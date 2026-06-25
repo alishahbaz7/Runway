@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProInfo · Telematics Packet Console</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1><b>Pro</b>Info</h1>
+    <span class="tag">Unified telematics packet parser &amp; relay</span>
+    <span class="spacer"></span>
+    <span class="pill" id="stat-devices">0 devices</span>
+    <span class="pill" id="stat-packets">0 packets</span>
+    <span class="pill dead" id="stat-conn">connecting…</span>
+  </header>
+
+  <main>
+    <!-- LEFT: controls + devices ------------------------------------------ -->
+    <aside id="sidebar">
+      <h2>Ingest</h2>
+      <div class="card">
+        <form id="upload-form">
+          <label>Upload log / .loc / dump file</label>
+          <input type="file" id="up-file" required />
+          <label>Codec</label>
+          <select id="up-codec"></select>
+          <div class="row">
+            <div>
+              <label>Format</label>
+              <select id="up-fmt">
+                <option value="auto">auto</option>
+                <option value="raw">raw</option>
+                <option value="hex">hex</option>
+                <option value="hexlines">hexlines</option>
+              </select>
+            </div>
+            <div>
+              <label>Replay delay (s)</label>
+              <input type="number" id="up-delay" value="0" step="0.05" min="0" />
+            </div>
+          </div>
+          <button type="submit">▶ Parse &amp; replay</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <form id="listen-form">
+          <label>Live TCP listener</label>
+          <div class="row">
+            <select id="ls-codec"></select>
+            <input type="number" id="ls-port" value="5050" />
+          </div>
+          <button type="submit" class="ghost">📡 Start listener</button>
+        </form>
+        <button id="clear-btn" class="ghost">🗑 Clear data</button>
+      </div>
+
+      <h2>Devices</h2>
+      <input id="dev-search" placeholder="filter devices…" />
+      <ul id="devices"><li class="empty">No devices yet</li></ul>
+    </aside>
+
+    <!-- CENTER: map + packet table ---------------------------------------- -->
+    <section id="center">
+      <div id="map"></div>
+      <div id="packets">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Time</th><th>Device</th><th>Proto</th>
+              <th>Type</th><th>Lat,Lon</th><th>km/h</th>
+            </tr>
+          </thead>
+          <tbody id="packet-rows">
+            <tr><td colspan="7" class="empty">Waiting for packets…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RIGHT: packet detail ---------------------------------------------- -->
+    <aside id="detail">
+      <h2>Packet detail</h2>
+      <div id="detail-body"><p class="empty">Select a packet to inspect it</p></div>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

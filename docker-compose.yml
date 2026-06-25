@@ -1,0 +1,35 @@
+# ProInfo - local & cloud deployment.
+#   docker compose up --build
+#   dashboard/API -> http://localhost:8080   |   device TCP listener -> :5050
+
+services:
+  proinfo:
+    build: .
+    container_name: proinfo
+    ports:
+      - "8080:8080"      # dashboard + REST + WebSocket
+      - "5050:5050"      # TCP device listener (start from dashboard or override CMD)
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+  # --- Optional: durable cloud persistence (ROADMAP M6) -----------------------
+  # Add a Postgres/TimescaleDB sink and point it here. Drop-in for sqlite_store.
+  #
+  # db:
+  #   image: timescale/timescaledb:latest-pg16
+  #   environment:
+  #     POSTGRES_DB: proinfo
+  #     POSTGRES_USER: proinfo
+  #     POSTGRES_PASSWORD: change-me
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #
+  # redis:                  # shared live store/hub for multi-worker scale-out
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+
+# volumes:
+#   pgdata:

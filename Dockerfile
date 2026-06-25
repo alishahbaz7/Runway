@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first (better layer caching)
+COPY pyproject.toml README.md ./
+COPY proinfo ./proinfo
+RUN pip install --no-cache-dir .
+
+# Runtime data dirs
+RUN mkdir -p /app/data /app/uploads
+
+EXPOSE 8080
+EXPOSE 5050
+
+# Dashboard + API. Override CMD to run `proinfo listen ...` instead if desired.
+CMD ["proinfo", "serve", "--host", "0.0.0.0", "--port", "8080"]
