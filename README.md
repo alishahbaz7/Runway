@@ -98,7 +98,9 @@ sample in `samples/`. It auto-registers everywhere. Full guide:
 
 ## Architecture & roadmap
 
-- Design and scaling notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Full design (start here):** [docs/DESIGN.md](docs/DESIGN.md) — topology, run-modes, interfaces,
+  device I/O (serial/USB/RS232/BLE/BT), data model, edge↔hub, phased plan. Draft for discussion.
+- Spike notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Milestones and what's next: [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Run in Docker / cloud
