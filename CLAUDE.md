@@ -11,7 +11,8 @@ The repo today is the **v0.1 spike**: a flat `proinfo/` package that proves the
 Source → Codec → Sink design with a working CLI, dashboard and tests. The agreed target
 architecture (edge/hub run-modes, package split, serial/BLE/USB device I/O) lives in
 **[docs/DESIGN.md](docs/DESIGN.md)** — read it before any large or structural change; it is the
-source of truth for direction.
+source of truth for direction. The clean Phase-1 implementation brief (paste into a fresh
+workspace) is **[docs/PHASE1_KICKOFF.md](docs/PHASE1_KICKOFF.md)**.
 
 ## Commands
 
