@@ -2,7 +2,7 @@
  *
  * Each tab is an isolated parser instance (own input, grid, records table and map), built
  * by createParser() from the #tab-tpl template. A small tab manager handles add/close/
- * switch and persistence (open tabs + their data are restored on reload by re-decoding).
+ * switch. State is volatile (in-memory only) — a reload/restart starts fresh at Device 1.
  * Decoding in a tab also POSTs to /api/ingest so the device shows on the Dashboard.
  */
 (() => {
@@ -14,7 +14,6 @@
     "000000000000002a0801000001904f6013d8012e055770110e41b80050001e0a0025000403ef01f0011504014230d400000100003fd4",
   ].join("\n");
 
-  const LS_KEY = "runway.parser.v1";
   const TZONES = {
     ist: "Asia/Kolkata", utc: "UTC", dubai: "Asia/Dubai", singapore: "Asia/Singapore",
     london: "Europe/London", ny: "America/New_York", local: undefined,
@@ -29,16 +28,21 @@
   };
   const spaced = (h) => (h && h.match(/.{1,2}/g) || []).join(" ");
   const valText = (f) => (f.unit ? `${f.value} ${f.unit}` : f.value);
-  const cleanHex = (s) => {
-    let h = (s || "").replace(/[^0-9a-fA-F]/g, "").toLowerCase();
-    if (h.length % 2) h = h.slice(0, -1);
-    return h;
-  };
-  const colLabel = (i) => {                       // 0->A, 1->B, … 26->AA
-    let s = ""; i += 1;
-    while (i > 0) { i -= 1; s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26); }
-    return s;
-  };
+  // Decode one sub-field from a parameter's value bytes per a signature entry.
+  // (Big-endian / MSB-first bit numbering for reverse=0; LSB-first for reverse=1.)
+  function sigValue(hex, sub) {
+    if (!hex) return "—";
+    const bytes = (hex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16));
+    const start = sub.startingBit | 0, size = sub.size | 0;
+    if (size <= 0 || start + size > bytes.length * 8) return "—";
+    const bitAt = (bp) => (bytes[bp >> 3] >> (7 - (bp & 7))) & 1;
+    let raw = 0;
+    if (!sub.reverse) for (let i = 0; i < size; i++) raw = raw * 2 + bitAt(start + i);
+    else for (let i = size - 1; i >= 0; i--) raw = raw * 2 + bitAt(start + i);
+    if (sub.signed && raw >= 2 ** (size - 1)) raw -= 2 ** size;
+    const v = raw * (sub.multiplier == null ? 1 : sub.multiplier) + (sub.offset || 0);
+    return Number.isInteger(v) ? v : Math.round(v * 1000) / 1000;
+  }
   function isSignalRow(name) {
     if (name === "Timestamp") return false;
     if (name.startsWith("N of Total IO")) return false;
@@ -53,7 +57,7 @@
   function createParser(panel, id, onChange, peerName) {
     const q = (sel) => panel.querySelector(sel);
     const state = { records: [], packets: 0, selected: null, markers: [], trail: null,
-                    lastPackets: [], feeds: [] };
+                    lastPackets: [], feeds: [], signature: null, signatureName: null };
 
     const map = L.map(q(".parser-map"), { zoomControl: true }).setView([20.59, 78.96], 4);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -109,7 +113,7 @@
         const ll = [r.latitude, r.longitude];
         pts.push(ll);
         const m = L.circleMarker(ll, { radius: 5, color: "#3fb6ff", fillColor: "#3fb6ff", fillOpacity: 0.9 })
-          .addTo(map).bindTooltip(`${colLabel(pos)} · ${fmtTs(r.timestamp)}`);
+          .addTo(map).bindTooltip(`#${pos + 1} · ${fmtTs(r.timestamp)}`);
         m.on("click", () => selectRecord(idx));
         state.markers.push(m);
       });
@@ -197,43 +201,72 @@
         });
       });
       const cols = ordered(instances, (inst) => inst.timestamp).map((o) => o.item);
-      const rowNames = [];
+
+      // Applied signature: AVL id -> [sub-fields]. Matching IO params expand into sub-rows.
+      const sig = {};
+      if (state.signature) {
+        for (const k in state.signature) {
+          if (Array.isArray(state.signature[k])) sig[parseInt(k, 10)] = state.signature[k];
+        }
+      }
+      const rows = [];
       const seen = new Set();
       cols.forEach((inst) => inst.byName.forEach((_f, name) => {
-        if (isSignalRow(name) && !seen.has(name)) { seen.add(name); rowNames.push(name); }
+        if (!isSignalRow(name) || seen.has(name)) return;
+        seen.add(name);
+        rows.push({ kind: "field", name, label: name });
+        const m = name.match(/\(AVL (\d+)\)/);
+        if (m && sig[+m[1]]) {
+          sig[+m[1]].forEach((sub) =>
+            rows.push({ kind: "sig", parent: name, sub, label: "↳ " + (sub.fieldName || "field") }));
+        }
       }));
-      return { cols, rowNames };
+      return { cols, rows };
     }
+    // Transposed: one row per time instance (record), one column per signal (AVL params).
     function renderGrid(packets) {
-      const { cols, rowNames } = buildGrid(packets);
+      const { cols, rows } = buildGrid(packets);   // cols = records/time, rows = signal defs
       if (!cols.length) { fieldsMessage("Grid view shows AVL records — this input has none. Switch to “By record”."); return; }
       clearFields();
       const table = el("table", "grid");
+
+      // header: "Time" corner + one column per signal
       const htr = el("tr");
-      htr.appendChild(el("th", "corner", "Signal"));
-      cols.forEach((inst, i) => {
+      htr.appendChild(el("th", "corner", "Time"));
+      rows.forEach((r) => {
         const th = el("th");
-        th.appendChild(el("div", "colhead", colLabel(i)));
-        th.appendChild(el("small", "", fmtTs(inst.timestamp) || `packet ${inst.packet}`));
-        th.title = `Packet ${inst.packet} · ${inst.codec}` + (inst.timestamp ? ` · ${fmtTs(inst.timestamp)}` : "");
+        th.appendChild(el("div", "colhead" + (r.kind === "sig" ? " sig" : ""), r.label));
         htr.appendChild(th);
       });
       const thead = el("thead"); thead.appendChild(htr); table.appendChild(thead);
+
       const tbody = el("tbody");
-      rowNames.forEach((name) => {
+      const prev = new Array(rows.length).fill(undefined);   // track change per signal column
+      cols.forEach((inst, ci) => {
         const tr = el("tr");
-        tr.appendChild(el("td", "rowname", name));
-        let prev;
-        cols.forEach((inst) => {
-          const f = inst.byName.get(name);
+        const tcell = el("td", "rowname");
+        tcell.append(el("div", "", fmtTs(inst.timestamp) || `packet ${inst.packet}`),
+                     el("small", "muted", `#${ci + 1}`));
+        tr.appendChild(tcell);
+
+        rows.forEach((r, ri) => {
           const td = el("td", "val");
-          if (f) {
-            td.textContent = valText(f);
-            td.title = `size ${f.size} · hex ${spaced(f.hex)}` + (f.bit ? ` · bit ${f.bit}` : "");
-            if (prev !== undefined && prev !== f.value) td.classList.add("chg");
-            prev = f.value;
-            td.onclick = () => highlightField(inst.byteOffset, f);
-          } else { td.textContent = "—"; td.classList.add("muted"); }
+          let v;
+          if (r.kind === "sig") {
+            const pf = inst.byName.get(r.parent);
+            v = pf ? sigValue(pf.hex, r.sub) : "—";
+            td.textContent = v;
+          } else {
+            const f = inst.byName.get(r.name);
+            if (f) {
+              td.textContent = valText(f);
+              td.title = `size ${f.size} · hex ${spaced(f.hex)}` + (f.bit ? ` · bit ${f.bit}` : "");
+              td.onclick = () => highlightField(inst.byteOffset, f);
+              v = f.value;
+            } else { td.textContent = "—"; td.classList.add("muted"); v = undefined; }
+          }
+          if (prev[ri] !== undefined && String(prev[ri]) !== String(v)) td.classList.add("chg");
+          prev[ri] = v;
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
@@ -260,28 +293,64 @@
       state.selected = i;
       renderRecords();
       const r = state.records[i];
-      if (r && r.latitude != null) map.panTo([r.latitude, r.longitude]);
+      if (!r || r.latitude == null) return;
+      const w = q(".map-wrap");
+      if (w.classList.contains("folded")) {        // unfold so the clicked packet is visible
+        w.classList.remove("folded");
+        q(".map-fold").textContent = "Hide map ▾";
+        setTimeout(() => { map.invalidateSize(); map.panTo([r.latitude, r.longitude]); }, 0);
+      } else {
+        map.panTo([r.latitude, r.longitude]);
+      }
     }
 
     // ---- decode ----
     async function decodeHex(hex) {
       const msg = q(".parse-msg");
+      msg.className = "parse-msg"; msg.textContent = "Decoding…";
       try {
-        const res = await fetch("/api/parse", {
+        const res = await fetch("/api/parse-stream", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ hex, transport: transport() }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || res.status);
+        if (!res.ok) {
+          let d; try { d = await res.json(); } catch (e) { /* ignore */ }
+          throw new Error((d && d.detail) || res.status);
+        }
+        // read NDJSON: progress lines update the status; the final line is the result
+        const reader = res.body.getReader();
+        const td = new TextDecoder();
+        let sbuf = "", data = null;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sbuf += td.decode(value, { stream: true });
+          let nl;
+          while ((nl = sbuf.indexOf("\n")) >= 0) {
+            const line = sbuf.slice(0, nl).trim(); sbuf = sbuf.slice(nl + 1);
+            if (!line) continue;
+            const ev = JSON.parse(line);
+            if (ev.type === "progress") {
+              const pct = ev.total_bytes ? Math.round((ev.bytes / ev.total_bytes) * 100) : 0;
+              msg.className = "parse-msg";
+              msg.textContent = `Decoding… ${pct}% · ${ev.packets} packets, ${ev.records} records`
+                + (ev.skipped ? ` · ${ev.skipped} skipped` : "");
+            } else if (ev.type === "result") { data = ev; }
+          }
+        }
+        if (!data) throw new Error("no result from server");
         state.lastPackets = data.packets;
         renderFields(data.packets);
         state.packets += data.packets.length;
         data.records.forEach((r) => state.records.push(r));
         renderRecords();
         plotRecords();
-        if (data.error) { msg.className = "parse-msg err"; msg.textContent = data.error; }
-        else { msg.className = "parse-msg ok"; msg.textContent =
-          `✓ ${data.packets.length} packet(s), ${data.records.length} record(s)`; }
+        const k = data.skipped || 0;
+        // "N of total" parsed, plus how many corrupt frames were skipped
+        const note = `${data.packets.length}/${data.total || data.packets.length} packet(s)`
+          + `, ${data.records.length} record(s)` + (k ? ` · ${k} skipped (corrupt)` : "");
+        if (data.error) { msg.className = "parse-msg err"; msg.textContent = `${note} · ${data.error}`; }
+        else { msg.className = "parse-msg ok"; msg.textContent = "✓ " + note; }
         // Feed the Dashboard's live store; surface a hint if the endpoint is missing
         // (e.g. a server started before /api/ingest existed).
         fetch("/api/ingest", {
@@ -306,22 +375,79 @@
       if (await decodeHex(hex)) { state.feeds.push(hex); onChange(); }
     }
 
-    function downloadCsv() {
-      const msg = q(".parse-msg");
-      if (!state.lastPackets.length) { msg.className = "parse-msg err"; msg.textContent = "nothing to export"; return; }
-      const { cols, rowNames } = buildGrid(state.lastPackets);
-      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "no AVL records to export"; return; }
+    // Build the CSV from a chosen subset of signal rows (Time is always the first column).
+    function buildCsv(rowsSel, cols) {
       const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
-      const lines = [];
-      lines.push(["Signal", ...cols.map((c, i) => `${colLabel(i)} ${fmtTs(c.timestamp)}`)].map(esc).join(","));
-      rowNames.forEach((name) => {
-        const row = [name, ...cols.map((c) => { const f = c.byName.get(name); return f ? valText(f) : ""; })];
-        lines.push(row.map(esc).join(","));
+      const cell = (r, inst) => {
+        if (r.kind === "sig") { const pf = inst.byName.get(r.parent); return pf ? sigValue(pf.hex, r.sub) : ""; }
+        const f = inst.byName.get(r.name); return f ? valText(f) : "";
+      };
+      const lines = [["Time", ...rowsSel.map((r) => r.label)].map(esc).join(",")];
+      cols.forEach((inst) => {
+        lines.push([fmtTs(inst.timestamp), ...rowsSel.map((r) => cell(r, inst))].map(esc).join(","));
       });
-      const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
+      return lines.join("\r\n");
+    }
+    function downloadCsvFile(text) {
+      const blob = new Blob([text], { type: "text/csv" });
       const a = el("a");
       a.href = URL.createObjectURL(blob); a.download = "runway_parsed.csv";
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    }
+
+    // CSV button → pick which signals to include, then download.
+    function exportCsv() {
+      const msg = q(".parse-msg");
+      if (!state.lastPackets.length) { msg.className = "parse-msg err"; msg.textContent = "nothing to export"; return; }
+      const { cols, rows } = buildGrid(state.lastPackets);
+      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "no AVL records to export"; return; }
+      q(".more-panel").classList.remove("open");
+
+      const overlay = el("div", "modal-overlay");
+      const modal = el("div", "modal");
+      const head = el("div", "modal-head");
+      head.append(el("span", "", "Export columns"),
+        Object.assign(el("button", "modal-x", "✕"), { onclick: () => overlay.remove() }));
+      const tools = el("div", "export-tools");
+      const allBtn = el("button", "ghost mini", "All");
+      const noneBtn = el("button", "ghost mini", "None");
+      const search = el("input", "export-search"); search.placeholder = "filter…";
+      tools.append(allBtn, noneBtn, search);
+      const list = el("div", "export-list");
+      const tRow = el("label", "export-row");
+      const tcb = el("input"); tcb.type = "checkbox"; tcb.checked = true; tcb.disabled = true;
+      tRow.append(tcb, document.createTextNode(" Time (always included)"));
+      list.appendChild(tRow);
+      const prevSel = state.exportSel instanceof Set ? state.exportSel : null;
+      const cbs = rows.map((r) => {
+        const row = el("label", "export-row");
+        const cb = el("input"); cb.type = "checkbox"; cb.checked = prevSel ? prevSel.has(r.label) : true;
+        row.append(cb, document.createTextNode(" " + r.label));
+        list.appendChild(row);
+        return { cb, r, label: r.label, row };
+      });
+      const foot = el("div", "modal-foot");
+      const cancel = el("button", "ghost", "Cancel"); cancel.onclick = () => overlay.remove();
+      const dl = el("button", "", "⤓ Download CSV");
+      foot.append(cancel, dl);
+      modal.append(head, tools, list, foot);
+
+      allBtn.onclick = () => cbs.forEach((x) => { x.cb.checked = true; });
+      noneBtn.onclick = () => cbs.forEach((x) => { x.cb.checked = false; });
+      search.addEventListener("input", () => {
+        const qv = search.value.toLowerCase();
+        cbs.forEach((x) => { x.row.style.display = (!qv || x.label.toLowerCase().includes(qv)) ? "" : "none"; });
+      });
+      dl.onclick = () => {
+        const chosen = cbs.filter((x) => x.cb.checked).map((x) => x.r);
+        state.exportSel = new Set(chosen.map((r) => r.label));
+        downloadCsvFile(buildCsv(chosen, cols));
+        overlay.remove();
+      };
+
+      overlay.appendChild(modal);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
     }
 
     function rerender() {
@@ -344,7 +470,7 @@
     // ---- wire the panel's controls ----
     q(".decode-btn").addEventListener("click", decode);
     q(".clear-btn").addEventListener("click", clearAll);
-    q(".download-btn").addEventListener("click", downloadCsv);
+    q(".download-btn").addEventListener("click", exportCsv);
     q(".sample-btn").addEventListener("click", () => { q(".hexin").value = SAMPLE; decode(); });
     q(".upload-btn").addEventListener("click", () => q(".file-input").click());
     q(".file-input").addEventListener("change", (e) => {
@@ -364,30 +490,56 @@
     q(".tz-sel").addEventListener("change", () => { toggleTzCustom(); rerender(); onChange(); });
     [".tz-sign", ".tz-h", ".tz-m"].forEach((s) => q(s).addEventListener("change", () => { rerender(); onChange(); }));
 
-    // ---- instance API ----
-    function getState() {
-      return {
-        settings: {
-          inputText: q(".hexin").value, view: viewMode(), transport: transport(),
-          sort: sortMode(), tz: q(".tz-sel").value, tzSign: q(".tz-sign").value,
-          tzH: q(".tz-h").value, tzM: q(".tz-m").value,
-        },
-        feeds: state.feeds.slice(),
-      };
-    }
-    async function loadState(saved) {
-      const s = saved.settings || {};
-      const set = (sel, v) => { if (v != null) q(sel).value = v; };
-      set(".hexin", s.inputText); set(".view-sel", s.view); set(".transport-sel", s.transport);
-      set(".sort-sel", s.sort); set(".tz-sel", s.tz); set(".tz-sign", s.tzSign);
-      set(".tz-h", s.tzH); set(".tz-m", s.tzM);
-      toggleTzCustom();
-      for (const f of (saved.feeds || [])) { await decodeHex(f); state.feeds.push(f); }
-    }
+    // ---- foldable map ----
+    q(".map-fold").addEventListener("click", () => {
+      const w = q(".map-wrap");
+      const folded = w.classList.toggle("folded");
+      q(".map-fold").textContent = folded ? "Show map ▸" : "Hide map ▾";
+      if (!folded) setTimeout(() => map.invalidateSize(), 0);
+    });
 
+    // ---- "More" overflow dropdown ----
+    q(".more-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      q(".more-panel").classList.toggle("open");
+    });
+    document.addEventListener("click", (e) => {
+      const p = q(".more-panel");
+      if (p.classList.contains("open") && !p.contains(e.target) && !q(".more-btn").contains(e.target)) {
+        p.classList.remove("open");
+      }
+    });
+
+    // ---- signature: pick from the repository, apply / remove ----
+    (async function loadSigOptions() {
+      try {
+        const list = await fetch("/api/signatures").then((r) => r.json());
+        const sel = q(".sig-sel");
+        list.forEach((s) => sel.appendChild(Object.assign(document.createElement("option"),
+          { value: s.name, textContent: s.name })));
+      } catch (e) { /* repo unavailable */ }
+    })();
+    q(".sig-apply").addEventListener("click", async () => {
+      const btn = q(".sig-apply"); const sel = q(".sig-sel"); const m = q(".parse-msg");
+      if (state.signature) {                          // toggle off
+        state.signature = null; state.signatureName = null;
+        btn.textContent = "Apply"; btn.classList.remove("on"); sel.disabled = false;
+        rerender(); return;
+      }
+      const name = sel.value;
+      if (!name) { m.className = "parse-msg err"; m.textContent = "pick a signature first"; return; }
+      try {
+        const d = await fetch("/api/signatures/" + encodeURIComponent(name)).then((r) => r.json());
+        state.signature = d.content; state.signatureName = name;
+        btn.textContent = "Remove"; btn.classList.add("on"); sel.disabled = true;
+        m.className = "parse-msg ok"; m.textContent = "signature applied: " + name;
+        rerender();
+      } catch (e) { m.className = "parse-msg err"; m.textContent = "apply failed: " + e.message; }
+    });
+
+    // ---- instance API ----
     toggleTzCustom();
     return {
-      getState, loadState,
       activate() { setTimeout(() => map.invalidateSize(), 0); },
       destroy() { map.remove(); },
     };
@@ -403,14 +555,9 @@
   let activeId = null;
   let seq = 0;
 
-  function persist() {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        activeId,
-        tabs: tabs.map((t) => ({ id: t.id, name: t.name, ...t.parser.getState() })),
-      }));
-    } catch (e) { /* quota / disabled */ }
-  }
+  // Parser state is VOLATILE — kept only in memory. A fresh start (reload/restart) begins
+  // with one empty "Device 1"; nothing is persisted to disk or localStorage.
+  const noop = () => {};
 
   function updateStat() {
     const s = document.getElementById("stat-tabs");
@@ -425,12 +572,11 @@
       t.panel.classList.toggle("active", on);
       if (on) t.parser.activate();
     });
-    persist();
   }
 
-  function addTab(saved) {
+  function addTab() {
     const id = ++seq;
-    const name = (saved && saved.name) || `Device ${id}`;
+    const name = `Device ${id}`;
 
     const panel = tpl.content.firstElementChild.cloneNode(true);
     panels.appendChild(panel);
@@ -442,19 +588,18 @@
     tabbar.insertBefore(btn, document.getElementById("tab-add"));
 
     const tab = { id, name, btn, panel, parser: null };
-    tab.parser = createParser(panel, id, persist, () => tab.name);
+    tab.parser = createParser(panel, id, noop, () => tab.name);
     tabs.push(tab);
 
     btn.addEventListener("click", (e) => { if (e.target !== close) activate(id); });
     label.addEventListener("dblclick", () => {
       const n = prompt("Tab name", tab.name);
-      if (n) { tab.name = n; label.textContent = n; persist(); }
+      if (n) { tab.name = n; label.textContent = n; }
     });
     close.addEventListener("click", () => closeTab(id));
 
     activate(id);
     updateStat();
-    if (saved) tab.parser.loadState(saved);   // async re-decode of remembered feeds
     return tab;
   }
 
@@ -468,7 +613,6 @@
     if (!tabs.length) { addTab(); return; }   // never leave zero tabs
     if (activeId === id) activate(tabs[Math.max(0, i - 1)].id);
     updateStat();
-    persist();
   }
 
   // "+" button to open a new device tab.
@@ -477,20 +621,6 @@
   tabbar.appendChild(addBtn);
   addBtn.addEventListener("click", () => addTab());
 
-  // ---- boot: restore tabs, else open one ----
-  (function restore() {
-    let saved;
-    try { saved = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { saved = null; }
-    if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
-      saved.tabs.forEach((t) => addTab(t));
-      const want = saved.tabs.find((t) => t.id === saved.activeId);
-      if (want) {
-        // map saved id -> created tab order (ids are reassigned on load)
-        const idx = saved.tabs.indexOf(want);
-        if (tabs[idx]) activate(tabs[idx].id);
-      }
-    } else {
-      addTab();
-    }
-  })();
+  // ---- boot: always a fresh, empty Device 1 ----
+  addTab();
 })();

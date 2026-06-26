@@ -25,6 +25,12 @@
       { id: "profiles", label: "Profiles", icon: "🧩", disabled: true },
       { id: "settings", label: "Settings", icon: "⚙", disabled: true },
     ] },
+    { title: "Configuration", items: [
+      { id: "signatures", label: "Signatures", icon: "🧬", href: "signatures.html" },
+    ] },
+    { title: "Diagnostics", items: [
+      { id: "logs", label: "Logs", icon: "📜", href: "logs.html" },
+    ] },
   ];
 
   const page = document.body.dataset.page || "";

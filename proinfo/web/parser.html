@@ -29,19 +29,7 @@
         <textarea class="hexin" placeholder="000F33353633...  or  00000000000000310810..."
                   title="click a signal in the grid to highlight its bytes here"></textarea>
         <div class="controls">
-          <span class="seg">View:
-            <select class="view-sel">
-              <option value="grid" selected>Grid</option>
-              <option value="grouped">By record</option>
-              <option value="flat">Flat</option>
-            </select>
-          </span>
-          <span class="seg">Transport:
-            <select class="transport-sel">
-              <option value="tcp" selected>TCP</option>
-              <option value="udp">UDP</option>
-            </select>
-          </span>
+          <!-- always-visible essentials -->
           <span class="seg">Order:
             <select class="sort-sel">
               <option value="feed">Feed order</option>
@@ -49,32 +37,56 @@
               <option value="desc">Time ↓ (newest first)</option>
             </select>
           </span>
-          <span class="seg">Time zone:
-            <select class="tz-sel">
-              <option value="ist" selected>IST (UTC+5:30)</option>
-              <option value="utc">UTC / GMT</option>
-              <option value="dubai">Dubai (UTC+4)</option>
-              <option value="singapore">Singapore (UTC+8)</option>
-              <option value="london">London</option>
-              <option value="ny">New York</option>
-              <option value="local">Browser local</option>
-              <option value="custom">Custom…</option>
-            </select>
-            <span class="tz-custom" style="display:none">
-              UTC
-              <select class="tz-sign"><option value="+">+</option><option value="-">−</option></select>
-              <input class="tz-h" type="number" min="0" max="14" value="5" title="hours" /> :
-              <input class="tz-m" type="number" min="0" max="59" value="30" title="minutes" />
-            </span>
+          <span class="seg">Signature:
+            <select class="sig-sel"><option value="">— none —</option></select>
+            <button class="sig-apply ghost">Apply</button>
           </span>
           <span class="parse-msg"></span>
           <span class="spacer"></span>
-          <input type="file" class="file-input" accept=".hex,.txt,.log,.csv,.dump" style="display:none" />
-          <button class="upload-btn ghost" title="upload a file of hex packets, one per line">⤒ Upload</button>
-          <button class="sample-btn ghost">Load sample</button>
-          <button class="download-btn ghost">⤓ CSV</button>
-          <button class="clear-btn ghost">Clear</button>
           <button class="decode-btn">Decode ▶</button>
+          <button class="more-btn ghost">More ▾</button>
+
+          <!-- overflow dropdown -->
+          <div class="more-panel">
+            <span class="seg">View:
+              <select class="view-sel">
+                <option value="grid" selected>Grid</option>
+                <option value="grouped">By record</option>
+                <option value="flat">Flat</option>
+              </select>
+            </span>
+            <span class="seg">Transport:
+              <select class="transport-sel">
+                <option value="tcp" selected>TCP</option>
+                <option value="udp">UDP</option>
+              </select>
+            </span>
+            <span class="seg">Time zone:
+              <select class="tz-sel">
+                <option value="ist" selected>IST (UTC+5:30)</option>
+                <option value="utc">UTC / GMT</option>
+                <option value="dubai">Dubai (UTC+4)</option>
+                <option value="singapore">Singapore (UTC+8)</option>
+                <option value="london">London</option>
+                <option value="ny">New York</option>
+                <option value="local">Browser local</option>
+                <option value="custom">Custom…</option>
+              </select>
+              <span class="tz-custom" style="display:none">
+                UTC
+                <select class="tz-sign"><option value="+">+</option><option value="-">−</option></select>
+                <input class="tz-h" type="number" min="0" max="14" value="5" title="hours" /> :
+                <input class="tz-m" type="number" min="0" max="59" value="30" title="minutes" />
+              </span>
+            </span>
+            <div class="more-actions">
+              <input type="file" class="file-input" accept=".hex,.txt,.log,.csv,.dump" style="display:none" />
+              <button class="upload-btn ghost" title="upload a file of hex packets, one per line">⤒ Upload</button>
+              <button class="sample-btn ghost">Load sample</button>
+              <button class="download-btn ghost">⤓ CSV</button>
+              <button class="clear-btn ghost">Clear</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -87,7 +99,10 @@
               <tbody class="rec-rows"><tr><td colspan="4" class="empty">No AVL records yet</td></tr></tbody>
             </table>
           </div>
-          <div class="parser-map"></div>
+          <div class="map-wrap">
+            <div class="map-head"><span>Map</span><button class="map-fold ghost mini">Hide map ▾</button></div>
+            <div class="parser-map"></div>
+          </div>
         </aside>
       </div>
     </div>
