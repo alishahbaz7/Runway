@@ -3,73 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ProInfo · Teltonika Data Parser</title>
+  <title>Runway · Packet Parser</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <header>
-    <h1><b>Pro</b>Info</h1>
-    <span class="tag">Teltonika Data Parser</span>
-    <a class="nav" href="index.html">Live dashboard</a>
-    <a class="nav active" href="parser.html">Packet parser</a>
-    <span class="spacer"></span>
-    <span class="pill" id="stat-pkts">0 packets</span>
-    <span class="pill" id="stat-recs">0 records</span>
-  </header>
-
-  <div id="parsebar">
-    <label for="hexin">Enter data (hex — paste one or many Teltonika packets):</label>
-    <textarea id="hexin" placeholder="000F333536333037303432343431303133  or  00000000000000310810..."></textarea>
-    <div class="controls">
-      <span class="seg">View:
-        <label><input type="radio" name="view" value="grouped" checked /> By record</label>
-        <label><input type="radio" name="view" value="flat" /> Flat</label>
-      </span>
-      <span class="seg">Transport:
-        <label><input type="radio" name="transport" value="tcp" checked /> TCP</label>
-        <label><input type="radio" name="transport" value="udp" /> UDP</label>
-      </span>
-      <span id="parse-msg"></span>
+<body data-page="parser">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Packet Parser</h1>
+      <span class="tag">Decode device packets — one tab per device</span>
       <span class="spacer"></span>
-      <button id="sample-btn" class="ghost">Load sample</button>
-      <button id="clear-btn" class="ghost">Clear</button>
-      <button id="decode-btn">Decode ▶</button>
-    </div>
+      <span class="pill" id="stat-tabs">1 tab</span>
+    </header>
+
+    <div id="tabbar"></div>
+    <div id="panels"></div>
   </div>
 
-  <main id="parser-main">
-    <!-- LEFT: field-by-field breakdown ------------------------------------ -->
-    <section id="fields">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th><th>Size</th><th>Value</th><th>Hex Value</th><th>Bit Value</th>
-          </tr>
-        </thead>
-        <tbody id="field-rows">
-          <tr><td colspan="5" class="empty">Paste a packet and hit Decode</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- RIGHT: AVL records table + map ------------------------------------ -->
-    <aside id="parser-right">
-      <div id="rectable">
-        <table>
-          <thead>
-            <tr><th>Timestamp</th><th>Longitude</th><th>Latitude</th><th>km/h</th></tr>
-          </thead>
-          <tbody id="rec-rows">
-            <tr><td colspan="4" class="empty">No AVL records yet</td></tr>
-          </tbody>
-        </table>
+  <!-- One independent parser per tab is cloned from this template. -->
+  <template id="tab-tpl">
+    <div class="panel">
+      <div class="parsebar">
+        <label>Enter data (hex — paste one or many packets):</label>
+        <textarea class="hexin" placeholder="000F33353633...  or  00000000000000310810..."
+                  title="click a signal in the grid to highlight its bytes here"></textarea>
+        <div class="controls">
+          <span class="seg">View:
+            <select class="view-sel">
+              <option value="grid" selected>Grid</option>
+              <option value="grouped">By record</option>
+              <option value="flat">Flat</option>
+            </select>
+          </span>
+          <span class="seg">Transport:
+            <select class="transport-sel">
+              <option value="tcp" selected>TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </span>
+          <span class="seg">Order:
+            <select class="sort-sel">
+              <option value="feed">Feed order</option>
+              <option value="asc">Time ↑ (oldest first)</option>
+              <option value="desc">Time ↓ (newest first)</option>
+            </select>
+          </span>
+          <span class="seg">Time zone:
+            <select class="tz-sel">
+              <option value="ist" selected>IST (UTC+5:30)</option>
+              <option value="utc">UTC / GMT</option>
+              <option value="dubai">Dubai (UTC+4)</option>
+              <option value="singapore">Singapore (UTC+8)</option>
+              <option value="london">London</option>
+              <option value="ny">New York</option>
+              <option value="local">Browser local</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <span class="tz-custom" style="display:none">
+              UTC
+              <select class="tz-sign"><option value="+">+</option><option value="-">−</option></select>
+              <input class="tz-h" type="number" min="0" max="14" value="5" title="hours" /> :
+              <input class="tz-m" type="number" min="0" max="59" value="30" title="minutes" />
+            </span>
+          </span>
+          <span class="parse-msg"></span>
+          <span class="spacer"></span>
+          <input type="file" class="file-input" accept=".hex,.txt,.log,.csv,.dump" style="display:none" />
+          <button class="upload-btn ghost" title="upload a file of hex packets, one per line">⤒ Upload</button>
+          <button class="sample-btn ghost">Load sample</button>
+          <button class="download-btn ghost">⤓ CSV</button>
+          <button class="clear-btn ghost">Clear</button>
+          <button class="decode-btn">Decode ▶</button>
+        </div>
       </div>
-      <div id="parser-map"></div>
-    </aside>
-  </main>
+
+      <div class="parser-main">
+        <section class="fields"><p class="empty">Paste a packet and hit Decode</p></section>
+        <aside class="parser-right">
+          <div class="rectable">
+            <table>
+              <thead><tr><th>Timestamp</th><th>Longitude</th><th>Latitude</th><th>km/h</th></tr></thead>
+              <tbody class="rec-rows"><tr><td colspan="4" class="empty">No AVL records yet</td></tr></tbody>
+            </table>
+          </div>
+          <div class="parser-map"></div>
+        </aside>
+      </div>
+    </div>
+  </template>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="shell.js"></script>
   <script src="parser.js"></script>
 </body>
 </html>

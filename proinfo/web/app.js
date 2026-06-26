@@ -9,13 +9,15 @@
   const state = {
     packets: [],            // newest-last
     devices: new Map(),     // id -> summary
-    filter: null,           // selected device id (null = all)
+    hidden: new Set(),      // device ids hidden from map+table (default: all shown)
+    seenIo: new Set(),      // io_<id> keys actually received (drives the column picker)
     selectedSeq: null,
     markers: new Map(),     // id -> L.marker
     trails: new Map(),      // id -> L.polyline
     colorIdx: 0,
     colorOf: new Map(),
   };
+  const LIVE_MS = 30000;    // a device "communicating" if seen within this window
 
   // ---- DOM helpers --------------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -33,6 +35,66 @@
     return state.colorOf.get(id);
   };
 
+  // ---- Packet table columns (customizable, mirrors the Parser params) ----
+  const COLS_KEY = "runway.dash.cols";
+  const num = (v) => (v == null ? "—" : Math.round(v * 100) / 100);
+  const def = (v) => (v == null ? "—" : v);
+  const bool = (v) => (v == null ? "—" : v ? "yes" : "no");
+  const posStr = (r) => (r.position && r.position.latitude != null
+    ? `${r.position.latitude.toFixed(5)}, ${r.position.longitude.toFixed(5)}` : "—");
+
+  const STD_COLS = [
+    { key: "seq",         label: "Sr No",             get: (r) => r.seq, cls: "muted" },
+    { key: "time",        label: "Time",              get: (r) => fmtTime(r.event_time || r.received_at) },
+    { key: "device",      label: "Device",            get: (r) => r.device_id },
+    { key: "proto",       label: "Proto",             get: (r) => r.protocol },
+    { key: "type",        label: "Type",              get: (r) => r.message_type || "—" },
+    { key: "latlon",      label: "Lat, Lon",          get: posStr },
+    { key: "altitude",    label: "Alt (m)",           get: (r) => num(r.altitude_m) },
+    { key: "heading",     label: "Heading",           get: (r) => num(r.heading_deg) },
+    { key: "satellites",  label: "Satellites",        get: (r) => def(r.satellites) },
+    { key: "speed",       label: "Speed (km/h)",      get: (r) => num(r.speed_kph) },
+    { key: "external_v",  label: "Input voltage (V)", get: (r) => num(r.external_v) },
+    { key: "battery_pct", label: "Battery level (%)", get: (r) => num(r.battery_pct) },
+    { key: "battery_v",   label: "Battery (V)",       get: (r) => num(r.battery_v) },
+    { key: "ignition",    label: "Ignition",          get: (r) => bool(r.ignition) },
+    { key: "gsm",         label: "GSM",               get: (r) => def(r.gsm_signal) },
+    { key: "odometer",    label: "Odometer (m)",      get: (r) => num(r.odometer_m) },
+  ];
+  let paramMap = {};         // AVL id -> {name, unit} (just for labelling; from /api/params)
+  const DEFAULT_COLS = ["seq", "time", "latlon", "satellites", "speed", "external_v", "battery_pct"];
+  let visibleCols = loadCols();
+
+  function loadCols() {
+    try { const v = JSON.parse(localStorage.getItem(COLS_KEY) || "null"); if (Array.isArray(v) && v.length) return v; } catch (e) { /* ignore */ }
+    return DEFAULT_COLS.slice();
+  }
+  const saveCols = () => { try { localStorage.setItem(COLS_KEY, JSON.stringify(visibleCols)); } catch (e) { /* ignore */ } };
+
+  // Only AVL params that have actually arrived become columns (labelled like the Parser).
+  function seenAvlCols() {
+    return [...state.seenIo]
+      .map((key) => parseInt(key.slice(3), 10))
+      .filter((id) => !isNaN(id))
+      .sort((a, b) => a - b)
+      .map((id) => {
+        const p = paramMap[id];
+        const name = p ? p.name + (p.unit ? ` (${p.unit})` : "") : `AVL ${id}`;
+        return { key: "io_" + id, label: `${name} · AVL ${id}`,
+                 get: (r) => def(r.io ? r.io["io_" + id] : undefined) };
+      });
+  }
+  const allCols = () => STD_COLS.concat(seenAvlCols());
+  const colByKey = (k) => allCols().find((c) => c.key === k);
+  const noteIo = (rec) => { if (rec && rec.io) for (const k in rec.io) state.seenIo.add(k); };
+
+  async function loadParams() {
+    try {
+      const data = await api("/api/params");
+      (data.avl || []).forEach((p) => { paramMap[p.id] = { name: p.name, unit: p.unit }; });
+    } catch (e) { console.error(e); }
+  }
+
   // ---- Map ---------------------------------------------------------------
   const map = L.map("map", { zoomControl: true }).setView([20.59, 78.96], 5);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -43,7 +105,7 @@
     const p = rec.position;
     if (!p || p.latitude == null || p.longitude == null) return;
     if (p.latitude === 0 && p.longitude === 0) return;
-    if (state.filter && rec.device_id !== state.filter) return;
+    if (state.hidden.has(rec.device_id)) return;
     const id = rec.device_id;
     const ll = [p.latitude, p.longitude];
     const color = colorFor(id);
@@ -82,19 +144,20 @@
   function ingest(rec) {
     state.packets.push(rec);
     if (state.packets.length > MAX_ROWS) state.packets.shift();
+    noteIo(rec);
     upsertDevice(rec);
     plot(rec);
     renderRowsThrottled();
   }
 
   function upsertDevice(rec) {
-    const d = state.devices.get(rec.device_id) || {
-      device_id: rec.device_id, count: 0, protocol: rec.protocol,
-    };
+    const d = state.devices.get(rec.device_id) || { device_id: rec.device_id, count: 0 };
     d.count += 1;
     d.protocol = rec.protocol;
     d.last_seen = rec.received_at;
     d.last_message_type = rec.message_type;
+    d.transport = rec.transport;          // provenance, for the source badge
+    d.peer = rec.peer;
     if (rec.position && rec.position.latitude != null) {
       d.last_position = { lat: rec.position.latitude, lon: rec.position.longitude };
     }
@@ -103,6 +166,20 @@
   }
 
   // ---- Rendering: devices -------------------------------------------------
+  const liveOf = (d) => {
+    const t = d.last_seen ? Date.parse(d.last_seen) : 0;
+    return t && (Date.now() - t) < LIVE_MS;
+  };
+  function srcOf(d) {                      // where the data came from (parsed tab / TCP port)
+    const t = d.transport || (d.last && d.last.transport) || "";
+    const p = d.peer || (d.last && d.last.peer) || "";
+    if (t === "parser") return p || "parsed";
+    if (t === "tcp" || t === "udp") return ":" + (String(p).split(":").pop() || "?");
+    if (t === "file") return "replay";
+    return t || "stored";
+  }
+  function redrawMap() { clearMap(); state.packets.forEach(plot); refitMap(); }
+
   function renderDevices() {
     const ul = $("devices");
     const q = ($("dev-search").value || "").toLowerCase();
@@ -111,22 +188,35 @@
     ul.innerHTML = "";
     if (!list.length) { ul.appendChild(el("li", "empty", "No devices yet")); return; }
     for (const d of list) {
-      const li = el("li", state.filter === d.device_id ? "active" : "");
-      const id = el("div", "id");
-      id.append(Object.assign(el("span", "dot"), { style: `background:${colorFor(d.device_id)}` }),
-                document.createTextNode(d.device_id));
-      const meta = el("div", "meta");
-      meta.append(el("span", "", `${d.protocol} · ${d.count} pkts`),
-                  el("span", "", fmtTime(d.last_seen)));
-      li.append(id, meta);
-      li.onclick = () => {
-        state.filter = state.filter === d.device_id ? null : d.device_id;
-        clearMap();
-        state.packets.forEach(plot);
-        refitMap();
-        renderDevices();
-        renderRows();
+      const hidden = state.hidden.has(d.device_id);
+      const live = liveOf(d);
+      const li = el("li", hidden ? "off" : "");
+
+      const cb = el("input", "dev-cb"); cb.type = "checkbox"; cb.checked = !hidden;
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = () => {
+        if (cb.checked) state.hidden.delete(d.device_id); else state.hidden.add(d.device_id);
+        redrawMap(); renderRows(); renderDevices();
       };
+
+      // When the device id is just a placeholder (no IMEI yet), show the source name
+      // (e.g. the Parser tab name) as the title instead of "…-unknown".
+      const src = srcOf(d);
+      const unknown = /unknown$/i.test(d.device_id) || d.device_id === "unknown";
+      const title = unknown && src ? src : d.device_id;
+
+      const idLine = el("div", "id");
+      idLine.append(Object.assign(el("span", "dot"), { style: `background:${colorFor(d.device_id)}` }),
+                    document.createTextNode(title));
+      const meta = el("div", "meta");
+      meta.appendChild(el("span", "live-badge " + (live ? "on" : "idle"), live ? "live" : "idle"));
+      if (src && src !== title) meta.appendChild(el("span", "src-badge", src));
+      meta.appendChild(el("span", "", `${d.count} pkts`));
+      meta.appendChild(el("span", "muted", fmtTime(d.last_seen)));
+      const body = el("div", "dev-body");
+      body.append(idLine, meta);
+      li.append(cb, body);
+      li.onclick = () => { cb.checked = !cb.checked; cb.onchange(); };  // row toggles too
       ul.appendChild(li);
     }
     $("stat-devices").textContent = `${state.devices.size} devices`;
@@ -141,39 +231,76 @@
   }
 
   function renderRows() {
+    const cols = visibleCols.map(colByKey).filter(Boolean);
+    const head = $("packet-head");
+    head.innerHTML = "";
+    const htr = el("tr");
+    cols.forEach((c) => htr.appendChild(el("th", "", c.label)));
+    head.appendChild(htr);
+
     const tbody = $("packet-rows");
     const rows = state.packets
-      .filter((r) => !state.filter || r.device_id === state.filter)
+      .filter((r) => !state.hidden.has(r.device_id))
       .slice(-MAX_ROWS).reverse();
     tbody.innerHTML = "";
     if (!rows.length) {
       const tr = el("tr"); const td = el("td", "empty", "Waiting for packets…");
-      td.colSpan = 7; tr.appendChild(td); tbody.appendChild(tr);
+      td.colSpan = cols.length || 1; tr.appendChild(td); tbody.appendChild(tr);
     } else {
       for (const r of rows) {
         const tr = el("tr");
         if (r.seq === state.selectedSeq) tr.className = "sel";
-        const pos = r.position && r.position.latitude != null
-          ? `${r.position.latitude.toFixed(5)},${r.position.longitude.toFixed(5)}` : "—";
-        const typeCls = (r.alarms && r.alarms.length) ? "badge alarm" : "badge";
-        const typeTxt = (r.alarms && r.alarms.length) ? r.alarms.join(",") : (r.message_type || "—");
-        tr.append(
-          el("td", "muted", r.seq),
-          el("td", "", fmtTime(r.received_at)),
-          el("td", "", r.device_id),
-          el("td", "", r.protocol),
-          tdBadge(typeTxt, typeCls),
-          el("td", "", pos),
-          el("td", "", r.speed_kph != null ? Math.round(r.speed_kph) : "—"),
-        );
+        cols.forEach((c) => tr.appendChild(el("td", c.cls || "", String(c.get(r)))));
         tr.onclick = () => showDetail(r);
         tbody.appendChild(tr);
       }
     }
     $("stat-packets").textContent = `${state.packets.length} packets`;
   }
-  function tdBadge(txt, cls) {
-    const td = el("td"); td.appendChild(el("span", cls, txt)); return td;
+
+  // Column picker popover: pick which signals show as columns (standard + AVL params).
+  function toggleColsPicker() {
+    const existing = document.getElementById("cols-pop");
+    if (existing) { existing.remove(); return; }
+    const pop = el("div", "cols-pop"); pop.id = "cols-pop";
+    const search = el("input", "cols-search"); search.placeholder = "filter parameters…";
+    const list = el("div", "cols-list");
+    pop.append(search, list);
+
+    function build(q) {
+      list.innerHTML = "";
+      const add = (c) => {
+        if (q && !c.label.toLowerCase().includes(q)) return;
+        const row = el("label", "cols-row");
+        const cb = el("input"); cb.type = "checkbox"; cb.checked = visibleCols.includes(c.key);
+        cb.onchange = () => {
+          if (cb.checked) { if (!visibleCols.includes(c.key)) visibleCols.push(c.key); }
+          else visibleCols = visibleCols.filter((k) => k !== c.key);
+          saveCols(); renderRows();
+        };
+        row.append(cb, document.createTextNode(" " + c.label));
+        list.appendChild(row);
+      };
+      list.appendChild(el("div", "cols-group", "Standard"));
+      STD_COLS.forEach(add);
+      const seen = seenAvlCols();
+      list.appendChild(el("div", "cols-group", "Device parameters (received)"));
+      if (seen.length) seen.forEach(add);
+      else list.appendChild(el("div", "hint", "none received yet"));
+    }
+    build("");
+    search.addEventListener("input", () => build(search.value.toLowerCase()));
+
+    document.body.appendChild(pop);
+    const b = $("cols-btn").getBoundingClientRect();
+    pop.style.top = `${b.bottom + 4}px`;
+    pop.style.left = `${Math.max(8, b.right - pop.offsetWidth)}px`;
+    setTimeout(() => document.addEventListener("click", onDoc), 0);
+    function onDoc(e) {
+      if (!pop.contains(e.target) && e.target !== $("cols-btn")) {
+        pop.remove(); document.removeEventListener("click", onDoc);
+      }
+    }
   }
 
   // ---- Rendering: detail panel -------------------------------------------
@@ -224,51 +351,19 @@
     return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
   }
 
-  async function loadCodecs() {
-    try {
-      const codecs = await api("/api/codecs");
-      for (const sel of [$("up-codec"), $("ls-codec")]) {
-        sel.innerHTML = "";
-        sel.appendChild(new Option("auto-detect", "auto"));
-        codecs.forEach((c) => sel.appendChild(new Option(c.display_name, c.name)));
-      }
-    } catch (e) { console.error(e); }
-  }
-
-  $("upload-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const f = $("up-file").files[0];
-    if (!f) return;
-    const fd = new FormData();
-    fd.append("file", f);
-    fd.append("codec", $("up-codec").value);
-    fd.append("fmt", $("up-fmt").value);
-    fd.append("delay", $("up-delay").value || "0");
-    try { await api("/api/replay", { method: "POST", body: fd }); }
-    catch (err) { alert("Replay failed: " + err.message); }
-  });
-
-  $("listen-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      const job = await api("/api/listen", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ codec: $("ls-codec").value, port: +$("ls-port").value }),
-      });
-      alert(`Listener started on port ${$("ls-port").value} (${job.job.id})`);
-    } catch (err) { alert("Listen failed: " + err.message); }
-  });
-
+  // Ingest controls live elsewhere now; the Dashboard is view-only. Data arrives from the
+  // Parser (/api/ingest) or live feeds. "Clear" just empties the live view.
   $("clear-btn").addEventListener("click", async () => {
     if (!confirm("Clear all captured data?")) return;
     await api("/api/data", { method: "DELETE" });
-    state.packets = []; state.devices.clear(); state.filter = null;
+    state.packets = []; state.devices.clear(); state.hidden.clear(); state.seenIo.clear();
     state.selectedSeq = null; clearMap();
     renderDevices(); renderRows(); $("detail-body").innerHTML =
       '<p class="empty">Select a packet to inspect it</p>';
   });
 
   $("dev-search").addEventListener("input", renderDevices);
+  $("cols-btn").addEventListener("click", toggleColsPicker);
 
   // ---- WebSocket ---------------------------------------------------------
   function connect() {
@@ -281,7 +376,7 @@
       const msg = JSON.parse(ev.data);
       if (msg.type === "snapshot") {
         (msg.data.devices || []).forEach((d) => state.devices.set(d.device_id, d));
-        (msg.data.recent || []).forEach((r) => { state.packets.push(r); plot(r); });
+        (msg.data.recent || []).forEach((r) => { state.packets.push(r); noteIo(r); plot(r); });
         renderDevices(); renderRows(); refitMap();
       } else if (msg.type === "record") {
         ingest(msg.data);
@@ -297,6 +392,8 @@
   }
 
   // ---- boot --------------------------------------------------------------
-  loadCodecs();
+  renderRows();                              // draw the header immediately
+  loadParams().then(renderRows);             // add AVL params to the picker, then redraw
   connect();
+  setInterval(renderDevices, 5000);          // refresh live/idle status + last-seen
 })();
