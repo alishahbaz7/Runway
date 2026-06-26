@@ -129,10 +129,21 @@ def test_explain_field_offsets_map_to_bytes():
     assert out2["packets"][1]["byte_offset"] == len(pkt)
 
 
-def test_explain_garbage_reports_error():
+def test_explain_garbage_decodes_nothing():
+    # pure garbage with no preamble -> nothing decoded, but no hard error (graceful)
     out = explain(b"\xde\xad\xbe\xef\x11\x22", "tcp")
-    assert out["ok"] is False
-    assert out["error"]
+    assert out["packets"] == []
+    assert out["ok"] is True
+
+
+def test_explain_skips_corrupt_and_continues():
+    # good packet + garbage + good packet -> both good ones decoded, garbage skipped
+    good = _data(0x08, 1, _rec8())
+    buf = good + b"\xaa\xbb\xcc\xdd\xee" + good
+    out = explain(buf, "tcp")
+    assert len(out["packets"]) == 2          # the bad bytes didn't kill the decode
+    assert out["skipped"] >= 1
+    assert out["ok"] is True
 
 
 async def test_parse_endpoint():

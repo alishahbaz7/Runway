@@ -105,35 +105,58 @@ class _Cursor:
 def explain(buffer: bytes, transport: str = "tcp") -> dict:
     """Decode a buffer of one or more Teltonika packets into a field breakdown.
 
-    Returns ``{ok, transport, packets[], records[], error}``. ``records`` is the flat
-    list of AVL records (timestamp/lon/lat/speed/…) across every packet, for the table
-    view; ``packets[].fields`` is the per-packet field breakdown for the inspector.
+    Returns ``{ok, transport, packets[], records[], skipped, error}``. A corrupt/garbled
+    frame is **skipped** (we resync to the next ``00000000`` preamble) rather than aborting
+    the whole decode — so one bad packet in a long dump never kills the rest. ``skipped``
+    counts how many bad frames were jumped over.
     """
     out: dict = {"ok": True, "transport": transport, "packets": [], "records": [],
-                 "error": None}
-    off, guard = 0, 0
-    while off < len(buffer):
+                 "skipped": 0, "error": None, "consumed": 0}
+    for kind, payload, off in walk(buffer, transport):
+        out["consumed"] = off
+        if kind == "packet":
+            out["packets"].append(payload)
+            out["records"].extend(payload.get("records", []))
+        elif kind == "skip":
+            out["skipped"] += 1
+        elif kind == "error":
+            out["error"] = payload
+    out["ok"] = out["error"] is None
+    out["total"] = len(out["packets"]) + out["skipped"]
+    return out
+
+
+def walk(buffer: bytes, transport: str = "tcp"):
+    """Generator over a buffer: yields ``(kind, payload, byte_offset)`` per frame.
+
+    ``kind`` is ``"packet"`` (payload = the packet dict), ``"skip"`` (a corrupt frame was
+    jumped over) or ``"error"`` (payload = message). ``byte_offset`` is how far we've
+    advanced, which the streaming endpoint turns into live progress.
+    """
+    off, guard, n = 0, 0, len(buffer)
+    while off < n:
         guard += 1
-        if guard > 2000:
-            out["error"] = "too many packets (stopped at 2000)"
-            break
+        if guard > 20000:
+            yield ("error", "too many frames (stopped at 20000)", off)
+            return
         chunk = buffer[off:]
         try:
-            pkt, consumed = (_parse_udp(chunk) if transport == "udp"
-                             else _parse_tcp(chunk))
-        except (IndexError, ValueError) as exc:
-            out["error"] = f"parse error at byte {off}: {exc}"
-            break
-        if consumed <= 0:
-            out["error"] = "incomplete packet - need more bytes"
-            break
-        pkt["byte_offset"] = off            # absolute start of this packet in the buffer
-        out["packets"].append(pkt)
-        out["records"].extend(pkt.get("records", []))
-        off += consumed
-    out["ok"] = out["error"] is None
-    out["consumed"] = off
-    return out
+            pkt, consumed = (_parse_udp(chunk) if transport == "udp" else _parse_tcp(chunk))
+        except (IndexError, ValueError):
+            pkt, consumed = None, 0
+
+        if pkt is not None and consumed > 0:        # clean frame
+            pkt["byte_offset"] = off
+            off += consumed
+            yield ("packet", pkt, off)
+            continue
+
+        # Corrupt/garbled: resync to the next TCP preamble; none left -> truncated tail, stop.
+        nxt = buffer.find(b"\x00\x00\x00\x00", off + 1) if transport != "udp" else -1
+        if nxt == -1:
+            return
+        off = nxt
+        yield ("skip", None, off)
 
 
 # --------------------------------------------------------------------------- #

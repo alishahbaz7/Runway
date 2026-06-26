@@ -23,12 +23,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from logging.handlers import RotatingFileHandler
 from pydantic import BaseModel
 
 from .. import __version__
@@ -43,6 +47,29 @@ log = logging.getLogger("proinfo.api")
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 UPLOAD_DIR = Path(DATA_DIR) / "uploads"
+SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signature files
+SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
+_SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
+
+# Rotating runtime log (errors + activity), viewable in the Diagnostics → Logs page.
+LOG_FILE = Path(DATA_DIR) / "runway.log"
+
+
+def _setup_file_logging() -> None:
+    Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(name)s: %(message)s",
+                                            "%Y-%m-%d %H:%M:%S"))
+    handler._runway = True                          # marker so we don't add it twice
+    for name in ("", "uvicorn", "uvicorn.error"):   # root + uvicorn so crashes are captured
+        lg = logging.getLogger(name)
+        if not any(getattr(h, "_runway", False) for h in lg.handlers):
+            lg.addHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
+
+
+_setup_file_logging()
+log.info("Runway %s — logging to %s", __version__, LOG_FILE)
 
 # Running jobs: serializable info in _jobs, the asyncio.Task in _tasks.
 _jobs: dict[str, dict] = {}
@@ -50,28 +77,14 @@ _tasks: dict[str, asyncio.Task] = {}
 _job_seq = 0
 
 
-def _warm_start_devices() -> None:
-    """Preload persisted devices so the dashboard shows known devices before live traffic."""
-    for row in db.devices():
-        store.devices.setdefault(row["device_id"], {
-            "device_id": row["device_id"],
-            "protocol": row["protocol"],
-            "first_seen": row["first_seen"],
-            "last_seen": row["last_seen"],
-            "count": row["count"],
-            "last_message_type": row["last_message_type"],
-            "last_position": ({"lat": row["last_lat"], "lon": row["last_lon"]}
-                              if row["last_lat"] is not None else None),
-        })
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     registry.load_plugins()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    _warm_start_devices()
-    log.info("ProInfo API ready (codecs: %s, devices restored: %d)",
-             sorted(registry.CODECS), len(store.devices))
+    # Fresh start: the live view begins empty each run. Devices appear only from data fed
+    # this session (Parser ingest or live feeds) — we do NOT replay the persisted registry
+    # into the live store, so a restart is a clean slate.
+    log.info("Runway API ready (codecs: %s) — live view starts empty", sorted(registry.CODECS))
     yield
     for task in _tasks.values():
         task.cancel()
@@ -92,6 +105,14 @@ async def _revalidate_static(request, call_next):
     if not path.startswith("/api") and not path.startswith("/ws"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.exception_handler(Exception)
+async def _log_unhandled(request, exc):
+    """Last-resort handler: log the full traceback to runway.log, return a clean 500."""
+    log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500,
+                        content={"ok": False, "error": "internal error — see Diagnostics → Logs"})
 
 
 # --------------------------------------------------------------------------- #
@@ -136,6 +157,11 @@ class _BytesSource(Source):
 
     async def frames(self):
         yield RawFrame(data=self._data, transport="parser", peer=self._peer, source=self.name)
+
+
+class SignatureBody(BaseModel):
+    name: str
+    content: Any                       # JSON object, or a JSON string to be parsed
 
 
 class ProfileBody(BaseModel):
@@ -247,7 +273,54 @@ async def parse(body: ParseBody):
     if not raw:
         raise HTTPException(400, "no bytes to parse")
     transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
-    return explain(raw, transport)
+    result = explain(raw, transport)
+    if result.get("skipped") or result.get("error"):
+        log.warning("parse: %d packet(s), %d skipped, error=%s (%d bytes)",
+                    len(result["packets"]), result.get("skipped", 0), result.get("error"), len(raw))
+    return result
+
+
+@app.post("/api/parse-stream")
+async def parse_stream(body: ParseBody):
+    """Like /api/parse but streams NDJSON progress events while decoding, then a final
+    `{"type":"result", …}` line — so the UI can show live decode progress on big dumps."""
+    from ..codecs.teltonika_explain import walk
+
+    cleaned = "".join(ch for ch in body.hex if ch in "0123456789abcdefABCDEF")
+    if len(cleaned) % 2:
+        cleaned = cleaned[:-1]
+    raw = bytes.fromhex(cleaned)
+    if not raw:
+        raise HTTPException(400, "no bytes to parse")
+    transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
+    total_bytes = len(raw)
+
+    def gen():
+        out = {"ok": True, "transport": transport, "packets": [], "records": [],
+               "skipped": 0, "error": None}
+        last = 0
+        for kind, payload, off in walk(raw, transport):
+            if kind == "packet":
+                out["packets"].append(payload)
+                out["records"].extend(payload.get("records", []))
+            elif kind == "skip":
+                out["skipped"] += 1
+            elif kind == "error":
+                out["error"] = payload
+            if off - last >= 16384:                  # ~16 KB between progress ticks
+                last = off
+                yield json.dumps({"type": "progress", "bytes": off, "total_bytes": total_bytes,
+                                  "packets": len(out["packets"]), "records": len(out["records"]),
+                                  "skipped": out["skipped"]}) + "\n"
+        out["ok"] = out["error"] is None
+        out["consumed"] = total_bytes
+        out["total"] = len(out["packets"]) + out["skipped"]
+        if out["skipped"] or out["error"]:
+            log.warning("parse-stream: %d packet(s), %d skipped, error=%s (%d bytes)",
+                        len(out["packets"]), out["skipped"], out["error"], total_bytes)
+        yield json.dumps({"type": "result", **out}) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 
 @app.post("/api/ingest")
@@ -339,6 +412,100 @@ async def delete_profile(profile_id: int):
 @app.get("/api/captures")
 async def list_captures(limit: int = 100):
     return db.query("SELECT * FROM captures ORDER BY id DESC LIMIT ?", (limit,))
+
+
+# --------------------------------------------------------------------------- #
+# Signatures repository (decode specs: parameter key -> sub-field definitions)
+# --------------------------------------------------------------------------- #
+def _sig_file(name: str) -> Path:
+    raw = name or ""
+    if "/" in raw or "\\" in raw or ".." in raw:    # reject path traversal outright
+        raise HTTPException(400, "invalid signature name (no path separators)")
+    base = raw.strip()
+    if not base:
+        raise HTTPException(400, "signature name required")
+    if not base.lower().endswith(".json"):
+        base += ".json"
+    if not _SIG_NAME_RE.match(base):
+        raise HTTPException(400, "invalid signature name (use letters, digits, . _ - space)")
+    return SIGNATURES_DIR / base
+
+
+@app.get("/api/signatures")
+async def list_signatures():
+    out = []
+    for p in sorted(SIGNATURES_DIR.glob("*.json")):
+        info = {"name": p.name, "size": p.stat().st_size, "modified": p.stat().st_mtime}
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            info["keys"] = len(data) if isinstance(data, dict) else 0
+            info["fields"] = (sum(len(v) for v in data.values() if isinstance(v, list))
+                              if isinstance(data, dict) else 0)
+            info["valid"] = True
+        except Exception:
+            info.update(keys=0, fields=0, valid=False)
+        out.append(info)
+    return out
+
+
+@app.get("/api/signatures/{name}")
+async def get_signature(name: str):
+    p = _sig_file(name)
+    if not p.exists():
+        raise HTTPException(404, "signature not found")
+    try:
+        return {"name": p.name, "content": json.loads(p.read_text(encoding="utf-8"))}
+    except Exception as exc:
+        raise HTTPException(400, f"invalid JSON in {p.name}: {exc}")
+
+
+@app.post("/api/signatures")
+async def save_signature(body: SignatureBody):
+    p = _sig_file(body.name)
+    content = body.content
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except Exception as exc:
+            raise HTTPException(400, f"content is not valid JSON: {exc}")
+    if not isinstance(content, dict):
+        raise HTTPException(400, "signature content must be a JSON object (key -> [fields])")
+    p.write_text(json.dumps(content, indent=2), encoding="utf-8")
+    return {"name": p.name, "keys": len(content), "saved": True}
+
+
+@app.delete("/api/signatures/{name}")
+async def delete_signature(name: str):
+    p = _sig_file(name)
+    if p.exists():
+        p.unlink()
+    return {"deleted": p.name}
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics: runtime log (errors + activity)
+# --------------------------------------------------------------------------- #
+@app.get("/api/logs")
+async def get_logs(limit: int = 500):
+    if not LOG_FILE.exists():
+        return {"path": str(LOG_FILE), "size": 0, "lines": []}
+    lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+    return {"path": str(LOG_FILE), "size": LOG_FILE.stat().st_size, "lines": lines[-limit:]}
+
+
+@app.get("/api/logs/download")
+async def download_logs():
+    if not LOG_FILE.exists():
+        raise HTTPException(404, "no log file yet")
+    return FileResponse(str(LOG_FILE), filename="runway.log", media_type="text/plain")
+
+
+@app.delete("/api/logs")
+async def clear_logs():
+    if LOG_FILE.exists():
+        LOG_FILE.write_text("", encoding="utf-8")
+    log.info("log cleared from Diagnostics")
+    return {"cleared": True}
 
 
 @app.post("/api/replay")
