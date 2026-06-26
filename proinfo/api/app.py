@@ -33,6 +33,8 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..core import registry
+from ..core.interfaces import Source
+from ..core.models import RawFrame
 from ..core.pipeline import Pipeline
 from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, store
@@ -75,10 +77,21 @@ async def lifespan(_: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="ProInfo", version=__version__, lifespan=lifespan)
+app = FastAPI(title="Runway", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
+
+@app.middleware("http")
+async def _revalidate_static(request, call_next):
+    """Force the browser to revalidate static assets so UI edits show on a normal reload
+    (no more stale cached HTML/JS/CSS). API/WS responses are left untouched."""
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api") and not path.startswith("/ws"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # --------------------------------------------------------------------------- #
@@ -100,6 +113,29 @@ class ListenBody(BaseModel):
 class ParseBody(BaseModel):
     hex: str
     transport: str = "tcp"          # tcp | udp
+
+
+class IngestBody(BaseModel):
+    hex: str
+    codec: str = "teltonika"
+    peer: str = "parser"            # shows as the device's source/peer on the dashboard
+
+
+class _BytesSource(Source):
+    """One-shot in-memory Source: yields the given bytes as a single frame.
+
+    Lets the Parser push decoded data through the normal pipeline into the live store
+    (so it appears on the Dashboard) without writing a temp file.
+    """
+
+    name = "bytes"
+
+    def __init__(self, data: bytes, peer: str):
+        self._data = data
+        self._peer = peer
+
+    async def frames(self):
+        yield RawFrame(data=self._data, transport="parser", peer=self._peer, source=self.name)
 
 
 class ProfileBody(BaseModel):
@@ -187,6 +223,15 @@ async def codecs():
     return registry.list_codecs()
 
 
+@app.get("/api/params")
+async def params():
+    """AVL id -> parameter name/unit list, so the Dashboard's column picker offers the same
+    signal names as the Parser view."""
+    from ..codecs.teltonika_ids import AVL_IDS
+
+    return {"avl": [{"id": k, "name": n, "unit": u} for k, (n, u) in sorted(AVL_IDS.items())]}
+
+
 @app.post("/api/parse")
 async def parse(body: ParseBody):
     """Stateless Teltonika hex -> field-by-field breakdown (for the parser UI)."""
@@ -203,6 +248,21 @@ async def parse(body: ParseBody):
         raise HTTPException(400, "no bytes to parse")
     transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
     return explain(raw, transport)
+
+
+@app.post("/api/ingest")
+async def ingest(body: IngestBody):
+    """Decode hex through the real codec into the live store, so parsed devices show on
+    the Dashboard (the Parser calls this alongside /api/parse)."""
+    cleaned = "".join(ch for ch in body.hex if ch in "0123456789abcdefABCDEF")
+    if len(cleaned) % 2:
+        cleaned = cleaned[:-1]
+    raw = bytes.fromhex(cleaned)
+    if not raw:
+        raise HTTPException(400, "no bytes to ingest")
+    pipeline = Pipeline(_BytesSource(raw, body.peer), body.codec, _default_sinks())
+    count = await pipeline.run()
+    return {"records": count, "bytes": pipeline.bytes_in}
 
 
 @app.get("/api/devices")

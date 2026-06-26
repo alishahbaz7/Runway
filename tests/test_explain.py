@@ -80,6 +80,28 @@ def test_explain_gprs12_command():
     assert vals["Command/Response"] == "getinfo"
 
 
+def test_explain_io_900_930_shown_as_raw_hex():
+    # Codec 8E (2-byte IO ids). One 2-byte IO with id 905 (in the raw range) + ignition.
+    ts = (1719318600000).to_bytes(8, "big")
+    gps = (int(88.3 * 1e7).to_bytes(4, "big", signed=True)
+           + int(22.5 * 1e7).to_bytes(4, "big", signed=True)
+           + (100).to_bytes(2, "big", signed=True) + (90).to_bytes(2, "big")
+           + bytes([12]) + (60).to_bytes(2, "big"))
+    event = (0).to_bytes(2, "big") + (2).to_bytes(2, "big")          # event id, total=2
+    n1 = (1).to_bytes(2, "big") + b"\x00\xef" + b"\x01"              # 239 = 1 (decoded int)
+    n2 = (1).to_bytes(2, "big") + (905).to_bytes(2, "big") + b"\x12\x34"   # 905 -> raw hex
+    # N4=0, N8=0, NX=0 (Codec 8E has the trailing variable-length group count too)
+    record = ts + bytes([1]) + gps + event + n1 + n2 + (0).to_bytes(2, "big") * 3
+    data = bytes([0x8E, 1]) + record + bytes([1])
+    pkt = (b"\x00\x00\x00\x00" + len(data).to_bytes(4, "big")
+           + data + crc16_ibm(data).to_bytes(4, "big"))
+
+    fields = {f["name"]: f for f in explain(pkt, "tcp")["packets"][0]["fields"]}
+    assert fields["Ignition (AVL 239)"]["value"] == "1"             # normal IO still decoded
+    assert fields["AVL ID 905 (AVL 905)"]["value"] == "0x1234"      # raw range -> hex
+    assert fields["AVL ID 905 (AVL 905)"]["bit"] == ""             # no bit view for raw
+
+
 def test_explain_udp_frame():
     inner = bytes([0x08, 1]) + _rec8() + bytes([1])
     imei = b"356307042441013"
@@ -89,6 +111,22 @@ def test_explain_udp_frame():
     assert out["ok"]
     assert out["packets"][0]["kind"] == "udp_data"
     assert out["records"][0]["speed_kph"] == 60
+
+
+def test_explain_field_offsets_map_to_bytes():
+    # Every field's (at, size) must index exactly its hex in the packet (drives the
+    # click-to-highlight feature). Validates the whole-packet byte map at once.
+    pkt = _data(0x08, 1, _rec8())
+    out = explain(pkt, "tcp")
+    p = out["packets"][0]
+    assert p["byte_offset"] == 0
+    full = pkt.hex()
+    for f in p["fields"]:
+        assert full[f["at"] * 2:(f["at"] + f["size"]) * 2] == f["hex"], f["name"]
+
+    # A second concatenated packet starts at the byte length of the first.
+    out2 = explain(pkt + pkt, "tcp")
+    assert out2["packets"][1]["byte_offset"] == len(pkt)
 
 
 def test_explain_garbage_reports_error():
