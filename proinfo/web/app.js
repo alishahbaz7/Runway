@@ -16,6 +16,7 @@
     trails: new Map(),      // id -> L.polyline
     colorIdx: 0,
     colorOf: new Map(),
+    hl: null,               // map highlight for the clicked packet
   };
   const LIVE_MS = 30000;    // a device "communicating" if seen within this window
 
@@ -138,6 +139,7 @@
     state.trails.forEach((t) => map.removeLayer(t));
     state.markers.clear();
     state.trails.clear();
+    if (state.hl) { map.removeLayer(state.hl); state.hl = null; }
   }
 
   // ---- Records -----------------------------------------------------------
@@ -255,7 +257,12 @@
         tbody.appendChild(tr);
       }
     }
-    $("stat-packets").textContent = `${state.packets.length} packets`;
+    // header pill = TOTAL packets across all devices (matches the device counts);
+    // the table itself is only the recent rolling window.
+    const total = [...state.devices.values()].reduce((s, d) => s + (d.count || 0), 0);
+    $("stat-packets").textContent = `${total} packets`;
+    const lbl = $("packets-label");
+    if (lbl) lbl.textContent = `Recent packets · showing ${rows.length}`;
   }
 
   // Column picker popover: pick which signals show as columns (standard + AVL params).
@@ -304,9 +311,18 @@
   }
 
   // ---- Rendering: detail panel -------------------------------------------
+  function highlightAt(ll) {                 // ring the clicked packet on the map
+    if (state.hl) map.removeLayer(state.hl);
+    state.hl = L.circleMarker(ll, { radius: 9, color: "#ffb454", weight: 3, fill: false }).addTo(map);
+  }
   function showDetail(rec) {
     state.selectedSeq = rec.seq;
     renderRows();
+    const p = rec.position;
+    if (p && p.latitude != null && !(p.latitude === 0 && p.longitude === 0)) {
+      map.panTo([p.latitude, p.longitude]);
+      highlightAt([p.latitude, p.longitude]);
+    }
     const body = $("detail-body");
     body.innerHTML = "";
     const kv = el("div", "kv");

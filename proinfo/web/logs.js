@@ -10,9 +10,11 @@
     : /\bWARN/.test(l) ? "WARN"
     : /\bDEBUG\b/.test(l) ? "DEBUG" : "INFO");
 
+  const source = () => $("log-source").value;
+
   async function load() {
     try {
-      const d = await fetch("/api/logs?limit=2000").then((r) => r.json());
+      const d = await fetch(`/api/logs?limit=2000&source=${source()}`).then((r) => r.json());
       lines = d.lines || [];
       $("log-info").textContent = `${lines.length} lines · ${(d.size / 1024).toFixed(1)} KB`;
       render();
@@ -53,10 +55,12 @@
   $("log-refresh").addEventListener("click", load);
   $("log-search").addEventListener("input", render);
   $("log-level").addEventListener("change", render);
-  $("log-download").addEventListener("click", () => { window.location.href = "/api/logs/download"; });
+  $("log-source").addEventListener("change", load);
+  $("log-download").addEventListener("click", () => { window.location.href = `/api/logs/download?source=${source()}`; });
   $("log-clear").addEventListener("click", async () => {
-    if (!confirm("Clear the runtime log?")) return;
-    try { await fetch("/api/logs", { method: "DELETE" }); } catch (e) { /* ignore */ }
+    const what = source() === "errors" ? "kept errors & warnings log" : "activity log";
+    if (!confirm(`Clear the ${what}?`)) return;
+    try { await fetch(`/api/logs?source=${source()}`, { method: "DELETE" }); } catch (e) { /* ignore */ }
     load();
   });
   $("log-auto").addEventListener("change", () => {

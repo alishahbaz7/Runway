@@ -57,7 +57,8 @@
   function createParser(panel, id, onChange, peerName) {
     const q = (sel) => panel.querySelector(sel);
     const state = { records: [], packets: 0, selected: null, markers: [], trail: null,
-                    lastPackets: [], feeds: [], signature: null, signatureName: null };
+                    lastPackets: [], feeds: [], signature: null, signatureName: null,
+                    lastSkipped: 0, hl: null };
 
     const map = L.map(q(".parser-map"), { zoomControl: true }).setView([20.59, 78.96], 4);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -106,8 +107,10 @@
       state.markers.forEach((m) => map.removeLayer(m));
       state.markers = [];
       if (state.trail) { map.removeLayer(state.trail); state.trail = null; }
+      if (state.hl) { map.removeLayer(state.hl); state.hl = null; }
       const pts = [];
-      ordered(state.records, (r) => r.timestamp).forEach(({ item: r, idx }, pos) => {
+      const MAX_MARKERS = 2000;                 // cap markers so huge dumps don't freeze the map
+      ordered(state.records, (r) => r.timestamp).slice(0, MAX_MARKERS).forEach(({ item: r, idx }, pos) => {
         if (r.latitude == null || r.longitude == null) return;
         if (r.latitude === 0 && r.longitude === 0) return;
         const ll = [r.latitude, r.longitude];
@@ -242,11 +245,23 @@
 
       const tbody = el("tbody");
       const prev = new Array(rows.length).fill(undefined);   // track change per signal column
-      cols.forEach((inst, ci) => {
+      const MAX_ROWS = 1000;                                  // cap DOM rows so huge dumps don't freeze
+      const shown = cols.slice(0, MAX_ROWS);
+      shown.forEach((inst, ci) => {
         const tr = el("tr");
-        const tcell = el("td", "rowname");
+        const tcell = el("td", "rowname time");
         tcell.append(el("div", "", fmtTs(inst.timestamp) || `packet ${inst.packet}`),
                      el("small", "muted", `#${ci + 1}`));
+        tcell.title = "show this packet on the map";
+        tcell.onclick = () => {
+          tbody.querySelectorAll("tr.sel").forEach((x) => x.classList.remove("sel"));
+          tr.classList.add("sel");
+          const la = inst.byName.get("Latitude"), lo = inst.byName.get("Longitude");
+          if (la && lo) {
+            const lat = parseFloat(la.value), lon = parseFloat(lo.value);
+            if (!isNaN(lat) && !isNaN(lon) && !(lat === 0 && lon === 0)) focusLatLon([lat, lon]);
+          }
+        };
         tr.appendChild(tcell);
 
         rows.forEach((r, ri) => {
@@ -271,37 +286,107 @@
         });
         tbody.appendChild(tr);
       });
+      if (cols.length > MAX_ROWS) {
+        const tr = el("tr");
+        const td = el("td", "empty", `… showing ${MAX_ROWS} of ${cols.length} records — use ⤓ CSV to export all`);
+        td.colSpan = rows.length + 1;
+        tr.appendChild(td); tbody.appendChild(tr);
+      }
       table.appendChild(tbody);
       q(".fields").appendChild(table);
     }
 
-    // ---- records table ----
-    function renderRecords() {
-      const tbody = q(".rec-rows");
-      tbody.innerHTML = "";
-      if (!state.records.length) { tbody.appendChild(emptyRow("No AVL records yet", 4)); return; }
-      ordered(state.records, (r) => r.timestamp).forEach(({ item: r, idx }) => {
-        const tr = el("tr");
-        if (idx === state.selected) tr.className = "sel";
-        tr.append(el("td", "", fmtTs(r.timestamp)), el("td", "", r.longitude),
-                  el("td", "", r.latitude), el("td", "", r.speed_kph));
-        tr.onclick = () => selectRecord(idx);
-        tbody.appendChild(tr);
-      });
+    // ---- map focus (pan + highlight a point; unfold the map if it's hidden) ----
+    function highlightAt(ll) {
+      if (state.hl) map.removeLayer(state.hl);
+      state.hl = L.circleMarker(ll, { radius: 9, color: "#ffb454", weight: 3, fill: false }).addTo(map);
     }
-    function selectRecord(i) {
-      state.selected = i;
-      renderRecords();
-      const r = state.records[i];
-      if (!r || r.latitude == null) return;
+    function focusLatLon(ll) {
+      if (!ll) return;
       const w = q(".map-wrap");
-      if (w.classList.contains("folded")) {        // unfold so the clicked packet is visible
+      if (w.classList.contains("folded")) {
         w.classList.remove("folded");
         q(".map-fold").textContent = "Hide map ▾";
-        setTimeout(() => { map.invalidateSize(); map.panTo([r.latitude, r.longitude]); }, 0);
-      } else {
-        map.panTo([r.latitude, r.longitude]);
-      }
+        setTimeout(() => { map.invalidateSize(); map.panTo(ll); highlightAt(ll); }, 0);
+      } else { map.panTo(ll); highlightAt(ll); }
+    }
+    function selectRecord(i) {                 // map marker click
+      const r = state.records[i];
+      if (r && r.latitude != null) focusLatLon([r.latitude, r.longitude]);
+    }
+
+    // ---- summary / insights (replaces the redundant records table) ----
+    function bars(rowsArr) {
+      const max = Math.max(1, ...rowsArr.map((r) => r[1]));
+      const box = el("div", "sum-bars");
+      rowsArr.forEach(([label, count, color]) => {
+        const row = el("div", "sum-bar");
+        row.append(el("span", "sum-bar-l", label), el("span", "sum-bar-c", String(count)));
+        const track = el("div", "sum-bar-t");
+        const fill = el("div", "sum-bar-f");
+        fill.style.width = (count / max * 100) + "%"; fill.style.background = color;
+        track.appendChild(fill); row.appendChild(track);
+        box.appendChild(row);
+      });
+      return box;
+    }
+    function renderSummary() {
+      const wrap = q(".summary");
+      wrap.innerHTML = "";
+      const pkts = state.lastPackets || [];
+      if (!pkts.length) { wrap.appendChild(el("p", "empty", "Decode to see a summary")); return; }
+
+      let handshakes = 0, crcBad = 0, records = 0, gprs = 0, gpsValid = 0;
+      const byCodec = {}, prio = { Low: 0, High: 0, Panic: 0 };
+      let firstTs = null, lastTs = null, sMin = null, sMax = null, sSum = 0, sN = 0;
+      pkts.forEach((p) => {
+        byCodec[p.codec_name] = (byCodec[p.codec_name] || 0) + 1;
+        if (p.kind === "imei") handshakes++;
+        if (p.crc_ok === false) crcBad++;
+        if ([12, 13, 14].includes(p.codec_id)) gprs++;
+        (p.fields || []).forEach((f) => {
+          if (f.name === "Priority") { const m = /\((Low|High|Panic)\)/.exec(f.value); if (m) prio[m[1]]++; }
+        });
+        (p.records || []).forEach((r) => {
+          records++;
+          if (r.latitude != null && !(r.latitude === 0 && r.longitude === 0)) gpsValid++;
+          if (typeof r.speed_kph === "number") {
+            sSum += r.speed_kph; sN++;
+            sMin = sMin == null ? r.speed_kph : Math.min(sMin, r.speed_kph);
+            sMax = sMax == null ? r.speed_kph : Math.max(sMax, r.speed_kph);
+          }
+          const t = Date.parse(r.timestamp);
+          if (!isNaN(t)) { if (firstTs == null || t < firstTs) firstTs = t; if (lastTs == null || t > lastTs) lastTs = t; }
+        });
+      });
+
+      const skipped = state.lastSkipped || 0;
+      const stats = el("div", "sum-stats");
+      const tile = (label, value, cls) => {
+        const t = el("div", "stat" + (cls ? " " + cls : ""));
+        t.append(el("div", "stat-v", String(value)), el("div", "stat-k", label));
+        stats.appendChild(t);
+      };
+      tile("Packets", pkts.length);
+      tile("AVL records", records);
+      tile("Handshakes", handshakes);
+      tile("GPRS msgs", gprs);
+      tile("CRC bad", crcBad, crcBad ? "bad" : "");
+      tile("Corrupt skipped", skipped, skipped ? "warn" : "");
+      wrap.append(el("h3", "sum-h", "Overview"), stats);
+
+      const kv = el("div", "sum-kv");
+      const add = (k, v) => { kv.append(el("div", "k", k), el("div", "v", String(v))); };
+      add("GPS-valid", `${gpsValid} / ${records}`);
+      if (sN) add("Speed", `${Math.round(sMin)}–${Math.round(sMax)} km/h · avg ${Math.round(sSum / sN)}`);
+      if (firstTs != null) add("Time span",
+        `${fmtTs(new Date(firstTs).toISOString())} → ${fmtTs(new Date(lastTs).toISOString())}`);
+      wrap.append(el("h3", "sum-h", "Details"), kv);
+
+      wrap.append(el("h3", "sum-h", "Priority"));
+      wrap.appendChild(bars([["Low", prio.Low, "#3fb6ff"], ["High", prio.High, "#ffb454"], ["Panic", prio.Panic, "#ff6b6b"]]));
+      wrap.append(el("h3", "sum-h", "By codec"));
+      wrap.appendChild(bars(Object.entries(byCodec).map(([n, c]) => [n, c, "#00d18f"])));
     }
 
     // ---- decode ----
@@ -340,10 +425,11 @@
         }
         if (!data) throw new Error("no result from server");
         state.lastPackets = data.packets;
+        state.lastSkipped = data.skipped || 0;
         renderFields(data.packets);
         state.packets += data.packets.length;
         data.records.forEach((r) => state.records.push(r));
-        renderRecords();
+        renderSummary();
         plotRecords();
         const k = data.skipped || 0;
         // "N of total" parsed, plus how many corrupt frames were skipped
@@ -452,7 +538,7 @@
 
     function rerender() {
       if (state.lastPackets.length) renderFields(state.lastPackets);
-      renderRecords(); plotRecords();
+      renderSummary(); plotRecords();
     }
     function toggleTzCustom() {
       q(".tz-custom").style.display = q(".tz-sel").value === "custom" ? "inline-flex" : "none";
@@ -462,32 +548,36 @@
       state.lastPackets = []; state.feeds = [];
       q(".hexin").value = "";
       fieldsMessage("Paste a packet and hit Decode");
-      renderRecords(); plotRecords();
+      renderSummary(); plotRecords();
       q(".parse-msg").textContent = "";
       onChange();
     }
 
     // ---- wire the panel's controls ----
+    const closeMore = () => q(".more-panel").classList.remove("open");
     q(".decode-btn").addEventListener("click", decode);
-    q(".clear-btn").addEventListener("click", clearAll);
-    q(".download-btn").addEventListener("click", exportCsv);
-    q(".sample-btn").addEventListener("click", () => { q(".hexin").value = SAMPLE; decode(); });
+    q(".clear-btn").addEventListener("click", () => { clearAll(); closeMore(); });
+    q(".download-btn").addEventListener("click", exportCsv);   // exportCsv already closes More
+    q(".sample-btn").addEventListener("click", () => { q(".hexin").value = SAMPLE; closeMore(); decode(); });
     q(".upload-btn").addEventListener("click", () => q(".file-input").click());
     q(".file-input").addEventListener("change", (e) => {
       const f = e.target.files[0];
       if (!f) return;
       const reader = new FileReader();
-      reader.onload = () => { q(".hexin").value = String(reader.result || ""); decode(); };
+      reader.onload = () => { q(".hexin").value = String(reader.result || ""); closeMore(); decode(); };
       reader.onerror = () => { const m = q(".parse-msg"); m.className = "parse-msg err"; m.textContent = "could not read file"; };
       reader.readAsText(f);
       e.target.value = "";
     });
     q(".hexin").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") decode(); });
     q(".hexin").addEventListener("input", onChange);
-    q(".view-sel").addEventListener("change", () => { rerender(); onChange(); });
-    q(".transport-sel").addEventListener("change", onChange);
-    q(".sort-sel").addEventListener("change", () => { rerender(); onChange(); });
-    q(".tz-sel").addEventListener("change", () => { toggleTzCustom(); rerender(); onChange(); });
+    q(".view-sel").addEventListener("change", () => { rerender(); onChange(); closeMore(); });
+    q(".transport-sel").addEventListener("change", () => { onChange(); closeMore(); });
+    q(".sort-sel").addEventListener("change", () => { rerender(); onChange(); });   // Order lives on the bar
+    q(".tz-sel").addEventListener("change", () => {
+      toggleTzCustom(); rerender(); onChange();
+      if (q(".tz-sel").value !== "custom") closeMore();   // keep open to enter a custom HH:MM
+    });
     [".tz-sign", ".tz-h", ".tz-m"].forEach((s) => q(s).addEventListener("change", () => { rerender(); onChange(); }));
 
     // ---- foldable map ----
@@ -537,9 +627,38 @@
       } catch (e) { m.className = "parse-msg err"; m.textContent = "apply failed: " + e.message; }
     });
 
-    // ---- instance API ----
+    // ---- instance API (for session persistence across page navigation) ----
+    function getState() {
+      return {
+        settings: {
+          inputText: q(".hexin").value, view: viewMode(), transport: transport(),
+          sort: sortMode(), tz: q(".tz-sel").value, tzSign: q(".tz-sign").value,
+          tzH: q(".tz-h").value, tzM: q(".tz-m").value, signatureName: state.signatureName,
+        },
+        feeds: state.feeds.slice(),
+      };
+    }
+    async function loadState(saved) {
+      const s = saved.settings || {};
+      const set = (sel, v) => { if (v != null) q(sel).value = v; };
+      set(".hexin", s.inputText); set(".view-sel", s.view); set(".transport-sel", s.transport);
+      set(".sort-sel", s.sort); set(".tz-sel", s.tz); set(".tz-sign", s.tzSign);
+      set(".tz-h", s.tzH); set(".tz-m", s.tzM);
+      toggleTzCustom();
+      if (s.signatureName) {
+        try {
+          const d = await fetch("/api/signatures/" + encodeURIComponent(s.signatureName)).then((r) => r.json());
+          state.signature = d.content; state.signatureName = s.signatureName;
+          q(".sig-sel").value = s.signatureName; q(".sig-sel").disabled = true;
+          const b = q(".sig-apply"); b.textContent = "Remove"; b.classList.add("on");
+        } catch (e) { /* signature gone from repo */ }
+      }
+      for (const f of (saved.feeds || [])) { await decodeHex(f); state.feeds.push(f); }
+    }
+
     toggleTzCustom();
     return {
+      getState, loadState,
       activate() { setTimeout(() => map.invalidateSize(), 0); },
       destroy() { map.remove(); },
     };
@@ -555,9 +674,18 @@
   let activeId = null;
   let seq = 0;
 
-  // Parser state is VOLATILE — kept only in memory. A fresh start (reload/restart) begins
-  // with one empty "Device 1"; nothing is persisted to disk or localStorage.
-  const noop = () => {};
+  // Parser state lives in sessionStorage: it survives navigating between pages and a page
+  // refresh, but a new browser session (or closing the tab) starts fresh at "Device 1".
+  const SS_KEY = "runway.parser.session";
+
+  function persist() {
+    try {
+      sessionStorage.setItem(SS_KEY, JSON.stringify({
+        activeId,
+        tabs: tabs.map((t) => ({ id: t.id, name: t.name, ...t.parser.getState() })),
+      }));
+    } catch (e) { /* quota / disabled — non-fatal */ }
+  }
 
   function updateStat() {
     const s = document.getElementById("stat-tabs");
@@ -572,11 +700,12 @@
       t.panel.classList.toggle("active", on);
       if (on) t.parser.activate();
     });
+    persist();
   }
 
-  function addTab() {
+  function addTab(saved) {
     const id = ++seq;
-    const name = `Device ${id}`;
+    const name = (saved && saved.name) || `Device ${id}`;
 
     const panel = tpl.content.firstElementChild.cloneNode(true);
     panels.appendChild(panel);
@@ -588,18 +717,19 @@
     tabbar.insertBefore(btn, document.getElementById("tab-add"));
 
     const tab = { id, name, btn, panel, parser: null };
-    tab.parser = createParser(panel, id, noop, () => tab.name);
+    tab.parser = createParser(panel, id, persist, () => tab.name);
     tabs.push(tab);
 
     btn.addEventListener("click", (e) => { if (e.target !== close) activate(id); });
     label.addEventListener("dblclick", () => {
       const n = prompt("Tab name", tab.name);
-      if (n) { tab.name = n; label.textContent = n; }
+      if (n) { tab.name = n; label.textContent = n; persist(); }
     });
     close.addEventListener("click", () => closeTab(id));
 
     activate(id);
     updateStat();
+    if (saved) tab.parser.loadState(saved);   // re-decode the retained data (auto, with progress)
     return tab;
   }
 
@@ -613,6 +743,7 @@
     if (!tabs.length) { addTab(); return; }   // never leave zero tabs
     if (activeId === id) activate(tabs[Math.max(0, i - 1)].id);
     updateStat();
+    persist();
   }
 
   // "+" button to open a new device tab.
@@ -621,6 +752,16 @@
   tabbar.appendChild(addBtn);
   addBtn.addEventListener("click", () => addTab());
 
-  // ---- boot: always a fresh, empty Device 1 ----
-  addTab();
+  // ---- boot: restore the session's tabs, else open a fresh Device 1 ----
+  (function restore() {
+    let saved;
+    try { saved = JSON.parse(sessionStorage.getItem(SS_KEY) || "null"); } catch (e) { saved = null; }
+    if (saved && Array.isArray(saved.tabs) && saved.tabs.length) {
+      saved.tabs.forEach((t) => addTab(t));
+      const idx = saved.tabs.findIndex((t) => t.id === saved.activeId);
+      if (idx >= 0 && tabs[idx]) activate(tabs[idx].id);
+    } else {
+      addTab();
+    }
+  })();
 })();

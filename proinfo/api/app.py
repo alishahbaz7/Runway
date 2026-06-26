@@ -51,20 +51,31 @@ SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signatu
 SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
 _SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 
-# Rotating runtime log (errors + activity), viewable in the Diagnostics → Logs page.
+# Two runtime logs (Diagnostics → Logs):
+#   runway.log         — all activity (INFO+), small + frequently rotated (churns).
+#   runway.errors.log  — WARNING+ERROR only, large + many backups (KEPT for later analysis).
 LOG_FILE = Path(DATA_DIR) / "runway.log"
+LOG_ERR_FILE = Path(DATA_DIR) / "runway.errors.log"
+
+
+def _log_path(source: str) -> Path:
+    return LOG_ERR_FILE if source == "errors" else LOG_FILE
 
 
 def _setup_file_logging() -> None:
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(name)s: %(message)s",
-                                            "%Y-%m-%d %H:%M:%S"))
-    handler._runway = True                          # marker so we don't add it twice
+    fmt = logging.Formatter("%(asctime)s %(levelname)-5s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+    activity = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    activity.setFormatter(fmt); activity.setLevel(logging.INFO); activity._runway = "activity"
+    errors = RotatingFileHandler(LOG_ERR_FILE, maxBytes=5_000_000, backupCount=10, encoding="utf-8")
+    errors.setFormatter(fmt); errors.setLevel(logging.WARNING); errors._runway = "errors"
     for name in ("", "uvicorn", "uvicorn.error"):   # root + uvicorn so crashes are captured
         lg = logging.getLogger(name)
-        if not any(getattr(h, "_runway", False) for h in lg.handlers):
-            lg.addHandler(handler)
+        have = {getattr(h, "_runway", None) for h in lg.handlers}
+        if "activity" not in have:
+            lg.addHandler(activity)
+        if "errors" not in have:
+            lg.addHandler(errors)
     logging.getLogger().setLevel(logging.INFO)
 
 
@@ -274,10 +285,18 @@ async def parse(body: ParseBody):
         raise HTTPException(400, "no bytes to parse")
     transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
     result = explain(raw, transport)
-    if result.get("skipped") or result.get("error"):
-        log.warning("parse: %d packet(s), %d skipped, error=%s (%d bytes)",
-                    len(result["packets"]), result.get("skipped", 0), result.get("error"), len(raw))
+    _log_skips("parse", result.get("skips", []), result.get("skipped", 0))
+    if result.get("error"):
+        log.warning("parse: error=%s (%d bytes)", result["error"], len(raw))
     return result
+
+
+def _log_skips(tag: str, skips: list, total: int) -> None:
+    """Log each skipped frame (offset + reason) so it can be drilled into in Logs."""
+    for s in skips[:50]:
+        log.warning("%s: skipped %d byte(s) at offset %d — %s", tag, s["bytes"], s["at"], s["reason"])
+    if total > 50:
+        log.warning("%s: …and %d more skipped frame(s)", tag, total - 50)
 
 
 @app.post("/api/parse-stream")
@@ -297,14 +316,20 @@ async def parse_stream(body: ParseBody):
 
     def gen():
         out = {"ok": True, "transport": transport, "packets": [], "records": [],
-               "skipped": 0, "error": None}
-        last = 0
+               "skipped": 0, "skips": [], "error": None}
+        last, logged = 0, 0
         for kind, payload, off in walk(raw, transport):
             if kind == "packet":
                 out["packets"].append(payload)
                 out["records"].extend(payload.get("records", []))
             elif kind == "skip":
                 out["skipped"] += 1
+                if len(out["skips"]) < 200:
+                    out["skips"].append(payload)
+                if logged < 50:                      # log each skip reason for drill-down
+                    log.warning("parse-stream: skipped %d byte(s) at offset %d — %s",
+                                payload["bytes"], payload["at"], payload["reason"])
+                    logged += 1
             elif kind == "error":
                 out["error"] = payload
             if off - last >= 16384:                  # ~16 KB between progress ticks
@@ -312,12 +337,11 @@ async def parse_stream(body: ParseBody):
                 yield json.dumps({"type": "progress", "bytes": off, "total_bytes": total_bytes,
                                   "packets": len(out["packets"]), "records": len(out["records"]),
                                   "skipped": out["skipped"]}) + "\n"
+        if out["skipped"] > 50:
+            log.warning("parse-stream: …and %d more skipped frame(s)", out["skipped"] - 50)
         out["ok"] = out["error"] is None
         out["consumed"] = total_bytes
         out["total"] = len(out["packets"]) + out["skipped"]
-        if out["skipped"] or out["error"]:
-            log.warning("parse-stream: %d packet(s), %d skipped, error=%s (%d bytes)",
-                        len(out["packets"]), out["skipped"], out["error"], total_bytes)
         yield json.dumps({"type": "result", **out}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
@@ -486,26 +510,29 @@ async def delete_signature(name: str):
 # Diagnostics: runtime log (errors + activity)
 # --------------------------------------------------------------------------- #
 @app.get("/api/logs")
-async def get_logs(limit: int = 500):
-    if not LOG_FILE.exists():
-        return {"path": str(LOG_FILE), "size": 0, "lines": []}
-    lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
-    return {"path": str(LOG_FILE), "size": LOG_FILE.stat().st_size, "lines": lines[-limit:]}
+async def get_logs(limit: int = 500, source: str = "activity"):
+    p = _log_path(source)
+    if not p.exists():
+        return {"path": str(p), "size": 0, "lines": [], "source": source}
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    return {"path": str(p), "size": p.stat().st_size, "lines": lines[-limit:], "source": source}
 
 
 @app.get("/api/logs/download")
-async def download_logs():
-    if not LOG_FILE.exists():
+async def download_logs(source: str = "activity"):
+    p = _log_path(source)
+    if not p.exists():
         raise HTTPException(404, "no log file yet")
-    return FileResponse(str(LOG_FILE), filename="runway.log", media_type="text/plain")
+    return FileResponse(str(p), filename=p.name, media_type="text/plain")
 
 
 @app.delete("/api/logs")
-async def clear_logs():
-    if LOG_FILE.exists():
-        LOG_FILE.write_text("", encoding="utf-8")
-    log.info("log cleared from Diagnostics")
-    return {"cleared": True}
+async def clear_logs(source: str = "activity"):
+    p = _log_path(source)
+    if p.exists():
+        p.write_text("", encoding="utf-8")
+    log.info("log cleared from Diagnostics (%s)", source)
+    return {"cleared": True, "source": source}
 
 
 @app.post("/api/replay")

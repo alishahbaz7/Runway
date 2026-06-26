@@ -111,7 +111,7 @@ def explain(buffer: bytes, transport: str = "tcp") -> dict:
     counts how many bad frames were jumped over.
     """
     out: dict = {"ok": True, "transport": transport, "packets": [], "records": [],
-                 "skipped": 0, "error": None, "consumed": 0}
+                 "skipped": 0, "skips": [], "error": None, "consumed": 0}
     for kind, payload, off in walk(buffer, transport):
         out["consumed"] = off
         if kind == "packet":
@@ -119,6 +119,8 @@ def explain(buffer: bytes, transport: str = "tcp") -> dict:
             out["records"].extend(payload.get("records", []))
         elif kind == "skip":
             out["skipped"] += 1
+            if len(out["skips"]) < 200:           # {at, bytes, reason} for each skipped frame
+                out["skips"].append(payload)
         elif kind == "error":
             out["error"] = payload
     out["ok"] = out["error"] is None
@@ -140,10 +142,11 @@ def walk(buffer: bytes, transport: str = "tcp"):
             yield ("error", "too many frames (stopped at 20000)", off)
             return
         chunk = buffer[off:]
+        reason = None
         try:
             pkt, consumed = (_parse_udp(chunk) if transport == "udp" else _parse_tcp(chunk))
-        except (IndexError, ValueError):
-            pkt, consumed = None, 0
+        except (IndexError, ValueError) as exc:
+            pkt, consumed, reason = None, 0, str(exc)
 
         if pkt is not None and consumed > 0:        # clean frame
             pkt["byte_offset"] = off
@@ -152,11 +155,13 @@ def walk(buffer: bytes, transport: str = "tcp"):
             continue
 
         # Corrupt/garbled: resync to the next TCP preamble; none left -> truncated tail, stop.
+        if reason is None:
+            reason = "incomplete frame (need more bytes / bad length)"
         nxt = buffer.find(b"\x00\x00\x00\x00", off + 1) if transport != "udp" else -1
         if nxt == -1:
             return
+        yield ("skip", {"at": off, "bytes": nxt - off, "reason": reason}, nxt)
         off = nxt
-        yield ("skip", None, off)
 
 
 # --------------------------------------------------------------------------- #
