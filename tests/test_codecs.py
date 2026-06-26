@@ -148,3 +148,120 @@ def test_teltonika_imei_then_data():
     assert rec.ignition is True
     assert rec.moving is True
     assert out.ack == (1).to_bytes(4, "big")
+
+
+# -- shared AVL building blocks --------------------------------------------- #
+def _gps_block() -> bytes:
+    return (int(88.3 * 1e7).to_bytes(4, "big", signed=True)     # longitude
+            + int(22.5 * 1e7).to_bytes(4, "big", signed=True)   # latitude
+            + (100).to_bytes(2, "big", signed=True)             # altitude
+            + (90).to_bytes(2, "big")                           # angle
+            + bytes([12])                                       # satellites
+            + (60).to_bytes(2, "big"))                          # speed km/h
+
+
+def _avl_record_16() -> bytes:
+    # Codec 16: 2-byte IO ids, 1-byte counts, a generation-type byte after the event id.
+    ts = (1719318600000).to_bytes(8, "big")
+    head = ts + bytes([1]) + _gps_block()
+    event_id = (1).to_bytes(2, "big")
+    gen_type = bytes([5])           # "on change"
+    n1 = bytes([2]) + b"\x00\xef\x01" + b"\x00\xf0\x01"   # ignition=1, movement=1 (2-byte ids)
+    io = event_id + gen_type + bytes([2]) + n1 + bytes([0, 0, 0])
+    return head + io
+
+
+def _avl_record_8e() -> bytes:
+    # Codec 8 Extended: 2-byte ids + counts, plus an NX variable-length element.
+    ts = (1719318600000).to_bytes(8, "big")
+    head = ts + bytes([1]) + _gps_block()
+    event_id = (0).to_bytes(2, "big")
+    total = (2).to_bytes(2, "big")
+    n1 = (1).to_bytes(2, "big") + b"\x00\xef" + b"\x01"          # ignition=1
+    n248 = (0).to_bytes(2, "big") * 3
+    nx = (1).to_bytes(2, "big") + b"\x01\x2c" + (3).to_bytes(2, "big") + b"\xaa\xbb\xcc"
+    io = event_id + total + n1 + n248 + nx
+    return head + io
+
+
+def test_teltonika_codec16():
+    c = codec("teltonika")
+    sess = Session(id="t", device_id="356307042441013")
+    out = c.decode(_teltonika_data(_avl_record_16(), codec_id=0x10), sess)
+    rec = out.records[0]
+    assert abs(rec.position.latitude - 22.5) < 1e-4
+    assert abs(rec.position.longitude - 88.3) < 1e-4
+    assert rec.speed_kph == 60
+    assert rec.satellites == 12
+    assert rec.ignition is True
+    assert rec.moving is True
+    assert rec.extra["codec_id"] == 0x10
+    assert rec.extra["generation_type"] == 5
+    assert rec.extra["event_io_id"] == 1
+    assert out.ack == (1).to_bytes(4, "big")
+
+
+def test_teltonika_codec8e_nx():
+    c = codec("teltonika")
+    sess = Session(id="t", device_id="356307042441013")
+    out = c.decode(_teltonika_data(_avl_record_8e(), codec_id=0x8E), sess)
+    rec = out.records[0]
+    assert rec.ignition is True
+    assert rec.io["io_300"] == "aabbcc"     # NX variable-length element preserved as hex
+    assert abs(rec.position.latitude - 22.5) < 1e-4
+
+
+# -- GPRS command / response codecs (12 / 13 / 14) -------------------------- #
+def _teltonika_gprs(codec_id: int, ctype: int, body: bytes, prefix: bytes = b"") -> bytes:
+    payload = prefix + body
+    data = bytes([codec_id, 1, ctype]) + len(payload).to_bytes(4, "big") + payload + bytes([1])
+    return (b"\x00\x00\x00\x00" + len(data).to_bytes(4, "big")
+            + data + crc16_ibm(data).to_bytes(4, "big"))
+
+
+def test_teltonika_codec12_command_response():
+    c = codec("teltonika")
+    sess = Session(id="t", device_id="356307042441013")
+
+    out = c.decode(_teltonika_gprs(0x0C, 0x05, b"getinfo"), sess)
+    rec = out.records[0]
+    assert rec.message_type == "command"
+    assert rec.extra["command_text"] == "getinfo"
+    assert out.ack is None     # GPRS frames are not record-count-acked
+
+    out = c.decode(_teltonika_gprs(0x0C, 0x06, b"INFO:OK"), sess)
+    rec = out.records[0]
+    assert rec.message_type == "response"
+    assert rec.extra["response_text"] == "INFO:OK"
+
+
+def test_teltonika_codec13():
+    c = codec("teltonika")
+    sess = Session(id="t", device_id="356307042441013")
+    ts = (1719318600).to_bytes(4, "big")
+    out = c.decode(_teltonika_gprs(0x0D, 0x06, b"DATA", prefix=ts), sess)
+    rec = out.records[0]
+    assert rec.message_type == "response"
+    assert rec.extra["response_text"] == "DATA"
+    assert rec.event_time is not None
+
+
+def test_teltonika_codec14():
+    c = codec("teltonika")
+    sess = Session(id="t", device_id="356307042441013")
+    imei8 = bytes.fromhex("0356307042441013")  # 8-byte addressed IMEI
+    out = c.decode(_teltonika_gprs(0x0E, 0x05, b"getgps", prefix=imei8), sess)
+    rec = out.records[0]
+    assert rec.message_type == "command"
+    assert rec.extra["command_text"] == "getgps"
+    assert rec.extra["imei_hex"] == "0356307042441013"
+
+
+def test_teltonika_build_command_roundtrip():
+    from proinfo.codecs.teltonika import TeltonikaCodec
+
+    frame = TeltonikaCodec.build_command("setdigout 1")
+    out = codec("teltonika").decode(frame, Session(id="t"))
+    rec = out.records[0]
+    assert rec.message_type == "command"
+    assert rec.extra["command_text"] == "setdigout 1"
