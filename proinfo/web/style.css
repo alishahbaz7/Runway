@@ -112,3 +112,40 @@ pre.hex, pre.json {
 }
 .empty { color: var(--muted); font-style: italic; padding: 20px; text-align: center; }
 .muted { color: var(--muted); }
+
+header a.nav { color: var(--muted); text-decoration: none; font-size: 12px;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 7px; }
+header a.nav:hover { color: var(--text); border-color: var(--accent); }
+header a.nav.active { color: var(--accent); border-color: var(--accent); }
+
+/* ---- Teltonika parser page ---------------------------------------------- */
+#parsebar { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+#parsebar textarea {
+  width: 100%; min-height: 54px; resize: vertical; padding: 8px 10px;
+  font-family: var(--mono); font-size: 12.5px; border-radius: 7px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+}
+#parsebar .controls { display: flex; align-items: center; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+#parsebar .controls .seg { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+#parsebar .controls label { display: inline; margin: 0; color: var(--text); }
+#parsebar .controls input[type=radio] { width: auto; }
+#parsebar .spacer { flex: 1; }
+#parsebar button { width: auto; padding: 7px 18px; margin: 0; }
+#parse-msg { font-size: 12px; margin-left: 4px; }
+#parse-msg.ok { color: var(--accent-2); }
+#parse-msg.err { color: var(--danger); }
+
+main#parser-main { display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+#fields { overflow: auto; background: var(--bg); }
+#fields table { font-family: var(--mono); }
+#fields td.num { text-align: right; color: var(--muted); }
+#fields td.val { white-space: normal; word-break: break-word; }
+#fields td.hex { color: var(--accent); }
+#fields td.bit { color: var(--muted); font-size: 11px; }
+#fields tr.group td { background: var(--panel); color: var(--accent-2); font-weight: 700;
+  text-transform: none; letter-spacing: .3px; position: sticky; }
+#fields tr.crc-bad td { color: var(--danger); }
+#parser-right { display: flex; flex-direction: column; border-left: 1px solid var(--border); min-height: 0; }
+#rectable { height: 45%; overflow: auto; background: var(--panel); }
+#parser-map { flex: 1; min-height: 200px; background: #0a0d12; }
+#rectable tr.sel { background: #233044; }

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProInfo · Teltonika Data Parser</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1><b>Pro</b>Info</h1>
+    <span class="tag">Teltonika Data Parser</span>
+    <a class="nav" href="index.html">Live dashboard</a>
+    <a class="nav active" href="parser.html">Packet parser</a>
+    <span class="spacer"></span>
+    <span class="pill" id="stat-pkts">0 packets</span>
+    <span class="pill" id="stat-recs">0 records</span>
+  </header>
+
+  <div id="parsebar">
+    <label for="hexin">Enter data (hex — paste one or many Teltonika packets):</label>
+    <textarea id="hexin" placeholder="000F333536333037303432343431303133  or  00000000000000310810..."></textarea>
+    <div class="controls">
+      <span class="seg">View:
+        <label><input type="radio" name="view" value="grouped" checked /> By record</label>
+        <label><input type="radio" name="view" value="flat" /> Flat</label>
+      </span>
+      <span class="seg">Transport:
+        <label><input type="radio" name="transport" value="tcp" checked /> TCP</label>
+        <label><input type="radio" name="transport" value="udp" /> UDP</label>
+      </span>
+      <span id="parse-msg"></span>
+      <span class="spacer"></span>
+      <button id="sample-btn" class="ghost">Load sample</button>
+      <button id="clear-btn" class="ghost">Clear</button>
+      <button id="decode-btn">Decode ▶</button>
+    </div>
+  </div>
+
+  <main id="parser-main">
+    <!-- LEFT: field-by-field breakdown ------------------------------------ -->
+    <section id="fields">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Size</th><th>Value</th><th>Hex Value</th><th>Bit Value</th>
+          </tr>
+        </thead>
+        <tbody id="field-rows">
+          <tr><td colspan="5" class="empty">Paste a packet and hit Decode</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- RIGHT: AVL records table + map ------------------------------------ -->
+    <aside id="parser-right">
+      <div id="rectable">
+        <table>
+          <thead>
+            <tr><th>Timestamp</th><th>Longitude</th><th>Latitude</th><th>km/h</th></tr>
+          </thead>
+          <tbody id="rec-rows">
+            <tr><td colspan="4" class="empty">No AVL records yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="parser-map"></div>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="parser.js"></script>
+</body>
+</html>

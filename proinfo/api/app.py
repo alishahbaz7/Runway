@@ -21,6 +21,7 @@ WS   /ws                     real-time record stream (snapshot then live)
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -33,12 +34,13 @@ from pydantic import BaseModel
 from .. import __version__
 from ..core import registry
 from ..core.pipeline import Pipeline
-from ..storage.live import hub, store
+from ..storage.db import DATA_DIR
+from ..storage.live import config, db, hub, store
 
 log = logging.getLogger("proinfo.api")
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = Path(DATA_DIR) / "uploads"
 
 # Running jobs: serializable info in _jobs, the asyncio.Task in _tasks.
 _jobs: dict[str, dict] = {}
@@ -46,11 +48,28 @@ _tasks: dict[str, asyncio.Task] = {}
 _job_seq = 0
 
 
+def _warm_start_devices() -> None:
+    """Preload persisted devices so the dashboard shows known devices before live traffic."""
+    for row in db.devices():
+        store.devices.setdefault(row["device_id"], {
+            "device_id": row["device_id"],
+            "protocol": row["protocol"],
+            "first_seen": row["first_seen"],
+            "last_seen": row["last_seen"],
+            "count": row["count"],
+            "last_message_type": row["last_message_type"],
+            "last_position": ({"lat": row["last_lat"], "lon": row["last_lon"]}
+                              if row["last_lat"] is not None else None),
+        })
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     registry.load_plugins()
-    UPLOAD_DIR.mkdir(exist_ok=True)
-    log.info("ProInfo API ready (codecs: %s)", sorted(registry.CODECS))
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _warm_start_devices()
+    log.info("ProInfo API ready (codecs: %s, devices restored: %d)",
+             sorted(registry.CODECS), len(store.devices))
     yield
     for task in _tasks.values():
         task.cancel()
@@ -78,6 +97,22 @@ class ListenBody(BaseModel):
     port: int = 5050
 
 
+class ParseBody(BaseModel):
+    hex: str
+    transport: str = "tcp"          # tcp | udp
+
+
+class ProfileBody(BaseModel):
+    name: str
+    vendor: str = ""
+    model: str = ""
+    transport: str = ""
+    codec: str = ""
+    framing: dict = {}
+    signature: dict = {}
+    status: str = "draft"
+
+
 # --------------------------------------------------------------------------- #
 # Job plumbing
 # --------------------------------------------------------------------------- #
@@ -100,6 +135,7 @@ async def _run(jid: str, pipeline: Pipeline) -> None:
     try:
         count = await pipeline.run()
         job.update(status="done", records=count, bytes=pipeline.bytes_in)
+        _record_capture(job, count, pipeline.bytes_in)
     except asyncio.CancelledError:
         job["status"] = "stopped"
         raise
@@ -113,6 +149,23 @@ async def _run(jid: str, pipeline: Pipeline) -> None:
 
 def _spawn(jid: str, pipeline: Pipeline) -> None:
     _tasks[jid] = asyncio.create_task(_run(jid, pipeline))
+
+
+def _record_capture(job: dict, records: int, nbytes: int) -> None:
+    """Index a finished replay/listen job in the durable ``captures`` table."""
+    try:
+        db.insert(
+            "captures",
+            name=job.get("file") or f"{job['kind']}-{job['id']}",
+            path=job.get("file", ""),
+            fmt=job.get("fmt", ""),
+            codec=job.get("codec", ""),
+            records=records,
+            bytes=nbytes,
+            meta=json.dumps({"kind": job["kind"]}),
+        )
+    except Exception:
+        log.exception("failed to record capture for job %s", job.get("id"))
 
 
 # --------------------------------------------------------------------------- #
@@ -132,6 +185,24 @@ async def health():
 @app.get("/api/codecs")
 async def codecs():
     return registry.list_codecs()
+
+
+@app.post("/api/parse")
+async def parse(body: ParseBody):
+    """Stateless Teltonika hex -> field-by-field breakdown (for the parser UI)."""
+    from ..codecs.teltonika_explain import explain
+
+    cleaned = "".join(ch for ch in body.hex if ch in "0123456789abcdefABCDEF")
+    if len(cleaned) % 2:
+        raise HTTPException(400, "hex has an odd number of nibbles")
+    try:
+        raw = bytes.fromhex(cleaned)
+    except ValueError as exc:
+        raise HTTPException(400, f"invalid hex: {exc}")
+    if not raw:
+        raise HTTPException(400, "no bytes to parse")
+    transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
+    return explain(raw, transport)
 
 
 @app.get("/api/devices")
@@ -157,6 +228,57 @@ async def snapshot():
 @app.get("/api/jobs")
 async def jobs():
     return list(_jobs.values())
+
+
+# --------------------------------------------------------------------------- #
+# Persistence rail: config, profiles, captures
+# --------------------------------------------------------------------------- #
+@app.get("/api/config")
+async def get_config():
+    return config.all()
+
+
+@app.put("/api/config")
+async def put_config(values: dict):
+    for key, value in values.items():
+        config.set(key, value)
+    return config.all()
+
+
+@app.get("/api/profiles")
+async def list_profiles():
+    return db.list("profiles", order="id DESC")
+
+
+@app.post("/api/profiles")
+async def create_profile(body: ProfileBody):
+    pid = db.insert(
+        "profiles",
+        name=body.name, vendor=body.vendor, model=body.model,
+        transport=body.transport, codec=body.codec,
+        framing=json.dumps(body.framing), signature=json.dumps(body.signature),
+        status=body.status,
+    )
+    return db.get("profiles", pid)
+
+
+@app.get("/api/profiles/{profile_id}")
+async def get_profile(profile_id: int):
+    row = db.get("profiles", profile_id)
+    if row is None:
+        raise HTTPException(404, "profile not found")
+    return row
+
+
+@app.delete("/api/profiles/{profile_id}")
+async def delete_profile(profile_id: int):
+    db.delete("profiles", profile_id)
+    return {"deleted": profile_id}
+
+
+@app.get("/api/captures")
+async def list_captures(limit: int = 100):
+    return db.query("SELECT * FROM captures ORDER BY id DESC LIMIT ?", (limit,))
 
 
 @app.post("/api/replay")
