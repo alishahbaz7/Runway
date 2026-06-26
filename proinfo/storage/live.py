@@ -102,3 +102,11 @@ class Hub:
 # Module-level singletons.
 store = LiveStore()
 hub = Hub()
+
+# Durable persistence rail (relational + config). Lazy-imported here so the in-memory
+# singletons above stay usable even if SQLite is unavailable for some reason.
+from .config import Config       # noqa: E402
+from .db import Storage          # noqa: E402
+
+db = Storage()
+config = Config(db)
