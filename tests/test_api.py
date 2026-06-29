@@ -56,6 +56,35 @@ async def test_signatures_crud():
         assert not any(s["name"] == name + ".json" for s in listing)
 
 
+async def test_protocols_crud():
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    name = "pytest_proto_zz"
+    content = {"profile": {"vendor": "ACME"},
+               "fields": [{"name": "lat", "at": 0, "type": "int32_be"}]}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        import json as _json
+        # save (content as a JSON string, as the UI sends it)
+        r = await c.post("/api/protocols", json={"name": name, "content": _json.dumps(content)})
+        assert r.status_code == 200 and r.json()["keys"] == 2
+
+        listing = (await c.get("/api/protocols")).json()
+        assert any(s["name"] == name + ".json" for s in listing)
+
+        got = (await c.get(f"/api/protocols/{name}.json")).json()
+        assert got["content"]["fields"][0]["name"] == "lat"
+
+        # same repository mechanism as signatures: path-y names + non-object rejected
+        assert (await c.post("/api/protocols", json={"name": "../evil", "content": {}})).status_code == 400
+        assert (await c.post("/api/protocols", json={"name": "x", "content": "[]"})).status_code == 400
+
+        assert (await c.delete(f"/api/protocols/{name}.json")).status_code == 200
+        listing = (await c.get("/api/protocols")).json()
+        assert not any(s["name"] == name + ".json" for s in listing)
+
+
 async def test_parse_stream_emits_result():
     import json as _json
 

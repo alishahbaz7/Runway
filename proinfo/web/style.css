@@ -126,49 +126,52 @@ body.mode-live .sample-btn { display: none; }
 .topbar-status { cursor: pointer; }
 .topbar-status .caret { font-size: 10px; }
 
-/* ---- signatures page --------------------------------------------------- */
+/* ---- signatures + protocols pages (shared repository UI) --------------- */
 /* full-width add band */
-#sig-addbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;
+#sig-addbar, #proto-addbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;
   background: var(--panel); border-bottom: 1px solid var(--border); }
-#sig-addbar .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; }
-#sig-addbar #sig-name { width: 260px; }
-#sig-addbar button { width: auto; padding: 7px 16px; margin: 0; }
-#sig-addbar .spacer { flex: 1; }
-#sig-addbar button { display: inline-flex; align-items: center; gap: 6px; }
-#sig-addbar button svg { flex: none; }
-.sig-item button.icon-only { display: inline-flex; align-items: center; padding: 5px 7px; }
-#sig-addbar button:disabled { opacity: .4; cursor: default; }
+#sig-addbar .addbar-label, #proto-addbar .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; }
+#sig-addbar #sig-name, #proto-addbar #proto-name { width: 260px; }
+#sig-addbar button, #proto-addbar button { width: auto; padding: 7px 16px; margin: 0; }
+#sig-addbar .spacer, #proto-addbar .spacer { flex: 1; }
+#sig-addbar button, #proto-addbar button { display: inline-flex; align-items: center; gap: 6px; }
+#sig-addbar button svg, #proto-addbar button svg { flex: none; }
+.sig-item button.icon-only, .proto-item button.icon-only { display: inline-flex; align-items: center; padding: 5px 7px; }
+#sig-addbar button:disabled, #proto-addbar button:disabled { opacity: .4; cursor: default; }
 button.ghost.danger:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 button.ghost.danger:not(:disabled):hover { background: #3a2030; }
-#sig-file-name { font-size: 12px; color: var(--muted); }
-#sig-msg { font-size: 12px; }
-#sig-msg.ok { color: var(--accent-2); }
-#sig-msg.err { color: var(--danger); }
+#sig-file-name, #proto-file-name { font-size: 12px; color: var(--muted); }
+#sig-msg, #proto-msg { font-size: 12px; }
+#sig-msg.ok, #proto-msg.ok { color: var(--accent-2); }
+#sig-msg.err, #proto-msg.err { color: var(--danger); }
 
-main#sig-main { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
-#sig-list-pane { border-right: 1px solid var(--border); padding: 12px; overflow: auto; background: var(--panel); }
-#sig-search { width: 100%; margin-bottom: 10px; }
-.sig-view-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.sig-view-head h2 { margin: 0; }
-.sig-view-head .spacer { flex: 1; }
-.sig-banner { font-size: 12px; color: var(--warn); border: 1px solid var(--warn); border-radius: 6px; padding: 2px 8px; }
-.sig-actions { display: flex; gap: 8px; }
-.sig-actions button { width: auto; padding: 5px 12px; margin: 0; }
-#sig-list { list-style: none; margin: 0; padding: 0; }
-.sig-item { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border-radius: 8px;
+main#sig-main, main#proto-main { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
+#sig-list-pane, #proto-list-pane { border-right: 1px solid var(--border); padding: 12px; overflow: auto; background: var(--panel); }
+#sig-search, #proto-search { width: 100%; margin-bottom: 10px; }
+.sig-view-head, .proto-view-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sig-view-head h2, .proto-view-head h2 { margin: 0; }
+.sig-view-head .spacer, .proto-view-head .spacer { flex: 1; }
+.sig-banner, .proto-banner { font-size: 12px; color: var(--warn); border: 1px solid var(--warn); border-radius: 6px; padding: 2px 8px; }
+.sig-actions, .proto-actions { display: flex; gap: 8px; }
+.sig-actions button, .proto-actions button { width: auto; padding: 5px 12px; margin: 0; }
+#sig-list, #proto-list { list-style: none; margin: 0; padding: 0; }
+.sig-item, .proto-item { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border-radius: 8px;
   border: 1px solid transparent; background: var(--panel-2); margin-bottom: 6px; cursor: pointer; }
-.sig-item:hover { border-color: var(--border); }
-.sig-item.active { border-color: var(--accent); }
-.sig-body { flex: 1; min-width: 0; }
-.sig-name-row { font-weight: 600; font-size: 13px; word-break: break-all; }
-.sig-item .meta { font-size: 11px; color: var(--muted); }
-#sig-view { overflow: auto; padding: 16px; }
-.sig-key { font-family: var(--mono); color: var(--accent-2); font-weight: 700; margin: 14px 0 6px; }
-.sig-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 10px; }
-.sig-table th { text-align: left; color: var(--muted); border-bottom: 1px solid var(--border);
+.sig-item:hover, .proto-item:hover { border-color: var(--border); }
+.sig-item.active, .proto-item.active { border-color: var(--accent); }
+.sig-body, .proto-body { flex: 1; min-width: 0; }
+.sig-name-row, .proto-name-row { font-weight: 600; font-size: 13px; word-break: break-all; }
+.sig-item .meta, .proto-item .meta { font-size: 11px; color: var(--muted); }
+#sig-view, #proto-view { overflow: auto; padding: 16px; }
+.sig-key, .proto-key { font-family: var(--mono); color: var(--accent-2); font-weight: 700; margin: 14px 0 6px; }
+.sig-table, .proto-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 10px; }
+.sig-table th, .proto-table th { text-align: left; color: var(--muted); border-bottom: 1px solid var(--border);
   padding: 6px 8px; font-weight: 600; }
-.sig-table td { padding: 5px 8px; border-bottom: 1px solid #1a212c; }
-.sig-table td.num { color: var(--muted); }
+.sig-table td, .proto-table td { padding: 5px 8px; border-bottom: 1px solid #1a212c; }
+.sig-table td.num, .proto-table td.num { color: var(--muted); }
+.proto-editor { width: 100%; min-height: 60vh; box-sizing: border-box; resize: vertical;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 12px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
 
 /* ---- logs page --------------------------------------------------------- */
 #log-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; flex-wrap: wrap;

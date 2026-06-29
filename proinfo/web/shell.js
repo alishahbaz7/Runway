@@ -26,6 +26,7 @@
       { id: "settings", label: "Settings", icon: "⚙", disabled: true },
     ] },
     { title: "Configuration", items: [
+      { id: "protocols", label: "Protocols", icon: "🔌", href: "protocols.html" },
       { id: "signatures", label: "Signatures", icon: "🧬", href: "signatures.html" },
     ] },
     { title: "Diagnostics", items: [

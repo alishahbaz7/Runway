@@ -51,12 +51,13 @@ without a manual restart.
 2. **Map point/line toggle** (Points / Line / Both) and **click a map point → open that
    packet in the grid** (navigate to its page + highlight the row).
 3. Confirm the signature **bit/endianness convention** against a known-good decoded value.
-4. **Protocols repository UI** (Configuration → Protocols): backend is **done** —
-   `GET/POST/DELETE /api/protocols` over `data/protocols/` (same mechanism as signatures,
-   JSON files). Still needed: a page **identical to the Signatures page** (list / add /
-   edit / delete + search + preview + download), a rail item under Configuration, and CSS.
-   Intent: protocols are droppable repository files, **not** baked into core. Codecs also
-   now carry a one-line `description`, surfaced via `/api/codecs`.
+### Also shipped (added after the main session)
+- **Protocols repository** (Configuration → Protocols): `GET/POST/DELETE /api/protocols`
+  over `data/protocols/` — **same mechanism as signatures** (JSON files). UI mirrors the
+  Signatures page (`protocols.html` + `protocols.js`, shared CSS): list / search / add
+  (upload) / **edit** (in-place JSON editor) / download / delete + generic JSON preview.
+  Intent: protocols are droppable repository files, **not** baked into core. Codecs also
+  carry a one-line `description`, surfaced via `/api/codecs`.
 
 ### Notes / gotchas
 - `data/` (DB, `signatures/*.json`, `runway*.log`, uploads) is git-ignored — **commit code
