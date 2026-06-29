@@ -84,6 +84,16 @@ async def test_protocols_crud():
         listing = (await c.get("/api/protocols")).json()
         assert not any(s["name"] == name + ".json" for s in listing)
 
+        # format-agnostic: a .py parser file is stored verbatim and served as text
+        py_name, src = "pytest_proto_zz.py", "def parse(b):\n    return []\n"
+        r = await c.post("/api/protocols", json={"name": py_name, "content": src})
+        assert r.status_code == 200 and r.json()["kind"] == "py"
+        got = (await c.get(f"/api/protocols/{py_name}")).json()
+        assert got["kind"] == "py" and got["content"] is None and got["text"] == src
+        # unsupported extensions are rejected
+        assert (await c.post("/api/protocols", json={"name": "x.exe", "content": "x"})).status_code == 400
+        await c.delete(f"/api/protocols/{py_name}")
+
 
 async def test_parse_stream_emits_result():
     import json as _json

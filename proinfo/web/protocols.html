@@ -11,14 +11,14 @@
   <div id="content">
     <header>
       <h1>Protocols</h1>
-      <span class="tag">Protocol repository — droppable protocol definition files (not baked into core)</span>
+      <span class="tag">Protocol repository — transferable parser files in any format (.py, .json, .yaml…)</span>
     </header>
 
     <!-- full-width add band -->
     <div id="proto-addbar">
       <span class="addbar-label">Add protocol</span>
-      <input id="proto-name" placeholder="name (e.g. acme_t2)" />
-      <input type="file" id="proto-file" accept=".json,application/json" style="display:none" />
+      <input id="proto-name" placeholder="name with extension (e.g. teltonika.py)" />
+      <input type="file" id="proto-file" accept=".py,.json,.yaml,.yml,.toml,.txt,.md,.csv,.xml,.cfg,.ini" style="display:none" />
       <button id="proto-upload" class="ghost">⤒ Choose file</button>
       <span id="proto-file-name"></span>
       <span class="spacer"></span>

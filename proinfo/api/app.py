@@ -509,8 +509,13 @@ async def delete_signature(name: str):
 
 
 # --------------------------------------------------------------------------- #
-# Protocols repository — same mechanism as signatures, separate folder.
+# Protocols repository — format-agnostic: a transferable parser file can be a .py,
+# .json, .yaml, … Any other utility can take the file and parse with it. Files are
+# stored as-is (text); .json files are additionally validated + pretty-printed.
 # --------------------------------------------------------------------------- #
+PROTO_EXTS = {".json", ".py", ".yaml", ".yml", ".toml", ".txt", ".md", ".csv", ".xml", ".cfg", ".ini"}
+
+
 def _proto_file(name: str) -> Path:
     raw = name or ""
     if "/" in raw or "\\" in raw or ".." in raw:
@@ -518,28 +523,35 @@ def _proto_file(name: str) -> Path:
     base = raw.strip()
     if not base:
         raise HTTPException(400, "protocol name required")
-    if not base.lower().endswith(".json"):
-        base += ".json"
+    if "." not in base:
+        base += ".json"                                   # default format
     if not _SIG_NAME_RE.match(base):
         raise HTTPException(400, "invalid protocol name (use letters, digits, . _ - space)")
+    if Path(base).suffix.lower() not in PROTO_EXTS:
+        raise HTTPException(400, f"unsupported file type (allowed: {', '.join(sorted(PROTO_EXTS))})")
     return PROTOCOLS_DIR / base
 
 
-@app.get("/api/protocols")
-async def list_protocols():
-    out = []
-    for p in sorted(PROTOCOLS_DIR.glob("*.json")):
-        info = {"name": p.name, "size": p.stat().st_size, "modified": p.stat().st_mtime}
+def _proto_meta(p: Path) -> dict:
+    st = p.stat()
+    info = {"name": p.name, "size": st.st_size, "modified": st.st_mtime,
+            "kind": p.suffix.lower().lstrip(".") or "file", "valid": True,
+            "keys": 0, "fields": 0}
+    if p.suffix.lower() == ".json":
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             info["keys"] = len(data) if isinstance(data, dict) else 0
             info["fields"] = (sum(len(v) for v in data.values() if isinstance(v, list))
                               if isinstance(data, dict) else 0)
-            info["valid"] = True
         except Exception:
-            info.update(keys=0, fields=0, valid=False)
-        out.append(info)
-    return out
+            info["valid"] = False
+    return info
+
+
+@app.get("/api/protocols")
+async def list_protocols():
+    return [_proto_meta(p) for p in sorted(PROTOCOLS_DIR.iterdir())
+            if p.is_file() and p.suffix.lower() in PROTO_EXTS]
 
 
 @app.get("/api/protocols/{name}")
@@ -547,25 +559,37 @@ async def get_protocol(name: str):
     p = _proto_file(name)
     if not p.exists():
         raise HTTPException(404, "protocol not found")
-    try:
-        return {"name": p.name, "content": json.loads(p.read_text(encoding="utf-8"))}
-    except Exception as exc:
-        raise HTTPException(400, f"invalid JSON in {p.name}: {exc}")
+    text = p.read_text(encoding="utf-8", errors="replace")
+    content = None
+    if p.suffix.lower() == ".json":
+        try:
+            content = json.loads(text)
+        except Exception:
+            content = None                                # still return raw text to view/edit
+    return {"name": p.name, "kind": p.suffix.lower().lstrip(".") or "file",
+            "text": text, "content": content}
 
 
 @app.post("/api/protocols")
 async def save_protocol(body: SignatureBody):
     p = _proto_file(body.name)
     content = body.content
-    if isinstance(content, str):
-        try:
-            content = json.loads(content)
-        except Exception as exc:
-            raise HTTPException(400, f"content is not valid JSON: {exc}")
-    if not isinstance(content, dict):
-        raise HTTPException(400, "protocol content must be a JSON object")
-    p.write_text(json.dumps(content, indent=2), encoding="utf-8")
-    return {"name": p.name, "keys": len(content), "saved": True}
+    if p.suffix.lower() == ".json":
+        # JSON files are validated and stored pretty-printed.
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except Exception as exc:
+                raise HTTPException(400, f"content is not valid JSON: {exc}")
+        if not isinstance(content, dict):
+            raise HTTPException(400, "a .json protocol's content must be a JSON object")
+        p.write_text(json.dumps(content, indent=2), encoding="utf-8")
+        return {"name": p.name, "kind": "json", "keys": len(content), "saved": True}
+    # Any other format is stored verbatim — content must be raw text.
+    if not isinstance(content, str):
+        raise HTTPException(400, "non-JSON protocol content must be a string")
+    p.write_text(content, encoding="utf-8")
+    return {"name": p.name, "kind": p.suffix.lower().lstrip("."), "bytes": len(content), "saved": True}
 
 
 @app.delete("/api/protocols/{name}")

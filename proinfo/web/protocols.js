@@ -1,5 +1,6 @@
-/* Runway - Protocols repository: upload/add → preview → save; browse/search/edit/download/delete.
- * Mirrors the Signatures page; backend uses the same repository mechanism (/api/protocols). */
+/* Runway - Protocols repository: transferable parser files in any format (.py, .json,
+ * .yaml, …). Upload/add → preview → save; browse/search/edit/download/delete.
+ * Backend: /api/protocols (same repository mechanism as signatures, format-agnostic). */
 (() => {
   "use strict";
 
@@ -20,6 +21,10 @@
     return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
   }
   const fmtTime = (m) => (m ? new Date(m * 1000).toLocaleString() : "");
+  const fmtSize = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB"
+    : (n / 1048576).toFixed(1) + " MB");
+  const hasExt = (n) => /\.[A-Za-z0-9]+$/.test(n);
+  const resolveName = (n) => (hasExt(n) ? n : n + ".json");
 
   // Inline stroke icons (no external libs — CSP-safe).
   const SVG = (p) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"`
@@ -39,11 +44,13 @@
 
   let allProtos = [];      // cached repository listing (for search)
   let selected = null;     // name of the saved file being previewed
-  let pending = null;      // { content } chosen via upload but not yet saved
-  let currentName = null;  // what the preview currently shows (for Download)
-  let currentContent = null;
-  let editing = false;     // true while the in-place JSON editor is open
+  let pending = null;      // { name, text } chosen via upload but not yet saved
+  let currentName = null;  // what the preview currently shows
+  let currentText = null;  // raw file text (for Download / Edit)
+  let currentContent = null;  // parsed object when the file is JSON, else null
+  let editing = false;     // true while the in-place editor is open
   const msg = (cls, txt) => { const m = $("proto-msg"); m.className = cls; m.textContent = txt; };
+  const kindOf = (name) => (name.split(".").pop() || "file").toLowerCase();
 
   // ---- repository list (left) -------------------------------------------
   async function refresh() {
@@ -60,8 +67,10 @@
       const li = el("li", "proto-item" + (s.name === selected ? " active" : ""));
       const body = el("div", "proto-body");
       body.append(el("div", "proto-name-row", s.name));
-      body.append(el("div", "meta",
-        `${s.keys} keys · ${s.fields} fields${s.valid ? "" : " · ⚠ invalid"} · ${fmtTime(s.modified)}`));
+      const detail = (s.kind || "file").toUpperCase() + " · " + fmtSize(s.size)
+        + (s.kind === "json" && s.valid ? ` · ${s.keys} keys` : "")
+        + (s.valid ? "" : " · ⚠ invalid") + " · " + fmtTime(s.modified);
+      body.append(el("div", "meta", detail));
       const del = el("button", "ghost mini icon-only");
       del.innerHTML = ICON.trash;
       del.title = "delete";
@@ -72,17 +81,38 @@
     });
   }
 
-  // ---- preview (right) — generic JSON renderer (any protocol shape) ------
-  function renderFields(content, headExtras) {
+  // ---- preview (right) ---------------------------------------------------
+  // JSON files get a structured table view; any other format is shown as code.
+  function renderArtifact(name, text, content, headExtras) {
     editing = false;
-    const head = $("proto-view-head");
-    head.innerHTML = "";
-    head.append(...headExtras);
+    currentName = name; currentText = text; currentContent = content;
+    if (content && typeof content === "object") renderFields(content, headExtras);
+    else renderCode(text, headExtras);
+    setActions();
+  }
+
+  function head(headExtras) {
+    const h = $("proto-view-head");
+    h.innerHTML = "";
+    h.append(...headExtras);
+  }
+  function kindTag(name) { return el("span", "tag", kindOf(name).toUpperCase()); }
+
+  function renderCode(text, headExtras) {
+    head(headExtras);
+    const body = $("proto-view-body");
+    body.innerHTML = "";
+    const pre = el("pre", "json");          // monospace code block (reuses .json styling)
+    pre.textContent = text || "";
+    body.appendChild(pre);
+  }
+
+  function renderFields(content, headExtras) {
+    head(headExtras);
     const body = $("proto-view-body");
     body.innerHTML = "";
     const obj = content && typeof content === "object" ? content : {};
 
-    // Scalar / object top-level entries → one "Properties" table.
     const props = Object.keys(obj).filter((k) => !Array.isArray(obj[k]));
     if (props.length) {
       body.appendChild(el("div", "proto-key", "Properties"));
@@ -91,15 +121,13 @@
       props.forEach((k) => {
         const tr = el("tr");
         const v = obj[k];
-        tr.append(el("td", "", k),
-          el("td", "", typeof v === "object" ? JSON.stringify(v) : String(v)));
+        tr.append(el("td", "", k), el("td", "", typeof v === "object" ? JSON.stringify(v) : String(v)));
         tb.appendChild(tr);
       });
       t.appendChild(tb);
       body.appendChild(t);
     }
 
-    // Each array-of-objects entry → its own table (union of keys as columns).
     Object.keys(obj).filter((k) => Array.isArray(obj[k])).forEach((k) => {
       const rows = obj[k];
       body.appendChild(el("div", "proto-key", k));
@@ -128,41 +156,33 @@
       body.appendChild(t);
     });
 
-    body.appendChild(el("h2", "", "Raw JSON"));
+    body.appendChild(el("h2", "", "Raw"));
     body.appendChild(el("pre", "json", JSON.stringify(content, null, 2)));
   }
 
-  // ---- in-place editor (Edit / Add new) ----------------------------------
-  function openEditor(name, content) {
+  // ---- in-place editor (Edit) --------------------------------------------
+  function openEditor(name, text) {
     editing = true;
-    selected = (name && allProtos.some((p) => p.name === name)) ? name : selected;
-    currentName = name || ($("proto-name").value.trim() || "new-protocol");
-    currentContent = content;
-    $("proto-name").value = (currentName || "").replace(/\.json$/i, "");
-    const head = $("proto-view-head");
-    head.innerHTML = "";
-    head.append(el("h2", "", currentName),
-      el("span", "spacer"),
-      el("span", "proto-banner", "Editing — press Save to write to the repository"));
+    head([el("h2", "", name), kindTag(name), el("span", "spacer"),
+      el("span", "proto-banner", "Editing — press Save to write to the repository")]);
     const body = $("proto-view-body");
     body.innerHTML = "";
     const ta = el("textarea", "proto-editor");
     ta.id = "proto-editor";
-    ta.value = JSON.stringify(content ?? {}, null, 2);
+    ta.value = text || "";
     body.appendChild(ta);
     setActions();
     ta.focus();
   }
 
-  // The Edit / Download / Delete / Clear actions live in the top band.
   function setActions() {
-    $("proto-edit").disabled = currentContent == null || editing;
-    $("proto-download").disabled = currentContent == null;
-    $("proto-clear").disabled = currentContent == null;
+    $("proto-edit").disabled = currentText == null || editing;
+    $("proto-download").disabled = currentText == null;
+    $("proto-clear").disabled = currentText == null;
     $("proto-delete").disabled = !selected;       // only a saved file can be deleted
   }
   function clearPreview() {
-    pending = null; selected = null; currentName = null; currentContent = null; editing = false;
+    pending = null; selected = null; currentName = null; currentText = null; currentContent = null; editing = false;
     $("proto-name").value = ""; $("proto-file-name").textContent = "";
     $("proto-view-head").innerHTML = '<p class="empty">Upload, select or add a protocol to preview it</p>';
     $("proto-view-body").innerHTML = "";
@@ -175,11 +195,9 @@
     renderList($("proto-search").value || "");
     try {
       const d = await api("/api/protocols/" + encodeURIComponent(name));
-      currentName = d.name; currentContent = d.content;
-      setActions();
-      renderFields(d.content, [el("h2", "", d.name)]);
+      renderArtifact(d.name, d.text, d.content, [el("h2", "", d.name), kindTag(d.name)]);
     } catch (e) {
-      currentContent = null; setActions();
+      currentText = null; currentContent = null; setActions();
       $("proto-view-body").innerHTML = "";
       $("proto-view-head").textContent = "Failed to load: " + e.message;
     }
@@ -187,19 +205,18 @@
 
   function previewPending() {
     selected = null; editing = false;
-    currentName = $("proto-name").value.trim() || "new-protocol";
-    currentContent = pending.content;
-    setActions();
+    const name = resolveName($("proto-name").value.trim() || pending.name || "new-protocol");
+    let content = null;
+    if (kindOf(name) === "json") { try { content = JSON.parse(pending.text); } catch (e) { /* show as text */ } }
     renderList($("proto-search").value || "");
-    const title = el("h2", "", currentName);
-    const spacer = el("span", "spacer");
-    const banner = el("span", "proto-banner", "Unsaved — press Save to add to the repository");
-    renderFields(pending.content, [title, spacer, banner]);
+    renderArtifact(name, pending.text, content,
+      [el("h2", "", name), kindTag(name), el("span", "spacer"),
+       el("span", "proto-banner", "Unsaved — press Save to add to the repository")]);
   }
 
-  function download(name, content) {
-    const fname = /\.json$/i.test(name) ? name : name + ".json";
-    const blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
+  function download(name, text) {
+    const fname = resolveName(name);
+    const blob = new Blob([text ?? ""], { type: "text/plain" });
     const a = el("a"); a.href = URL.createObjectURL(blob); a.download = fname;
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
   }
@@ -211,12 +228,9 @@
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      let content;
-      try { content = JSON.parse(String(reader.result || "")); }
-      catch (err) { msg("err", "not valid JSON: " + err.message); return; }
-      pending = { content };
+      pending = { name: f.name, text: String(reader.result || "") };
       $("proto-file-name").textContent = f.name;
-      if (!$("proto-name").value) $("proto-name").value = f.name.replace(/\.json$/i, "");
+      if (!$("proto-name").value) $("proto-name").value = f.name;   // keep the extension (format matters)
       msg("", "");
       previewPending();
     };
@@ -226,27 +240,25 @@
 
   $("proto-save").addEventListener("click", async () => {
     const name = $("proto-name").value.trim();
-    if (!name) { msg("err", "enter a name"); return; }
-    let content;
-    if (editing) {
-      try { content = JSON.parse($("proto-editor").value || ""); }
-      catch (err) { msg("err", "editor is not valid JSON: " + err.message); return; }
-    } else if (pending) {
-      content = pending.content;
-    } else {
-      msg("err", "choose a file or click Edit first"); return;
+    if (!name) { msg("err", "enter a name (with extension, e.g. acme.py or acme.json)"); return; }
+    let text;
+    if (editing) text = $("proto-editor").value;
+    else if (pending) text = pending.text;
+    else { msg("err", "choose a file or click Edit first"); return; }
+    if (kindOf(resolveName(name)) === "json") {
+      try { JSON.parse(text); } catch (err) { msg("err", "not valid JSON: " + err.message); return; }
     }
-    if (!window.confirm(`Save protocol “${name}” to the repository?`)) return;
+    if (!window.confirm(`Save protocol “${resolveName(name)}” to the repository?`)) return;
     try {
       await api("/api/protocols", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, content }),
+        body: JSON.stringify({ name, content: text }),
       });
       msg("ok", "saved");
       $("proto-file-name").textContent = "";
       pending = null; editing = false;
       await refresh();
-      viewSaved(/\.json$/i.test(name) ? name : name + ".json");
+      viewSaved(resolveName(name));
     } catch (e) { msg("err", "save failed: " + e.message); }
   });
 
@@ -256,7 +268,7 @@
     try { await api("/api/protocols/" + encodeURIComponent(name), { method: "DELETE" }); }
     catch (e) { /* ignore */ }
     if (selected === name) {
-      selected = null; currentName = null; currentContent = null; editing = false;
+      selected = null; currentName = null; currentText = null; currentContent = null; editing = false;
       $("proto-view-head").innerHTML = '<p class="empty">Upload, select or add a protocol to preview it</p>';
       $("proto-view-body").innerHTML = "";
       setActions();
@@ -272,8 +284,8 @@
   $("proto-clear").innerHTML = ICON.x + "<span>Clear</span>";
 
   // band actions (next to Save)
-  $("proto-edit").addEventListener("click", () => { if (currentContent != null) openEditor(currentName, currentContent); });
-  $("proto-download").addEventListener("click", () => { if (currentContent != null) download(currentName, currentContent); });
+  $("proto-edit").addEventListener("click", () => { if (currentText != null) openEditor(currentName, currentText); });
+  $("proto-download").addEventListener("click", () => { if (currentText != null) download(currentName, currentText); });
   $("proto-delete").addEventListener("click", () => { if (selected) removeProto(selected); });
   $("proto-clear").addEventListener("click", clearPreview);
   $("proto-search").addEventListener("input", () => renderList($("proto-search").value || ""));
