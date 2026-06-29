@@ -24,6 +24,7 @@ from ..core.registry import register_codec
 class CustomTemplateCodec(Codec):
     name = "custom_template"
     display_name = "Custom (template - copy me)"
+    description = "Starter template — copy this file to add a new protocol (auto-discovered)."
 
     def detect(self, sample: bytes) -> float:
         # Return 0..1 confidence that this codec parses `sample`. Look for a magic

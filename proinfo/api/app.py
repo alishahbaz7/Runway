@@ -49,6 +49,8 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 UPLOAD_DIR = Path(DATA_DIR) / "uploads"
 SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signature files
 SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
+PROTOCOLS_DIR = Path(DATA_DIR) / "protocols"       # local repository of protocol definitions
+PROTOCOLS_DIR.mkdir(parents=True, exist_ok=True)
 _SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 
 # Two runtime logs (Diagnostics → Logs):
@@ -501,6 +503,74 @@ async def save_signature(body: SignatureBody):
 @app.delete("/api/signatures/{name}")
 async def delete_signature(name: str):
     p = _sig_file(name)
+    if p.exists():
+        p.unlink()
+    return {"deleted": p.name}
+
+
+# --------------------------------------------------------------------------- #
+# Protocols repository — same mechanism as signatures, separate folder.
+# --------------------------------------------------------------------------- #
+def _proto_file(name: str) -> Path:
+    raw = name or ""
+    if "/" in raw or "\\" in raw or ".." in raw:
+        raise HTTPException(400, "invalid protocol name (no path separators)")
+    base = raw.strip()
+    if not base:
+        raise HTTPException(400, "protocol name required")
+    if not base.lower().endswith(".json"):
+        base += ".json"
+    if not _SIG_NAME_RE.match(base):
+        raise HTTPException(400, "invalid protocol name (use letters, digits, . _ - space)")
+    return PROTOCOLS_DIR / base
+
+
+@app.get("/api/protocols")
+async def list_protocols():
+    out = []
+    for p in sorted(PROTOCOLS_DIR.glob("*.json")):
+        info = {"name": p.name, "size": p.stat().st_size, "modified": p.stat().st_mtime}
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            info["keys"] = len(data) if isinstance(data, dict) else 0
+            info["fields"] = (sum(len(v) for v in data.values() if isinstance(v, list))
+                              if isinstance(data, dict) else 0)
+            info["valid"] = True
+        except Exception:
+            info.update(keys=0, fields=0, valid=False)
+        out.append(info)
+    return out
+
+
+@app.get("/api/protocols/{name}")
+async def get_protocol(name: str):
+    p = _proto_file(name)
+    if not p.exists():
+        raise HTTPException(404, "protocol not found")
+    try:
+        return {"name": p.name, "content": json.loads(p.read_text(encoding="utf-8"))}
+    except Exception as exc:
+        raise HTTPException(400, f"invalid JSON in {p.name}: {exc}")
+
+
+@app.post("/api/protocols")
+async def save_protocol(body: SignatureBody):
+    p = _proto_file(body.name)
+    content = body.content
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except Exception as exc:
+            raise HTTPException(400, f"content is not valid JSON: {exc}")
+    if not isinstance(content, dict):
+        raise HTTPException(400, "protocol content must be a JSON object")
+    p.write_text(json.dumps(content, indent=2), encoding="utf-8")
+    return {"name": p.name, "keys": len(content), "saved": True}
+
+
+@app.delete("/api/protocols/{name}")
+async def delete_protocol(name: str):
+    p = _proto_file(name)
     if p.exists():
         p.unlink()
     return {"deleted": p.name}

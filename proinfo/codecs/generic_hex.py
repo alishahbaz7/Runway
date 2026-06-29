@@ -15,6 +15,7 @@ from ..core.registry import register_codec
 class GenericHexCodec(Codec):
     name = "generic_hex"
     display_name = "Generic / Hex dump"
+    description = "Fallback — passes raw bytes through as a hex dump when no codec matches."
 
     def detect(self, sample: bytes) -> float:
         # Lowest possible confidence: only auto-selected when nothing else matches.

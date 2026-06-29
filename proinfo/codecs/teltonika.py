@@ -74,6 +74,8 @@ TYPE_RESPONSE = 0x06
 class TeltonikaCodec(Codec):
     name = "teltonika"
     display_name = "Teltonika (Codec 8 / 8E / 16 / 12 / 13 / 14)"
+    description = ("Teltonika AVL over TCP — IMEI handshake, AVL Codec 8 / 8E / 16, and the "
+                   "GPRS command/response Codec 12 / 13 / 14. CRC-16/IBM, server count ACK.")
 
     def detect(self, sample: bytes) -> float:
         if sample[:4] == b"\x00\x00\x00\x00":

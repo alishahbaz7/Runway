@@ -84,4 +84,5 @@ def get_sink(name: str, **kwargs) -> Sink:
 
 def list_codecs() -> list[dict]:
     load_plugins()
-    return [{"name": c.name, "display_name": c.display_name} for c in CODECS.values()]
+    return [{"name": c.name, "display_name": c.display_name,
+             "description": getattr(c, "description", "")} for c in CODECS.values()]

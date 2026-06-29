@@ -37,6 +37,7 @@ def _nmea_deg(value: str, hemi: str) -> float | None:
 class NmeaCodec(Codec):
     name = "nmea"
     display_name = "NMEA-0183"
+    description = "NMEA-0183 GPS sentences (RMC, GGA…) — position, speed, satellites, fix."
 
     def detect(self, sample: bytes) -> float:
         try:
