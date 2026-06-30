@@ -1,0 +1,47 @@
+# Changelog
+
+All notable changes to **Runway** (package `proinfo`) are recorded here.
+Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
+
+## [1.0.0] — 2026-06-30
+
+First release. Runway — "where telematics data lands & takes off" — parses, visualizes and
+relays telematics packets from any IoT tracking device, regardless of OEM/protocol.
+
+### Core
+- **Source → Codec → Sink pipeline** with a normalized `UnifiedRecord` contract; streaming,
+  framing-aware decode (`decode(buffer, session) → DecodeOutput(consumed, …)`), per-session
+  codec caching, and plugin auto-discovery (`@register_codec/source/sink`).
+- **Codecs:** Teltonika (AVL Codec 8 / 8E / 16 + GPRS 12 / 13 / 14, IMEI handshake,
+  CRC-16/IBM, server ACK), GT06 / Concox, NMEA-0183, generic hex, and a copy-me template.
+- **Sources/sinks:** file replay, TCP server; console, in-memory store, WebSocket broadcast,
+  webhook, TCP relay.
+
+### App & UI
+- **FastAPI** REST + WebSocket server hosting a single-page UI with a collapsible left rail
+  (Runway banner, Live/Demo mode).
+- **Dashboard:** live map, device registry with multi-select visibility + source/liveness
+  badges, recent-packets window, click-to-highlight on the map.
+- **Packet Parser:** multi-tab (one independent session per device), paste/upload hex,
+  streaming decode with live progress, resilient skip-and-resync on corrupt frames,
+  transposed signal grid, AVL-ID → name resolution, foldable map, selective CSV export,
+  Summary panel; state persists per browser session.
+- **Configuration → Signatures:** repository to add/preview/edit/delete decode signatures,
+  with signature-driven sub-signal visualization in the parser.
+- **Configuration → Protocols:** format-agnostic repository of transferable parser files
+  (`.py`, `.json`, `.yaml`, …) — drop a file in, another utility can parse with it.
+- **Tools → Converter:** upload a CanPlus `*.Config.XML` vehicle signature, view/edit the
+  CAN signals, and export to **JSON** and **DBC**.
+- **Diagnostics → Logs:** rotating activity log + a kept errors/warnings log, with a viewer
+  (source/level filter, search, auto-refresh, download, clear) and a global exception handler.
+
+### Persistence
+- Thread-safe SQLite storage rail (`Storage` + `Config`) under `data/` (git-ignored).
+  A fresh server/browser session starts clean; the parser retains within a session.
+
+### Notes
+- Internal connectivity verified: `proinfo/convert` is isolated (lazily imported by its
+  endpoints; not a registered plugin), so the pipeline, dashboard and live store/hub are
+  unaffected.
+
+[1.0.0]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.0.0
