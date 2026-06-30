@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Converter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="converter">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Converter</h1>
+      <span class="tag">Upload a vehicle signature (CanPlus XML), view/edit signals, export to JSON &amp; DBC</span>
+    </header>
+
+    <div id="conv-addbar">
+      <input type="file" id="conv-file" accept=".xml,text/xml" style="display:none" />
+      <button id="conv-upload" class="ghost">⤒ Upload XML</button>
+      <span id="conv-veh" class="conv-veh"></span>
+      <input id="conv-search" placeholder="🔍 filter signals…" />
+      <span class="spacer"></span>
+      <span id="conv-msg"></span>
+      <button id="conv-json" class="ghost" disabled>⤓ Export JSON</button>
+      <button id="conv-dbc" class="ghost" disabled>⤓ Export DBC</button>
+    </div>
+
+    <main id="conv-main">
+      <div id="conv-empty" class="empty conv-empty">Upload a CanPlus <code>.Config.XML</code> to begin.</div>
+      <div id="conv-table-wrap" style="display:none">
+        <table id="conv-table" class="conv-table">
+          <thead>
+            <tr>
+              <th>VarID</th><th>Name</th><th>CAN&nbsp;ID</th><th>Start&nbsp;bit</th>
+              <th>Len</th><th>Order</th><th>Signed</th><th>Mult</th><th>Div</th>
+              <th>Offset</th><th>Dec</th><th>Unit</th><th>Function</th>
+            </tr>
+          </thead>
+          <tbody id="conv-rows"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script src="shell.js"></script>
+  <script src="converter.js"></script>
+</body>
+</html>

@@ -52,6 +52,14 @@ without a manual restart.
    packet in the grid** (navigate to its page + highlight the row).
 3. Confirm the signature **bit/endianness convention** against a known-good decoded value.
 ### Also shipped (added after the main session)
+- **Converter** (Tools → Converter): upload a **CanPlus `*.Config.XML`** vehicle signature →
+  view/edit the signals in a table → export **JSON** and **DBC**. Parser/exporters in
+  `proinfo/convert/canplus.py` (+ root `canplus_signature.py` CLI shim); endpoints
+  `POST /api/convert/parse` and `/api/convert/export`. Descriptor decode is verified
+  against the file's own mult/div; CAN-id low byte = descriptor byte 1 (SOC `0xAC` ↔ PID
+  `0x3AC`). **Open:** field **start-bit/length** isn't in the XML — user edits it in the
+  table before DBC export (defaults: start 0, len 16, big-endian). Need real raw/value
+  pairs to auto-derive bit positions.
 - **Protocols repository** (Configuration → Protocols): `GET/POST/DELETE /api/protocols`
   over `data/protocols/` — **same mechanism as signatures** (JSON files). UI mirrors the
   Signatures page (`protocols.html` + `protocols.js`, shared CSS): list / search / add

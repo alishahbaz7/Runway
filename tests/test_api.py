@@ -95,6 +95,39 @@ async def test_protocols_crud():
         await c.delete(f"/api/protocols/{py_name}")
 
 
+async def test_convert_canplus_to_dbc_and_json():
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    xml = (
+        '<CanData><Variable_Descriptors>'
+        '<VarDesc RawDataStr="00-AC-3D-80-13-0B-A3-03-01-00-0A-00-00-00-27-10-0D-F3-B2-03-8E-31" Name="SOC">'
+        '<Variable Title="SOC-State OF Charge" VarID="803D" Var_Function="FuelTankLevel"'
+        ' FW_Multiplier="1" FW_Divider="10" FW_Offset="0" FW_Units="%" Decimal_Places="0" />'
+        '</VarDesc></Variable_Descriptors>'
+        '<Config><VehicleLibraryInfo><Vehicle Brand="MG" ModelName="ZS EV" ProductionYear="2020" />'
+        '</VehicleLibraryInfo></Config></CanData>'
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        m = (await c.post("/api/convert/parse", json={"fmt": "canplus", "text": xml})).json()
+        assert m["vehicle"]["brand"] == "MG" and len(m["signals"]) == 1
+        soc = m["signals"][0]
+        assert soc["var_id"] == "803D" and soc["multiplier"] == 1 and soc["divider"] == 10
+        assert soc["can_id_low"] == 0xAC                     # descriptor byte 1 -> PID 0x3AC low byte
+
+        soc["can_id"] = 0x3AC                                # user edit
+        dbc = (await c.post("/api/convert/export",
+                            json={"fmt": "dbc", "vehicle": m["vehicle"], "signals": m["signals"]})).json()
+        assert "BO_ 940 " in dbc["content"]                  # 0x3AC = 940
+        assert "(0.1,0)" in dbc["content"] and '"%"' in dbc["content"]
+        assert dbc["filename"].endswith(".dbc")
+
+        js = (await c.post("/api/convert/export",
+                           json={"fmt": "json", "vehicle": m["vehicle"], "signals": m["signals"]})).json()
+        assert js["filename"].endswith(".json") and '"var_id": "803D"' in js["content"]
+
+
 async def test_parse_stream_emits_result():
     import json as _json
 

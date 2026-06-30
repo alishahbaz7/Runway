@@ -16,6 +16,7 @@
     ] },
     { title: "Tools", items: [
       { id: "parser", label: "Packet Parser", icon: "⤧", href: "parser.html" },
+      { id: "converter", label: "Converter", icon: "⇄", href: "converter.html" },
     ] },
     { title: "Capture", items: [
       { id: "tcp", label: "Live TCP", icon: "📡", disabled: true },

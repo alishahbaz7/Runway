@@ -184,6 +184,17 @@ class ProfileBody(BaseModel):
     transport: str = ""
     codec: str = ""
     framing: dict = {}
+
+
+class ConvertParseBody(BaseModel):
+    fmt: str = "canplus"               # source format of the uploaded signature
+    text: str                          # raw file text (e.g. CanPlus XML)
+
+
+class ConvertExportBody(BaseModel):
+    fmt: str = "json"                  # "json" | "dbc"
+    vehicle: dict = {}
+    signals: list = []
     signature: dict = {}
     status: str = "draft"
 
@@ -598,6 +609,38 @@ async def delete_protocol(name: str):
     if p.exists():
         p.unlink()
     return {"deleted": p.name}
+
+
+# --------------------------------------------------------------------------- #
+# Converter — upload a vehicle signature (CanPlus XML), view/edit, export DBC/JSON.
+# --------------------------------------------------------------------------- #
+@app.post("/api/convert/parse")
+async def convert_parse(body: ConvertParseBody):
+    """Parse an uploaded signature file into the editable signal model."""
+    if body.fmt != "canplus":
+        raise HTTPException(400, f"unsupported source format '{body.fmt}'")
+    from ..convert import canplus
+    try:
+        sig = canplus.parse(body.text)
+    except Exception as exc:
+        raise HTTPException(400, f"could not parse signature: {exc}")
+    return canplus.to_model(sig)
+
+
+@app.post("/api/convert/export")
+async def convert_export(body: ConvertExportBody):
+    """Render the (possibly edited) model to a downloadable JSON or DBC artifact."""
+    from ..convert import canplus
+    model = {"vehicle": body.vehicle, "signals": body.signals}
+    brand = re.sub(r"[^0-9A-Za-z]+", "_", f"{body.vehicle.get('brand','')}_"
+                   f"{body.vehicle.get('model','')}").strip("_") or "signals"
+    if body.fmt == "dbc":
+        return {"filename": f"{brand}.dbc", "mime": "text/plain",
+                "content": canplus.model_to_dbc(model)}
+    if body.fmt == "json":
+        return {"filename": f"{brand}.json", "mime": "application/json",
+                "content": json.dumps({"format": "canplus", **model}, indent=2)}
+    raise HTTPException(400, f"unsupported export format '{body.fmt}'")
 
 
 # --------------------------------------------------------------------------- #
