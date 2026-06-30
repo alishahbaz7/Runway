@@ -7,6 +7,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
 
 _Work continues on branch `v1.0.1`._
 
+### Added — Live TCP server (headline feature)
+- **Capture → Live TCP** page: start a TCP listener (codec + port + bind address), see all
+  running listeners (status, uptime, records, bytes, connected clients), and stop them — all
+  updating live over the WebSocket.
+- **Connected-clients list** per listener: the TCP source now emits connect/disconnect events
+  to the hub (`{"type":"conn"}`); the running-job view reports live `records`/`bytes`/`peers`.
+- **Live decoded-packet feed** on the page (time / device / type / position / speed).
+- **Downlink / send command** to a connected device — `POST /api/send/{job_id}` (`text`
+  built via the codec's `build_command`, or raw `hex`); `TcpServerSource.send(peer, data)`.
+- **Remembered settings**: last codec/port/bind stored in `Config`; `GET /api/listen/defaults`
+  pre-fills the Start form (no auto-start — fresh-start convention kept).
+- Decoded live traffic continues to flow to the Dashboard store + WebSocket as before.
+
 ## [1.0.0] — 2026-06-30
 
 First release. Runway — "where telematics data lands & takes off" — parses, visualizes and

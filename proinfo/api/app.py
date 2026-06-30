@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -84,9 +85,11 @@ def _setup_file_logging() -> None:
 _setup_file_logging()
 log.info("Runway %s — logging to %s", __version__, LOG_FILE)
 
-# Running jobs: serializable info in _jobs, the asyncio.Task in _tasks.
+# Running jobs: serializable info in _jobs, the asyncio.Task in _tasks, the live
+# Pipeline in _pipelines (for live records/bytes + the source's connected peers).
 _jobs: dict[str, dict] = {}
 _tasks: dict[str, asyncio.Task] = {}
+_pipelines: dict[str, "Pipeline"] = {}
 _job_seq = 0
 
 
@@ -195,6 +198,12 @@ class ConvertExportBody(BaseModel):
     fmt: str = "json"                  # "json" | "dbc"
     vehicle: dict = {}
     signals: list = []
+
+
+class SendBody(BaseModel):
+    peer: str                          # "ip:port" of a connected device
+    mode: str = "text"                 # "text" (built via codec) | "hex" (raw bytes)
+    value: str = ""
     signature: dict = {}
     status: str = "draft"
 
@@ -217,7 +226,7 @@ def _new_job(kind: str, **meta) -> str:
 async def _run(jid: str, pipeline: Pipeline) -> None:
     job = _jobs[jid]
     job["status"] = "running"
-    await hub.publish({"type": "job", "data": dict(job)})
+    await hub.publish({"type": "job", "data": _job_view(jid)})
     try:
         count = await pipeline.run()
         job.update(status="done", records=count, bytes=pipeline.bytes_in)
@@ -229,12 +238,27 @@ async def _run(jid: str, pipeline: Pipeline) -> None:
         job.update(status="error", error=str(exc))
         log.exception("job %s failed", jid)
     finally:
-        await hub.publish({"type": "job", "data": dict(job)})
+        await hub.publish({"type": "job", "data": _job_view(jid)})
         _tasks.pop(jid, None)
+        _pipelines.pop(jid, None)
 
 
 def _spawn(jid: str, pipeline: Pipeline) -> None:
+    _pipelines[jid] = pipeline
     _tasks[jid] = asyncio.create_task(_run(jid, pipeline))
+
+
+def _job_view(jid: str) -> dict:
+    """Job metadata merged with live counters from its running pipeline (if any)."""
+    job = dict(_jobs.get(jid, {}))
+    pipe = _pipelines.get(jid)
+    if pipe is not None:
+        job["records"] = pipe.records_emitted
+        job["bytes"] = pipe.bytes_in
+        src = getattr(pipe, "source", None)
+        if src is not None and hasattr(src, "peers"):
+            job["peers"] = src.peers()
+    return job
 
 
 def _record_capture(job: dict, records: int, nbytes: int) -> None:
@@ -397,7 +421,7 @@ async def snapshot():
 
 @app.get("/api/jobs")
 async def jobs():
-    return list(_jobs.values())
+    return [_job_view(jid) for jid in _jobs]
 
 
 # --------------------------------------------------------------------------- #
@@ -702,14 +726,73 @@ async def replay_path(body: ReplayPathBody):
     return {"job": _jobs[jid]}
 
 
+@app.get("/api/listen/defaults")
+async def listen_defaults():
+    """Last-used listener settings (for pre-filling the Start form)."""
+    return {"host": config.get("default_listen_host", "0.0.0.0"),
+            "port": config.get("default_listen_port", 5050),
+            "codec": config.get("default_codec", "auto")}
+
+
 @app.post("/api/listen")
 async def listen(body: ListenBody):
     from ..sources.tcp_server import TcpServerSource
 
-    source = TcpServerSource(host=body.host, port=body.port)
-    jid = _new_job("listen", codec=body.codec, host=body.host, port=body.port)
-    _spawn(jid, Pipeline(source, body.codec, _default_sinks()))
-    return {"job": _jobs[jid]}
+    registry.load_plugins()
+    if body.codec != "auto" and body.codec not in registry.CODECS:
+        raise HTTPException(400, f"unknown codec '{body.codec}'")
+
+    jid = _new_job("listen", codec=body.codec, host=body.host, port=body.port,
+                   started=time.time(), peers=[])
+
+    async def _on_conn(kind: str, peer: str) -> None:
+        job = _jobs.get(jid)
+        peers = source.peers()
+        if job is not None:
+            job["peers"] = peers
+        await hub.publish({"type": "conn", "data": {"job": jid, "peer": peer,
+                                                    "state": kind, "peers": peers,
+                                                    "port": body.port}})
+
+    source = TcpServerSource(host=body.host, port=body.port, on_event=_on_conn)
+    try:
+        _spawn(jid, Pipeline(source, body.codec, _default_sinks()))
+    except Exception as exc:
+        _jobs[jid].update(status="error", error=str(exc))
+        raise HTTPException(500, f"could not start listener: {exc}")
+
+    # Remember settings for next time.
+    config.set("default_listen_host", body.host)
+    config.set("default_listen_port", body.port)
+    config.set("default_codec", body.codec)
+    return {"job": _job_view(jid)}
+
+
+@app.post("/api/send/{job_id}")
+async def send_command(job_id: str, body: SendBody):
+    """Send a downlink command/bytes back to a connected device on a listener."""
+    pipe = _pipelines.get(job_id)
+    if pipe is None:
+        raise HTTPException(404, "job not running")
+    source = getattr(pipe, "source", None)
+    if source is None or not hasattr(source, "send"):
+        raise HTTPException(400, "this job does not support sending")
+
+    if body.mode == "hex":
+        cleaned = "".join(c for c in body.value if c in "0123456789abcdefABCDEF")
+        if len(cleaned) % 2 or not cleaned:
+            raise HTTPException(400, "invalid hex")
+        data = bytes.fromhex(cleaned)
+    else:  # build via the job's codec when it supports it, else raw ASCII
+        codec_name = _jobs.get(job_id, {}).get("codec", "")
+        cls = registry.CODECS.get(codec_name)
+        builder = getattr(cls, "build_command", None) if cls else None
+        data = builder(body.value) if builder else body.value.encode("ascii", "replace")
+
+    ok = await source.send(body.peer, data)
+    if not ok:
+        raise HTTPException(404, f"peer {body.peer} not connected")
+    return {"sent": len(data), "peer": body.peer, "hex": data.hex()}
 
 
 @app.post("/api/stop/{job_id}")

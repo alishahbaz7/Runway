@@ -19,7 +19,7 @@
       { id: "converter", label: "Converter", icon: "⇄", href: "converter.html" },
     ] },
     { title: "Capture", items: [
-      { id: "tcp", label: "Live TCP", icon: "📡", disabled: true },
+      { id: "tcp", label: "Live TCP", icon: "📡", href: "tcp.html" },
       { id: "captures", label: "Captures", icon: "🗂", disabled: true },
     ] },
     { title: "Library", items: [

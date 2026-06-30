@@ -128,6 +128,58 @@ async def test_convert_canplus_to_dbc_and_json():
         assert js["filename"].endswith(".json") and '"var_id": "803D"' in js["content"]
 
 
+async def test_tcp_listen_connect_send_stop():
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/listen", json={"codec": "teltonika", "host": "127.0.0.1", "port": port})
+        assert r.status_code == 200
+        jid = r.json()["job"]["id"]
+
+        # wait for the listener to bind, then connect a fake device
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None, "listener did not bind"
+
+        try:
+            imei = b"356307042441013"
+            writer.write(len(imei).to_bytes(2, "big") + imei)
+            await writer.drain()
+            assert await asyncio.wait_for(reader.read(1), 2) == b"\x01"     # handshake ACK
+
+            # live job view reflects the connection + decoded record
+            await asyncio.sleep(0.2)
+            job = next(j for j in (await c.get("/api/jobs")).json() if j["id"] == jid)
+            assert job["peers"] and job["records"] >= 1
+
+            # downlink: raw hex -> device receives the bytes
+            s = await c.post(f"/api/send/{jid}", json={"peer": job["peers"][0], "mode": "hex", "value": "68656c6c6f"})
+            assert s.status_code == 200 and s.json()["sent"] == 5
+            assert await asyncio.wait_for(reader.read(5), 2) == b"hello"
+        finally:
+            writer.close()
+            await c.post(f"/api/stop/{jid}")
+            await asyncio.sleep(0.1)
+
+
 async def test_parse_stream_emits_result():
     import json as _json
 

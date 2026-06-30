@@ -263,6 +263,63 @@ pre.hex, pre.json {
 }
 .empty { color: var(--muted); font-style: italic; padding: 20px; text-align: center; }
 .muted { color: var(--muted); }
+.mono { font-family: var(--mono); }
+
+/* ---- Live TCP page ----------------------------------------------------- */
+#tcp-bar { display: flex; align-items: flex-end; gap: 12px; padding: 10px 16px; flex-wrap: wrap;
+  background: var(--panel); border-bottom: 1px solid var(--border); }
+#tcp-bar .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; align-self: center; }
+#tcp-bar .spacer { flex: 1; }
+.tcp-fld { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.tcp-fld select, .tcp-fld input { padding: 6px 8px; }
+#tcp-port { width: 90px; } #tcp-host { width: 120px; }
+#tcp-start { width: auto; padding: 7px 16px; margin: 0; }
+#tcp-msg { font-size: 12px; align-self: center; }
+#tcp-msg.ok { color: var(--accent-2); }  #tcp-msg.err { color: var(--danger); }
+
+#tcp-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 460px) 1fr; }
+#tcp-listeners-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
+#tcp-feed-pane { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+.tcp-h { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.tcp-feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.tcp-feed-head .spacer { flex: 1; }
+
+.tcp-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 10px 12px; margin-bottom: 10px; }
+.tcp-card.on { border-color: var(--accent); }
+.tcp-card.off { opacity: .7; }
+.tcp-card-head { display: flex; align-items: center; gap: 8px; }
+.tcp-card-head .spacer { flex: 1; }
+.tcp-port { font-family: var(--mono); font-weight: 700; font-size: 15px; }
+.tcp-codec-tag { font-size: 11px; color: var(--accent-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; }
+.tcp-status { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.tcp-status.running { color: var(--accent-2); }  .tcp-status.error { color: var(--danger); }
+.tcp-status.stopped, .tcp-status.done { color: var(--muted); }
+.tcp-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--muted); }
+.tcp-dot.live { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
+.tcp-dot.dead { background: #555; }
+.tcp-card-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0; }
+.tcp-card-meta .err { color: var(--danger); }
+.tcp-peers { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.tcp-peer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.tcp-peer .spacer { flex: 1; }
+button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
+
+.tcp-feed-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tcp-feed-table td { padding: 4px 8px; border-bottom: 1px solid #1a212c; white-space: nowrap; }
+.tcp-feed-table td.num { text-align: right; color: var(--muted); }
+
+.tcp-modal { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; }
+.tcp-modal-card { width: 420px; max-width: 92vw; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.tcp-modal-card h3 { margin: 0; font-size: 14px; }
+.tcp-modal-card textarea { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.tcp-modal-actions { display: flex; align-items: center; gap: 8px; }
+.tcp-modal-actions .spacer { flex: 1; }
+.tcp-modal-actions button { width: auto; margin: 0; padding: 6px 14px; }
+#tcp-send-msg { font-size: 12px; }
+#tcp-send-msg.ok { color: var(--accent-2); }  #tcp-send-msg.err { color: var(--danger); }
 
 header a.nav { color: var(--muted); text-decoration: none; font-size: 12px;
   padding: 4px 10px; border: 1px solid var(--border); border-radius: 7px; }

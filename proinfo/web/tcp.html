@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Live TCP</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="tcp">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Live TCP</h1>
+      <span class="tag">Run a TCP server — devices dial in, packets decode live and flow to the Dashboard</span>
+    </header>
+
+    <!-- start a listener -->
+    <div id="tcp-bar">
+      <span class="addbar-label">Start listener</span>
+      <label class="tcp-fld">Codec
+        <select id="tcp-codec"></select>
+      </label>
+      <label class="tcp-fld">Port
+        <input id="tcp-port" type="number" min="1" max="65535" value="5050" />
+      </label>
+      <label class="tcp-fld">Bind
+        <input id="tcp-host" type="text" value="0.0.0.0" title="0.0.0.0 = reachable on the LAN; 127.0.0.1 = local only" />
+      </label>
+      <button id="tcp-start">▶ Start</button>
+      <span class="spacer"></span>
+      <span id="tcp-msg"></span>
+    </div>
+
+    <main id="tcp-main">
+      <!-- LEFT: running listeners + connected clients -->
+      <section id="tcp-listeners-pane">
+        <h2 class="tcp-h">Listeners</h2>
+        <div id="tcp-listeners"><p class="empty">No listeners running. Start one above.</p></div>
+      </section>
+
+      <!-- RIGHT: live decoded-packet feed -->
+      <section id="tcp-feed-pane">
+        <div class="tcp-feed-head">
+          <h2 class="tcp-h">Live packets</h2>
+          <span class="spacer"></span>
+          <span id="tcp-feed-count" class="muted"></span>
+          <button id="tcp-feed-clear" class="ghost mini">Clear</button>
+        </div>
+        <div id="tcp-feed"><p class="empty">Decoded packets appear here as devices send data.</p></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- send-command popup -->
+  <div id="tcp-send-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card">
+      <h3>Send to <span id="tcp-send-peer" class="mono"></span></h3>
+      <label class="tcp-fld">Mode
+        <select id="tcp-send-mode">
+          <option value="text">Text (built via codec)</option>
+          <option value="hex">Raw hex</option>
+        </select>
+      </label>
+      <textarea id="tcp-send-value" rows="3" placeholder="e.g. getinfo   — or hex bytes if Raw hex"></textarea>
+      <div class="tcp-modal-actions">
+        <span id="tcp-send-msg"></span>
+        <span class="spacer"></span>
+        <button id="tcp-send-cancel" class="ghost">Cancel</button>
+        <button id="tcp-send-go">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="shell.js"></script>
+  <script src="tcp.js"></script>
+</body>
+</html>
