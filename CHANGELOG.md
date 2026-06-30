@@ -3,6 +3,10 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [Unreleased] — v1.0.1 (in progress)
+
+_Work continues on branch `v1.0.1`._
+
 ## [1.0.0] — 2026-06-30
 
 First release. Runway — "where telematics data lands & takes off" — parses, visualizes and
