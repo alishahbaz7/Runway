@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Signatures</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="signatures">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Signatures</h1>
+      <span class="tag">Decode-signature repository — how a parameter's bytes split into signals</span>
+    </header>
+
+    <!-- full-width add band -->
+    <div id="sig-addbar">
+      <span class="addbar-label">Add signature</span>
+      <input id="sig-name" placeholder="name (e.g. mg_zs_ev)" />
+      <input type="file" id="sig-file" accept=".json,application/json" style="display:none" />
+      <button id="sig-upload" class="ghost">⤒ Choose file</button>
+      <span id="sig-file-name"></span>
+      <span class="spacer"></span>
+      <span id="sig-msg"></span>
+      <button id="sig-download" class="ghost" disabled>⤓ Download</button>
+      <button id="sig-delete" class="ghost danger" disabled>✕ Delete</button>
+      <button id="sig-clear" class="ghost" disabled>✕ Clear</button>
+      <button id="sig-save">Save</button>
+    </div>
+
+    <main id="sig-main">
+      <!-- LEFT: repository list + search -->
+      <aside id="sig-list-pane">
+        <input id="sig-search" placeholder="🔍 find in repository…" />
+        <ul id="sig-list"><li class="empty">No signatures yet</li></ul>
+      </aside>
+
+      <!-- RIGHT: large preview -->
+      <section id="sig-view">
+        <div id="sig-view-head"><p class="empty">Upload or select a signature to preview it</p></div>
+        <div id="sig-view-body"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="shell.js"></script>
+  <script src="signatures.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Logs</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="logs">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Logs</h1>
+      <span class="tag">Runtime log — errors &amp; activity (data/runway.log)</span>
+    </header>
+
+    <div id="log-bar">
+      <input id="log-search" placeholder="🔍 filter lines…" />
+      <select id="log-source">
+        <option value="activity">Activity (all)</option>
+        <option value="errors">Errors &amp; warnings (kept)</option>
+      </select>
+      <select id="log-level">
+        <option value="">all levels</option>
+        <option value="ERROR">errors</option>
+        <option value="WARN">warnings+</option>
+      </select>
+      <label class="seg"><input type="checkbox" id="log-auto" /> auto-refresh</label>
+      <span class="spacer"></span>
+      <span id="log-info" class="muted"></span>
+      <button id="log-refresh" class="ghost">↻ Refresh</button>
+      <button id="log-download" class="ghost">⤓ Download</button>
+      <button id="log-clear" class="ghost danger">🗑 Clear</button>
+    </div>
+
+    <pre id="log-view" class="empty">Loading…</pre>
+  </div>
+
+  <script src="shell.js"></script>
+  <script src="logs.js"></script>
+</body>
+</html>

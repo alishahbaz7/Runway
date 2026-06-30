@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
 
 from ..core.interfaces import Sink
 from ..core.models import UnifiedRecord
 from ..core.registry import register_sink
+from .db import DATA_DIR
 
 log = logging.getLogger("proinfo.sqlite")
+
+DEFAULT_RECORDS_DB = os.path.join(DATA_DIR, "proinfo.db")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS records (
@@ -41,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_records_time ON records(received_at);
 class SqliteStoreSink(Sink):
     name = "sqlite_store"
 
-    def __init__(self, path: str = "proinfo.db"):
+    def __init__(self, path: str = DEFAULT_RECORDS_DB):
         self.path = path
         self._conn: sqlite3.Connection | None = None
 

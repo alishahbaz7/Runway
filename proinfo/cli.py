@@ -61,6 +61,24 @@ async def _listen(args) -> None:
 def _serve(args) -> None:
     import uvicorn
 
+    # 0.0.0.0 means "all interfaces" - the browser should still hit localhost.
+    host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+    url = f"http://{host}:{args.port}"
+
+    if not getattr(args, "no_browser", False):
+        import threading
+        import webbrowser
+
+        def _open() -> None:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass  # no browser available (headless) - the URL is printed anyway
+
+        # Fire shortly after uvicorn.run() so the server is accepting connections.
+        threading.Timer(1.5, _open).start()
+        print(f"Opening {url} in your browser... (use --no-browser to disable)")
+
     uvicorn.run("proinfo.api.app:app", host=args.host, port=args.port,
                 reload=args.reload, log_level="info")
 
@@ -91,6 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8080)
     s.add_argument("--reload", action="store_true", help="auto-reload (dev)")
+    s.add_argument("--no-browser", action="store_true",
+                   help="don't auto-open the dashboard in a browser")
     s.set_defaults(func=_serve, is_async=False)
 
     r = sub.add_parser("replay", help="parse a log / .loc / dump file")

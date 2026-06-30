@@ -51,6 +51,7 @@ class Codec(ABC):
 
     name: str = "codec"
     display_name: str = "Codec"
+    description: str = ""        # one-line summary, shown in Configuration -> Protocols
 
     def detect(self, sample: bytes) -> float:
         """Confidence in [0, 1] that this codec can parse ``sample``.

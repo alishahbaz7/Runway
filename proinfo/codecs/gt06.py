@@ -59,6 +59,8 @@ _ALARM_CODES = {
 class Gt06Codec(Codec):
     name = "gt06"
     display_name = "GT06 / Concox"
+    description = ("GT06 / Concox family (GT06N, GT02…) over TCP — login, location, "
+                   "heartbeat, GPS+LBS, alarms. 7878/7979 framing, CRC-ITU, server ACK.")
 
     def detect(self, sample: bytes) -> float:
         if sample[:2] in (b"\x78\x78", b"\x79\x79"):
