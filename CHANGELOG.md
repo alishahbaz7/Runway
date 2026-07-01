@@ -19,6 +19,13 @@ _Work continues on branch `v1.0.1`._
 - **Remembered settings**: last codec/port/bind stored in `Config`; `GET /api/listen/defaults`
   pre-fills the Start form (no auto-start — fresh-start convention kept).
 - Decoded live traffic continues to flow to the Dashboard store + WebSocket as before.
+- **Resume / Remove**: a stopped listener can be resumed **in place** (same card, same
+  config) instead of spawning a new one (`POST /api/resume/{id}`); finished/stopped cards
+  can be removed (`DELETE /api/jobs/{id}`).
+- **Raw view for unknown packets**: the live feed shows each packet's raw bytes with a
+  **HEX / ASCII** toggle — so traffic from an unmatched protocol is still readable.
+- Labels: **Codec → Protocol**, **Bind → IP**; the IP field auto-fills with this machine's
+  detected LAN IP and the page shows where devices should dial in.
 
 ### Added — Standalone build
 - **`Runway.exe`** one-file Windows build via PyInstaller (`packaging/Runway.spec` +

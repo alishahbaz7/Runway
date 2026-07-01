@@ -309,6 +309,11 @@ button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
 .tcp-feed-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tcp-feed-table td { padding: 4px 8px; border-bottom: 1px solid #1a212c; white-space: nowrap; }
 .tcp-feed-table td.num { text-align: right; color: var(--muted); }
+.tcp-feed-table td.tcp-raw { color: var(--accent-2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.tcp-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.tcp-seg .seg { width: auto; margin: 0; padding: 2px 10px; font-size: 11px; background: transparent;
+  border: none; color: var(--muted); cursor: pointer; }
+.tcp-seg .seg.on { background: var(--accent); color: #fff; }
 
 .tcp-modal { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.5);
   display: flex; align-items: center; justify-content: center; }

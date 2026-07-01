@@ -174,10 +174,21 @@ async def test_tcp_listen_connect_send_stop():
             s = await c.post(f"/api/send/{jid}", json={"peer": job["peers"][0], "mode": "hex", "value": "68656c6c6f"})
             assert s.status_code == 200 and s.json()["sent"] == 5
             assert await asyncio.wait_for(reader.read(5), 2) == b"hello"
+            # stop, then resume the SAME job id (no new job created)
+            await c.post(f"/api/stop/{jid}")
+            await asyncio.sleep(0.15)
+            before = {j["id"] for j in (await c.get("/api/jobs")).json()}
+            rr = await c.post(f"/api/resume/{jid}")
+            assert rr.status_code == 200 and rr.json()["job"]["id"] == jid
+            after = {j["id"] for j in (await c.get("/api/jobs")).json()}
+            assert after == before                          # resumed in place, no extra card
         finally:
             writer.close()
             await c.post(f"/api/stop/{jid}")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.15)
+            # can't remove while running; after stop it drops from the list
+            assert (await c.delete(f"/api/jobs/{jid}")).status_code == 200
+            assert jid not in {j["id"] for j in (await c.get("/api/jobs")).json()}
 
 
 async def test_parse_stream_emits_result():

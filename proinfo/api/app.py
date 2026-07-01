@@ -763,29 +763,35 @@ async def listen_defaults():
             "hostname": socket.gethostname()}
 
 
-@app.post("/api/listen")
-async def listen(body: ListenBody):
+def _spawn_listener(jid: str) -> None:
+    """(Re)start the TCP listener for an existing listen job using its stored config."""
     from ..sources.tcp_server import TcpServerSource
 
+    job = _jobs[jid]
+
+    async def _on_conn(kind: str, peer: str) -> None:
+        peers = source.peers()
+        j = _jobs.get(jid)
+        if j is not None:
+            j["peers"] = peers
+        await hub.publish({"type": "conn", "data": {"job": jid, "peer": peer,
+                                                    "state": kind, "peers": peers,
+                                                    "port": job["port"]}})
+
+    source = TcpServerSource(host=job["host"], port=job["port"], on_event=_on_conn)
+    _spawn(jid, Pipeline(source, job["codec"], _default_sinks()))
+
+
+@app.post("/api/listen")
+async def listen(body: ListenBody):
     registry.load_plugins()
     if body.codec != "auto" and body.codec not in registry.CODECS:
         raise HTTPException(400, f"unknown codec '{body.codec}'")
 
     jid = _new_job("listen", codec=body.codec, host=body.host, port=body.port,
                    started=time.time(), peers=[])
-
-    async def _on_conn(kind: str, peer: str) -> None:
-        job = _jobs.get(jid)
-        peers = source.peers()
-        if job is not None:
-            job["peers"] = peers
-        await hub.publish({"type": "conn", "data": {"job": jid, "peer": peer,
-                                                    "state": kind, "peers": peers,
-                                                    "port": body.port}})
-
-    source = TcpServerSource(host=body.host, port=body.port, on_event=_on_conn)
     try:
-        _spawn(jid, Pipeline(source, body.codec, _default_sinks()))
+        _spawn_listener(jid)
     except Exception as exc:
         _jobs[jid].update(status="error", error=str(exc))
         raise HTTPException(500, f"could not start listener: {exc}")
@@ -795,6 +801,25 @@ async def listen(body: ListenBody):
     config.set("default_listen_port", body.port)
     config.set("default_codec", body.codec)
     return {"job": _job_view(jid)}
+
+
+@app.post("/api/resume/{job_id}")
+async def resume(job_id: str):
+    """Resume a stopped/finished listener under the SAME job id (no new card)."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.get("kind") != "listen":
+        raise HTTPException(400, "only listener jobs can be resumed")
+    if job_id in _tasks:
+        return {"job": _job_view(job_id)}                 # already running
+    job.update(status="pending", started=time.time(), peers=[], records=0, bytes=0, error=None)
+    try:
+        _spawn_listener(job_id)
+    except Exception as exc:
+        job.update(status="error", error=str(exc))
+        raise HTTPException(500, f"could not resume listener: {exc}")
+    return {"job": _job_view(job_id)}
 
 
 @app.post("/api/send/{job_id}")
@@ -831,6 +856,16 @@ async def stop(job_id: str):
         raise HTTPException(404, "job not running")
     task.cancel()
     return {"stopped": job_id}
+
+
+@app.delete("/api/jobs/{job_id}")
+async def remove_job(job_id: str):
+    """Drop a finished/stopped job from the list (must not be running)."""
+    if job_id in _tasks:
+        raise HTTPException(400, "stop the job before removing it")
+    _jobs.pop(job_id, None)
+    _pipelines.pop(job_id, None)
+    return {"removed": job_id}
 
 
 @app.delete("/api/data")

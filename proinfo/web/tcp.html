@@ -43,6 +43,9 @@
       <section id="tcp-feed-pane">
         <div class="tcp-feed-head">
           <h2 class="tcp-h">Live packets</h2>
+          <span class="tcp-seg" title="how to show raw/unknown packet bytes">
+            <button id="tcp-fmt-hex" class="seg on">HEX</button><button id="tcp-fmt-ascii" class="seg">ASCII</button>
+          </span>
           <span class="spacer"></span>
           <span id="tcp-feed-count" class="muted"></span>
           <button id="tcp-feed-clear" class="ghost mini">Clear</button>

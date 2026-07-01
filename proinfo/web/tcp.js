@@ -34,6 +34,24 @@
   const MAX_FEED = 200;
   let sendCtx = null;              // { job, peer } for the modal
   let LOCAL_IP = "";               // this machine's auto-detected LAN IP
+  let rawFmt = "hex";              // how to render raw/unknown packet bytes: "hex" | "ascii"
+
+  const hexSpaced = (h) => (h.match(/.{1,2}/g) || []).join(" ").toUpperCase();
+  function hexToAscii(h) {
+    let s = "";
+    for (let i = 0; i + 1 < h.length; i += 2) {
+      const b = parseInt(h.substr(i, 2), 16);
+      s += (b >= 32 && b < 127) ? String.fromCharCode(b) : ".";
+    }
+    return s;
+  }
+  function rawView(hex) {
+    if (!hex) return "";
+    const CAP = 48;                                   // show up to 24 bytes
+    const shown = hex.length > CAP ? hex.slice(0, CAP) : hex;
+    const more = hex.length > CAP ? " …" : "";
+    return (rawFmt === "ascii" ? hexToAscii(shown) : hexSpaced(shown)) + more;
+  }
 
   // ---- start form --------------------------------------------------------
   async function loadCodecs(selected) {
@@ -75,6 +93,19 @@
     try { await api("/api/stop/" + jid, { method: "POST" }); msg("tcp-msg", "ok", "stopped " + jid); }
     catch (e) { msg("tcp-msg", "err", "stop failed: " + e.message); }
   }
+  async function resumeJob(jid) {
+    try {
+      const r = await api("/api/resume/" + jid, { method: "POST" });
+      jobs.set(jid, { ...jobs.get(jid), ...r.job });
+      renderListeners();
+      msg("tcp-msg", "ok", "resumed " + jid);
+    } catch (e) { msg("tcp-msg", "err", "resume failed: " + e.message); }
+  }
+  async function removeJob(jid) {
+    try { await api("/api/jobs/" + jid, { method: "DELETE" }); } catch (e) { /* ignore */ }
+    jobs.delete(jid);
+    renderListeners();
+  }
 
   // ---- listeners (left) --------------------------------------------------
   function renderListeners() {
@@ -92,11 +123,18 @@
       head.append(el("span", "tcp-port", ":" + j.port));
       head.append(el("span", "tcp-codec-tag", j.codec));
       head.append(el("span", "tcp-status " + j.status, j.status));
-      const sp = el("span", "spacer"); head.append(sp);
+      head.append(el("span", "spacer"));
       if (running) {
         const stop = el("button", "ghost mini danger", "■ Stop");
         stop.onclick = () => stopJob(j.id);
         head.append(stop);
+      } else {
+        const res = el("button", "ghost mini", "▶ Resume");
+        res.onclick = () => resumeJob(j.id);
+        const rm = el("button", "ghost mini", "✕");
+        rm.title = "remove from list";
+        rm.onclick = () => removeJob(j.id);
+        head.append(res, rm);
       }
       card.append(head);
 
@@ -162,11 +200,20 @@
       tr.append(el("td", "", r.message_type || ""));
       tr.append(el("td", "mono", pos));
       tr.append(el("td", "num", r.speed_kph != null ? r.speed_kph : ""));
+      tr.append(el("td", "mono tcp-raw", rawView(r.raw_hex)));
       tb.append(tr);
     });
     t.append(tb); host.append(t);
   }
   $("tcp-feed-clear").addEventListener("click", () => { feed.length = 0; renderFeed(); });
+  function setRawFmt(fmt) {
+    rawFmt = fmt;
+    $("tcp-fmt-hex").classList.toggle("on", fmt === "hex");
+    $("tcp-fmt-ascii").classList.toggle("on", fmt === "ascii");
+    renderFeed();
+  }
+  $("tcp-fmt-hex").addEventListener("click", () => setRawFmt("hex"));
+  $("tcp-fmt-ascii").addEventListener("click", () => setRawFmt("ascii"));
 
   // ---- send-command modal ------------------------------------------------
   function openSend(job, peer) {
