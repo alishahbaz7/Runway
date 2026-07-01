@@ -243,6 +243,7 @@ async def _run(jid: str, pipeline: Pipeline) -> None:
         job.update(status="error", error=str(exc))
         log.exception("job %s failed", jid)
     finally:
+        job["ended"] = time.time()                        # freeze uptime once it stops
         await hub.publish({"type": "job", "data": _job_view(jid)})
         _tasks.pop(jid, None)
         _pipelines.pop(jid, None)
@@ -813,7 +814,8 @@ async def resume(job_id: str):
         raise HTTPException(400, "only listener jobs can be resumed")
     if job_id in _tasks:
         return {"job": _job_view(job_id)}                 # already running
-    job.update(status="pending", started=time.time(), peers=[], records=0, bytes=0, error=None)
+    job.update(status="pending", started=time.time(), ended=None, peers=[],
+               records=0, bytes=0, error=None)
     try:
         _spawn_listener(job_id)
     except Exception as exc:

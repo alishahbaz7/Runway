@@ -25,7 +25,11 @@ _Work continues on branch `v1.0.1`._
 - **Raw view for unknown packets**: the live feed shows each packet's raw bytes with a
   **HEX / ASCII** toggle — so traffic from an unmatched protocol is still readable.
 - Labels: **Codec → Protocol**, **Bind → IP**; the IP field auto-fills with this machine's
-  detected LAN IP and the page shows where devices should dial in.
+  detected LAN IP and the page shows where devices should dial in. Protocol defaults to
+  **Auto**; the **last-used port** is remembered.
+- Fixes: a stopped listener's uptime now **freezes** (it no longer keeps counting after the
+  server/listener stops). Tests run against an isolated `RUNWAY_DATA_DIR` temp folder so they
+  never overwrite your real remembered settings.
 
 ### Added — Standalone build
 - **`Runway.exe`** one-file Windows build via PyInstaller (`packaging/Runway.spec` +

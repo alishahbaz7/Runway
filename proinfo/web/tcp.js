@@ -72,7 +72,7 @@
       $("tcp-localip").textContent = LOCAL_IP
         ? `This machine: ${LOCAL_IP}${d.hostname ? " (" + d.hostname + ")" : ""} — devices dial in here`
         : "";
-      await loadCodecs(d.codec);
+      await loadCodecs("auto");            // Protocol defaults to Auto (detect)
     } catch (e) { await loadCodecs("auto"); }
   }
 
@@ -139,10 +139,12 @@
       card.append(head);
 
       const meta = el("div", "tcp-card-meta");
-      const up = j.started ? fmtDur(Date.now() / 1000 - j.started) : "—";
-      meta.dataset.started = j.started || "";
+      // Running: tick from `started`. Stopped: freeze at `ended - started`.
+      const upSecs = running && j.started ? (Date.now() / 1000 - j.started)
+        : (j.started && j.ended ? (j.ended - j.started) : null);
+      meta.dataset.started = running && j.started ? j.started : "";   // only running ticks
       if (running) meta.append(el("span", "tcp-reach", `📶 ${(LOCAL_IP || j.host)}:${j.port}`));
-      meta.append(el("span", "", `▲ ${up}`));
+      meta.append(el("span", "tcp-up", `▲ ${upSecs == null ? "—" : fmtDur(upSecs)}`));
       meta.append(el("span", "", `${j.records || 0} records`));
       meta.append(el("span", "", fmtBytes(j.bytes)));
       const peers = j.peers || [];
@@ -172,8 +174,9 @@
   // tick uptimes once a second without re-fetching
   setInterval(() => {
     $("tcp-listeners").querySelectorAll(".tcp-card-meta").forEach((m) => {
-      const st = Number(m.dataset.started);
-      if (st) m.firstChild.textContent = "▲ " + fmtDur(Date.now() / 1000 - st);
+      const st = Number(m.dataset.started);          // only set for running listeners
+      const up = m.querySelector(".tcp-up");
+      if (st && up) up.textContent = "▲ " + fmtDur(Date.now() / 1000 - st);
     });
   }, 1000);
 
