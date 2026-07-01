@@ -20,6 +20,12 @@ _Work continues on branch `v1.0.1`._
   pre-fills the Start form (no auto-start — fresh-start convention kept).
 - Decoded live traffic continues to flow to the Dashboard store + WebSocket as before.
 
+### Added — Standalone build
+- **`Runway.exe`** one-file Windows build via PyInstaller (`packaging/Runway.spec` +
+  `packaging/runway_main.py`) — teammates run it with no Python install; double-click starts
+  the server + opens the dashboard. `DATA_DIR`/`WEB_DIR` are now frozen-aware and plugin
+  discovery has a frozen fallback so codecs still load inside the exe. See `packaging/README.md`.
+
 ## [1.0.0] — 2026-06-30
 
 First release. Runway — "where telematics data lands & takes off" — parses, visualizes and

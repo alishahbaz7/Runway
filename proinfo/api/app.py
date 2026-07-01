@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import re
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -46,7 +47,11 @@ from ..storage.live import config, db, hub, store
 
 log = logging.getLogger("proinfo.api")
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+# Static UI. When frozen (PyInstaller), it's bundled under _MEIPASS/proinfo/web.
+if getattr(sys, "frozen", False):
+    WEB_DIR = Path(getattr(sys, "_MEIPASS", ".")) / "proinfo" / "web"
+else:
+    WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 UPLOAD_DIR = Path(DATA_DIR) / "uploads"
 SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signature files
 SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)

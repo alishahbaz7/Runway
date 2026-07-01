@@ -1,0 +1,48 @@
+# PyInstaller spec — builds a standalone one-file Runway.exe.
+#
+#   pip install pyinstaller
+#   pyinstaller packaging/Runway.spec --noconfirm       # run from the REPO ROOT
+#
+# Output: dist/Runway.exe  (double-click to start the server + open the dashboard).
+# A `data/` folder is created next to the exe on first run (db, logs, repositories).
+#
+# One-file build: passing a.binaries + a.datas into EXE (no COLLECT) makes it one-file.
+
+from PyInstaller.utils.hooks import collect_submodules
+
+# Paths in a .spec are relative to the spec's folder (packaging/), so reach up with ../.
+# Bundle the static web UI at proinfo/web (app.py looks for it under _MEIPASS/proinfo/web).
+datas = [("../proinfo/web", "proinfo/web")]
+
+# uvicorn loads its protocol/loop backends by string; websockets and the proinfo plugins
+# are imported dynamically — collect them all so nothing is missing at runtime.
+hiddenimports = (
+    collect_submodules("uvicorn")
+    + collect_submodules("proinfo")
+    + collect_submodules("websockets")
+    + ["multipart", "anyio"]
+)
+
+a = Analysis(
+    ["runway_main.py"],
+    pathex=[".."],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=["tkinter", "matplotlib", "numpy", "pandas", "pytest"],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name="Runway",
+    console=True,          # show the startup banner + URL + logs while testing
+    upx=False,
+)

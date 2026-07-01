@@ -39,15 +39,26 @@ def register_sink(cls: Type[Sink]) -> Type[Sink]:
     return cls
 
 
+# When frozen (PyInstaller), pkgutil.iter_modules can come up empty for a package that
+# lives inside the archive. Fall back to this explicit list so plugins still register.
+# Keep in sync when adding a plugin module (the normal filesystem path needs no change).
+_FROZEN_FALLBACK = {
+    "proinfo.codecs": ["teltonika", "gt06", "nmea", "generic_hex", "custom_template"],
+    "proinfo.sources": ["file_replay", "tcp_server"],
+    "proinfo.sinks": ["console", "memory_store", "ws_broadcast", "webhook", "tcp_relay"],
+}
+
+
 def _discover(package_name: str) -> None:
     pkg = importlib.import_module(package_name)
-    for mod in pkgutil.iter_modules(pkg.__path__):
-        if mod.name.startswith("_"):
-            continue
+    names = [m.name for m in pkgutil.iter_modules(pkg.__path__) if not m.name.startswith("_")]
+    if not names:                                    # frozen / empty — use the fallback list
+        names = _FROZEN_FALLBACK.get(package_name, [])
+    for name in names:
         try:
-            importlib.import_module(f"{package_name}.{mod.name}")
+            importlib.import_module(f"{package_name}.{name}")
         except Exception:  # a broken plugin must not take the whole app down
-            log.exception("Failed to import plugin module %s.%s", package_name, mod.name)
+            log.exception("Failed to import plugin module %s.%s", package_name, name)
 
 
 def load_plugins(force: bool = False) -> None:
