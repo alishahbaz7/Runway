@@ -276,6 +276,8 @@ pre.hex, pre.json {
 #tcp-start { width: auto; padding: 7px 16px; margin: 0; }
 #tcp-msg { font-size: 12px; align-self: center; }
 #tcp-msg.ok { color: var(--accent-2); }  #tcp-msg.err { color: var(--danger); }
+.tcp-localip { font-size: 12px; color: var(--muted); align-self: center; font-family: var(--mono); }
+.tcp-reach { font-family: var(--mono); color: var(--accent-2); }
 
 #tcp-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 460px) 1fr; }
 #tcp-listeners-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }

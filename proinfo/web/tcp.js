@@ -33,6 +33,7 @@
   const feed = [];                 // recent decoded records
   const MAX_FEED = 200;
   let sendCtx = null;              // { job, peer } for the modal
+  let LOCAL_IP = "";               // this machine's auto-detected LAN IP
 
   // ---- start form --------------------------------------------------------
   async function loadCodecs(selected) {
@@ -47,7 +48,12 @@
   async function loadDefaults() {
     try {
       const d = await api("/api/listen/defaults");
-      $("tcp-port").value = d.port; $("tcp-host").value = d.host;
+      LOCAL_IP = d.local_ip || "";
+      $("tcp-port").value = d.port;
+      $("tcp-host").value = d.local_ip || d.host || "0.0.0.0";   // auto-filled with this machine's IP
+      $("tcp-localip").textContent = LOCAL_IP
+        ? `This machine: ${LOCAL_IP}${d.hostname ? " (" + d.hostname + ")" : ""} — devices dial in here`
+        : "";
       await loadCodecs(d.codec);
     } catch (e) { await loadCodecs("auto"); }
   }
@@ -97,6 +103,7 @@
       const meta = el("div", "tcp-card-meta");
       const up = j.started ? fmtDur(Date.now() / 1000 - j.started) : "—";
       meta.dataset.started = j.started || "";
+      if (running) meta.append(el("span", "tcp-reach", `📶 ${(LOCAL_IP || j.host)}:${j.port}`));
       meta.append(el("span", "", `▲ ${up}`));
       meta.append(el("span", "", `${j.records || 0} records`));
       meta.append(el("span", "", fmtBytes(j.bytes)));

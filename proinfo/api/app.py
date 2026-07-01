@@ -731,12 +731,36 @@ async def replay_path(body: ReplayPathBody):
     return {"job": _jobs[jid]}
 
 
+def _local_ip() -> str:
+    """Best-effort primary LAN IP of this machine (the address devices dial into).
+
+    Opens a UDP socket toward a public address to learn the outbound interface — no
+    packets are actually sent. Falls back to the hostname lookup, then localhost.
+    """
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
 @app.get("/api/listen/defaults")
 async def listen_defaults():
-    """Last-used listener settings (for pre-filling the Start form)."""
+    """Last-used listener settings + the auto-detected local IP (for the Start form)."""
+    import socket
     return {"host": config.get("default_listen_host", "0.0.0.0"),
             "port": config.get("default_listen_port", 5050),
-            "codec": config.get("default_codec", "auto")}
+            "codec": config.get("default_codec", "auto"),
+            "local_ip": _local_ip(),
+            "hostname": socket.gethostname()}
 
 
 @app.post("/api/listen")
