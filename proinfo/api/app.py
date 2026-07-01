@@ -856,6 +856,10 @@ async def stop(job_id: str):
     task = _tasks.get(job_id)
     if task is None:
         raise HTTPException(404, "job not running")
+    job = _jobs.get(job_id)
+    if job is not None:                       # reflect immediately so a poll mid-cancel
+        job["status"] = "stopped"             # never sees it back as "running"
+        job["ended"] = time.time()
     task.cancel()
     return {"stopped": job_id}
 

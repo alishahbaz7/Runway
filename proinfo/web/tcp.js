@@ -34,7 +34,9 @@
   const MAX_FEED = 200;
   let sendCtx = null;              // { job, peer } for the modal
   let LOCAL_IP = "";               // this machine's auto-detected LAN IP
+  const RAWFMT_KEY = "runway.tcp.rawfmt";   // persisted view mode (retained until changed)
   let rawFmt = "hex";              // how to render raw/unknown packet bytes: "hex" | "ascii"
+  try { rawFmt = localStorage.getItem(RAWFMT_KEY) || "hex"; } catch (e) { /* ignore */ }
 
   const hexSpaced = (h) => (h.match(/.{1,2}/g) || []).join(" ").toUpperCase();
   function hexToAscii(h) {
@@ -47,19 +49,20 @@
   }
   function rawView(hex) {
     if (!hex) return "";
-    const CAP = 48;                                   // show up to 24 bytes
-    const shown = hex.length > CAP ? hex.slice(0, CAP) : hex;
-    const more = hex.length > CAP ? " …" : "";
-    return (rawFmt === "ascii" ? hexToAscii(shown) : hexSpaced(shown)) + more;
+    return rawFmt === "ascii" ? hexToAscii(hex) : hexSpaced(hex);   // complete packet (cell wraps)
   }
 
   // ---- start form --------------------------------------------------------
   async function loadCodecs(selected) {
     const sel = $("tcp-codec");
     sel.innerHTML = "";
-    sel.appendChild(new Option("auto (detect)", "auto"));
+    sel.appendChild(new Option("Auto (detect)", "auto"));
+    sel.appendChild(new Option("Generic (raw — no protocol)", "generic_hex"));
     try {
-      (await api("/api/codecs")).forEach((c) => sel.appendChild(new Option(c.display_name || c.name, c.name)));
+      (await api("/api/codecs")).forEach((c) => {
+        if (c.name === "generic_hex" || c.name === "custom_template") return;  // surfaced above / hidden
+        sel.appendChild(new Option(c.display_name || c.name, c.name));
+      });
     } catch (e) { /* ignore */ }
     if (selected) sel.value = selected;
   }
@@ -90,8 +93,13 @@
   });
 
   async function stopJob(jid) {
-    try { await api("/api/stop/" + jid, { method: "POST" }); msg("tcp-msg", "ok", "stopped " + jid); }
-    catch (e) { msg("tcp-msg", "err", "stop failed: " + e.message); }
+    try {
+      await api("/api/stop/" + jid, { method: "POST" });
+      const j = jobs.get(jid);                        // optimistic: flip + freeze uptime now
+      if (j) { j.status = "stopped"; j.ended = j.ended || Date.now() / 1000; }
+      renderListeners();
+      msg("tcp-msg", "ok", "stopped " + jid);
+    } catch (e) { msg("tcp-msg", "err", "stop failed: " + e.message); }
   }
   async function resumeJob(jid) {
     try {
@@ -102,6 +110,9 @@
     } catch (e) { msg("tcp-msg", "err", "resume failed: " + e.message); }
   }
   async function removeJob(jid) {
+    const j = jobs.get(jid);
+    const label = j ? `:${j.port} (${j.codec})` : jid;
+    if (!window.confirm(`Remove listener ${label} from the list?`)) return;
     try { await api("/api/jobs/" + jid, { method: "DELETE" }); } catch (e) { /* ignore */ }
     jobs.delete(jid);
     renderListeners();
@@ -120,7 +131,12 @@
 
       const head = el("div", "tcp-card-head");
       head.append(el("span", "tcp-dot " + (running ? "live" : "dead")));
-      head.append(el("span", "tcp-port", ":" + j.port));
+      // Full reachable address (IP:port) — the address to give devices. Shown consistently
+      // whether running or stopped (same order), once (no separate reachable line).
+      const addr = (LOCAL_IP || j.host) ? `${LOCAL_IP || j.host}:${j.port}` : `:${j.port}`;
+      const portEl = el("span", "tcp-port", addr);
+      portEl.title = "point devices to this address";
+      head.append(portEl);
       head.append(el("span", "tcp-codec-tag", j.codec));
       head.append(el("span", "tcp-status " + j.status, j.status));
       head.append(el("span", "spacer"));
@@ -129,12 +145,13 @@
         stop.onclick = () => stopJob(j.id);
         head.append(stop);
       } else {
-        const res = el("button", "ghost mini", "▶ Resume");
-        res.onclick = () => resumeJob(j.id);
-        const rm = el("button", "ghost mini", "✕");
+        // ✕ first (left, with a gap), Resume rightmost — same slot Stop occupies when running.
+        const rm = el("button", "ghost mini tcp-x", "✕");
         rm.title = "remove from list";
         rm.onclick = () => removeJob(j.id);
-        head.append(res, rm);
+        const res = el("button", "ghost mini", "▶ Resume");
+        res.onclick = () => resumeJob(j.id);
+        head.append(rm, res);
       }
       card.append(head);
 
@@ -143,7 +160,6 @@
       const upSecs = running && j.started ? (Date.now() / 1000 - j.started)
         : (j.started && j.ended ? (j.ended - j.started) : null);
       meta.dataset.started = running && j.started ? j.started : "";   // only running ticks
-      if (running) meta.append(el("span", "tcp-reach", `📶 ${(LOCAL_IP || j.host)}:${j.port}`));
       meta.append(el("span", "tcp-up", `▲ ${upSecs == null ? "—" : fmtDur(upSecs)}`));
       meta.append(el("span", "", `${j.records || 0} records`));
       meta.append(el("span", "", fmtBytes(j.bytes)));
@@ -194,29 +210,64 @@
     const t = el("table", "tcp-feed-table");
     const tb = el("tbody");
     feed.forEach((r) => {
-      const tr = el("tr");
+      const tr = el("tr", "tcp-feed-row");
+      tr.title = "click to see the full packet";
+      tr.onclick = () => openPacket(r);
       const tm = r.event_time ? new Date(r.event_time).toLocaleTimeString() : "";
-      const pos = (r.position && r.position.latitude != null)
-        ? `${r.position.latitude.toFixed(5)}, ${r.position.longitude.toFixed(5)}` : "";
-      tr.append(el("td", "muted", tm));
-      tr.append(el("td", "mono", r.device_id || ""));
-      tr.append(el("td", "", r.message_type || ""));
-      tr.append(el("td", "mono", pos));
-      tr.append(el("td", "num", r.speed_kph != null ? r.speed_kph : ""));
-      tr.append(el("td", "mono tcp-raw", rawView(r.raw_hex)));
+      tr.append(el("td", "muted tcp-time", tm));
+      // Generic / unmatched packet: just timestamp + the complete packet (no wrap).
+      const isRaw = r.message_type === "raw" || r.protocol === "generic_hex";
+      if (isRaw) {
+        const pkt = el("td", "mono tcp-raw", rawView(r.raw_hex));
+        pkt.colSpan = 4;
+        tr.append(pkt);
+      } else {
+        const pos = (r.position && r.position.latitude != null)
+          ? `${r.position.latitude.toFixed(5)}, ${r.position.longitude.toFixed(5)}` : "";
+        tr.append(el("td", "mono", r.device_id || ""));
+        tr.append(el("td", "", r.message_type || ""));
+        tr.append(el("td", "mono", pos));
+        tr.append(el("td", "num", r.speed_kph != null ? r.speed_kph : ""));
+      }
       tb.append(tr);
     });
     t.append(tb); host.append(t);
   }
   $("tcp-feed-clear").addEventListener("click", () => { feed.length = 0; renderFeed(); });
+
+  // full-packet view (click a feed row) — complete HEX + ASCII, untruncated
+  function asciiFull(hex) {
+    let s = "";
+    for (let i = 0; i + 1 < hex.length; i += 2) {
+      const b = parseInt(hex.substr(i, 2), 16);
+      s += (b === 10 || b === 13) ? "\n" : (b >= 32 && b < 127) ? String.fromCharCode(b) : ".";
+    }
+    return s;
+  }
+  function openPacket(r) {
+    const hex = r.raw_hex || "";
+    const bytes = hex.length / 2;
+    const when = r.event_time ? new Date(r.event_time).toLocaleString() : "";
+    $("tcp-pkt-meta").textContent =
+      `${r.device_id || "—"} · ${r.message_type || ""} · ${bytes} bytes${when ? " · " + when : ""}`;
+    $("tcp-pkt-ascii").textContent = hex ? asciiFull(hex) : "(no raw bytes on this record)";
+    $("tcp-pkt-hex").textContent = hex ? hexSpaced(hex) : "";
+    $("tcp-pkt-modal").style.display = "flex";
+  }
+  $("tcp-pkt-close").addEventListener("click", () => { $("tcp-pkt-modal").style.display = "none"; });
+  $("tcp-pkt-modal").addEventListener("click", (e) => {
+    if (e.target.id === "tcp-pkt-modal") $("tcp-pkt-modal").style.display = "none";
+  });
   function setRawFmt(fmt) {
     rawFmt = fmt;
+    try { localStorage.setItem(RAWFMT_KEY, fmt); } catch (e) { /* ignore */ }
     $("tcp-fmt-hex").classList.toggle("on", fmt === "hex");
     $("tcp-fmt-ascii").classList.toggle("on", fmt === "ascii");
     renderFeed();
   }
   $("tcp-fmt-hex").addEventListener("click", () => setRawFmt("hex"));
   $("tcp-fmt-ascii").addEventListener("click", () => setRawFmt("ascii"));
+  setRawFmt(rawFmt);               // apply the retained view mode on load
 
   // ---- send-command modal ------------------------------------------------
   function openSend(job, peer) {
@@ -255,7 +306,13 @@
     sock.onerror = () => sock.close();
     sock.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
-      if (m.type === "record") {
+      if (m.type === "snapshot") {
+        // Re-seed the feed from the server's recent buffer so returning to this page
+        // (e.g. after visiting the Dashboard) doesn't come back empty.
+        feed.length = 0;
+        (m.data.recent || []).slice(-MAX_FEED).reverse().forEach((r) => feed.push(r));
+        renderFeed();
+      } else if (m.type === "record") {
         pushFeed(m.data);
       } else if (m.type === "job") {
         jobs.set(m.data.id, { ...jobs.get(m.data.id), ...m.data });
@@ -270,5 +327,6 @@
 
   loadDefaults();
   refreshJobs();
+  setInterval(refreshJobs, 2500);        // keep listener status / records / clients live
   connect();
 })();

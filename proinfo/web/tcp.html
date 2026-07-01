@@ -75,6 +75,21 @@
     </div>
   </div>
 
+  <!-- full packet view -->
+  <div id="tcp-pkt-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card tcp-pkt-card">
+      <div class="tcp-pkt-head">
+        <h3>Packet</h3><span class="spacer"></span>
+        <button id="tcp-pkt-close" class="ghost mini">✕ Close</button>
+      </div>
+      <div id="tcp-pkt-meta" class="muted"></div>
+      <h4 class="tcp-pkt-h">ASCII</h4>
+      <pre id="tcp-pkt-ascii" class="json"></pre>
+      <h4 class="tcp-pkt-h">HEX</h4>
+      <pre id="tcp-pkt-hex" class="json"></pre>
+    </div>
+  </div>
+
   <script src="shell.js"></script>
   <script src="tcp.js"></script>
 </body>

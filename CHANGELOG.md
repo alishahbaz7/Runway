@@ -3,9 +3,10 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [Unreleased] — v1.0.1 (in progress)
+## [1.1.0] — 2026-06-30
 
-_Work continues on branch `v1.0.1`._
+Feature release. Headline: a **Live TCP server**. Also adds the **Protocols** repository,
+the **Converter** (CanPlus XML → JSON/DBC), and a **standalone `Runway.exe`** build.
 
 ### Added — Live TCP server (headline feature)
 - **Capture → Live TCP** page: start a TCP listener (codec + port + bind address), see all
@@ -30,6 +31,12 @@ _Work continues on branch `v1.0.1`._
 - Fixes: a stopped listener's uptime now **freezes** (it no longer keeps counting after the
   server/listener stops). Tests run against an isolated `RUNWAY_DATA_DIR` temp folder so they
   never overwrite your real remembered settings.
+- **Generic listener**: explicit "Generic (raw)" protocol option; generic/unmatched rows show
+  **timestamp + the complete packet** (no wrap, horizontal scroll for any length); click a row
+  for the full HEX/ASCII view.
+- UX: listeners show a single consistent `IP:port`; **Stop/Resume** stay in one position with a
+  spaced, confirming **Remove**; live card refresh + instant Stop; the packet feed persists
+  across navigation (re-seeds from the server snapshot). The HEX/ASCII view mode is remembered.
 
 ### Added — Standalone build
 - **`Runway.exe`** one-file Windows build via PyInstaller (`packaging/Runway.spec` +
@@ -78,4 +85,5 @@ relays telematics packets from any IoT tracking device, regardless of OEM/protoc
   endpoints; not a registered plugin), so the pipeline, dashboard and live store/hub are
   unaffected.
 
+[1.1.0]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.0
 [1.0.0]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.0.0

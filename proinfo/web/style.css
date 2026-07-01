@@ -282,6 +282,7 @@ pre.hex, pre.json {
 #tcp-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 460px) 1fr; }
 #tcp-listeners-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
 #tcp-feed-pane { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+#tcp-feed { overflow-x: auto; }        /* let a complete no-wrap packet scroll horizontally */
 .tcp-h { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
 .tcp-feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tcp-feed-head .spacer { flex: 1; }
@@ -305,11 +306,22 @@ pre.hex, pre.json {
 .tcp-peer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .tcp-peer .spacer { flex: 1; }
 button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
+/* destructive remove: sits left of Resume with a gap + muted until hovered, to avoid misclicks */
+button.ghost.mini.tcp-x { margin-right: 16px; color: var(--muted); }
+button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
 
 .tcp-feed-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .tcp-feed-table td { padding: 4px 8px; border-bottom: 1px solid #1a212c; white-space: nowrap; }
 .tcp-feed-table td.num { text-align: right; color: var(--muted); }
-.tcp-feed-table td.tcp-raw { color: var(--accent-2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.tcp-feed-table td.tcp-raw { color: var(--accent-2); white-space: nowrap; }  /* complete packet, no wrap */
+.tcp-feed-table td.tcp-time { white-space: nowrap; vertical-align: top; }
+.tcp-feed-row { cursor: pointer; }
+.tcp-feed-row:hover td { background: var(--panel-2); }
+.tcp-pkt-card { width: 720px; max-width: 94vw; max-height: 86vh; overflow: auto; }
+.tcp-pkt-head { display: flex; align-items: center; }
+.tcp-pkt-head h3 { margin: 0; }
+.tcp-pkt-h { margin: 12px 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+#tcp-pkt-ascii, #tcp-pkt-hex { max-height: 260px; }
 .tcp-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .tcp-seg .seg { width: auto; margin: 0; padding: 2px 10px; font-size: 11px; background: transparent;
   border: none; color: var(--muted); cursor: pointer; }
