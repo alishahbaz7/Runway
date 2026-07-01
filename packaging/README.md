@@ -13,6 +13,25 @@ pyinstaller packaging/Runway.spec --noconfirm
 
 Output: **`dist/Runway.exe`** (~26 MB).
 
+## Build a shareable ZIP (recommended for handoff)
+
+```bash
+python packaging/build_release.py            # builds the exe if missing, then zips
+python packaging/build_release.py --rebuild  # force a fresh exe build first
+```
+
+Output: **`dist/Runway-<version>-win64.zip`** — unpacks to one folder containing:
+
+```
+Runway.exe            the standalone app (no Python needed)
+GETTING_STARTED.txt   how to run + test
+CHANGELOG.md          what's in this build
+samples/              demo inputs (teltonika_demo.hex, nmea_sample.log) to try
+```
+
+Send that ZIP to your teammate. Neither the exe nor the ZIP is committed to git
+(`dist/` is ignored) — rebuild it, or attach the ZIP to a GitHub Release.
+
 ## Run / share
 
 - Send `dist/Runway.exe` to your teammate (it's fully self-contained).
