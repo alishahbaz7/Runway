@@ -43,7 +43,7 @@ from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..core.pipeline import Pipeline
 from ..storage.db import DATA_DIR
-from ..storage.live import config, db, hub, store
+from ..storage.live import config, db, hub, packet_log, store
 
 log = logging.getLogger("proinfo.api")
 
@@ -209,6 +209,13 @@ class SendBody(BaseModel):
     peer: str                          # "ip:port" of a connected device
     mode: str = "text"                 # "text" (built via codec) | "hex" (raw bytes)
     value: str = ""
+
+
+class LogStartBody(BaseModel):
+    fmt: str = "txt"                   # txt | csv
+    raw: str = "ascii"                 # ascii | hex
+    name: str = ""                     # file name (blank = auto, timestamped)
+    directory: str = ""                # folder (blank = server data/logs)
     signature: dict = {}
     status: str = "draft"
 
@@ -262,8 +269,15 @@ def _job_view(jid: str) -> dict:
         job["records"] = pipe.records_emitted
         job["bytes"] = pipe.bytes_in
         src = getattr(pipe, "source", None)
-        if src is not None and hasattr(src, "peers"):
-            job["peers"] = src.peers()
+        connected = set(src.peers()) if (src is not None and hasattr(src, "peers")) else set()
+        job["peers"] = sorted(connected)
+        per = getattr(pipe, "per_peer", {}) or {}
+        job["clients"] = [
+            {"peer": p, "records": per.get(p, {}).get("records", 0),
+             "bytes": per.get(p, {}).get("bytes", 0), "last": per.get(p, {}).get("last", 0),
+             "connected": p in connected}
+            for p in sorted(set(per) | connected) if p and p != "?"
+        ]
     return job
 
 
@@ -878,6 +892,37 @@ async def remove_job(job_id: str):
 async def clear_data():
     store.clear()
     return {"cleared": True}
+
+
+# --------------------------------------------------------------------------- #
+# Continuous packet logging (server-side; start/stop, then download the file).
+# --------------------------------------------------------------------------- #
+@app.get("/api/log/status")
+async def log_status():
+    return packet_log.status()
+
+
+@app.post("/api/log/start")
+async def log_start(body: LogStartBody):
+    try:
+        return packet_log.start(body.fmt, body.raw, body.name, body.directory)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        raise HTTPException(400, f"could not open log file: {exc}")
+
+
+@app.post("/api/log/stop")
+async def log_stop():
+    return packet_log.stop()
+
+
+@app.get("/api/log/file")
+async def log_file():
+    p = packet_log.path
+    if not p or not Path(p).exists():
+        raise HTTPException(404, "no log file yet")
+    return FileResponse(p, filename=Path(p).name, media_type="application/octet-stream")
 
 
 # --------------------------------------------------------------------------- #

@@ -15,6 +15,7 @@ Codecs are cached per session so protocol state in ``session.state`` survives.
 from __future__ import annotations
 
 import logging
+import time
 
 from . import registry
 from .interfaces import Codec, Sink, Source
@@ -32,6 +33,7 @@ class Pipeline:
         self._codecs: dict[str, Codec] = {}
         self.records_emitted = 0
         self.bytes_in = 0
+        self.per_peer: dict[str, dict] = {}   # peer -> {records, bytes, last} (server lifetime)
 
     # -- session / codec selection ----------------------------------------- #
     def _session_for(self, frame: RawFrame) -> Session:
@@ -66,6 +68,11 @@ class Pipeline:
         try:
             async for frame in self.source.frames():
                 self.bytes_in += len(frame.data)
+                pp = self.per_peer.get(frame.peer or frame.source or "?")
+                if pp is None:
+                    pp = {"records": 0, "bytes": 0, "last": 0.0}
+                    self.per_peer[frame.peer or frame.source or "?"] = pp
+                pp["bytes"] += len(frame.data)
                 sess = self._session_for(frame)
                 sess.buffer.extend(frame.data)
 
@@ -114,6 +121,10 @@ class Pipeline:
                     sess.device_id = rec.device_id
 
                 self.records_emitted += 1
+                pp = self.per_peer.get(frame.peer or frame.source or "?")
+                if pp is not None:
+                    pp["records"] += 1
+                    pp["last"] = time.time()
                 for sink in self.sinks:
                     try:
                         await sink.handle(rec)

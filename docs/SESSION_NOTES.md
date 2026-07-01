@@ -5,6 +5,38 @@ data lands & takes off"); internal Python package stays `proinfo`.
 
 ---
 
+## 2026-06-30 — `v1.1.0`
+
+Branch `v1.1.0` (version `1.1.0`). Tests: **41 passing** (`python -m pytest -q`). Since 1.0.0
+this cycle added the **Protocols** repository, the **Converter** (CanPlus XML → JSON/DBC), the
+standalone **`Runway.exe`** build, and the headline **Live TCP server**.
+
+### Live TCP server (Capture → Live TCP)
+- Start/stop/resume listeners (Protocol incl. **Auto** + **Generic (raw)**, Port, auto-detected
+  **IP**); running cards show status/uptime/records/bytes and update live (2.5s poll + WS).
+- **Per-client**: checkboxes filter the feed per client (hide ≠ stop) + All/None; per-client
+  packet **count** and **idle** tracked **server-side** (`pipeline.per_peer` → `job.clients`),
+  so they survive reloads. Downlink **Send** per client.
+- **Live packets** feed: `Timestamp | Payload` header, complete packet (click a row → full
+  HEX/ASCII), remembered HEX/ASCII view, feed persists across navigation.
+- **Logging vs Download**: one-time **Download** (buffered, TXT/CSV, all/selected, ASCII/HEX)
+  **and** continuous **Start/Stop log** — server-side, chosen folder+filename, flushed per
+  packet + fsync'd (crash/power-safe), append-only; timestamps `DD-MMM-YYYY HH:MM:SS:zzz`.
+
+### Working rules in force (see memory)
+- **3 dev phases**: local edits (incl. version bumps) by default → push only when asked →
+  build exe/zip only when asked.
+- **Retention**: user config persists (`localStorage`) until changed; page data persists
+  across nav (`sessionStorage`/server snapshot) until Clear/restart.
+- `RUNWAY_DATA_DIR` overrides the data dir; tests use a temp dir (no pollution).
+
+### Pending / notes
+- Server per-client counts reset when a listener stops/resumes (live, not durable) — can move
+  to the DB if cross-restart totals are wanted.
+- Continuous log currently captures **all** packets; could honor the per-client selection.
+
+---
+
 ## 2026-06-26 — `v0.0.3`
 
 Branch `v0.0.3` (version `0.0.3`). All work pushed to `origin/v0.0.3`. Tests: **38 passing**

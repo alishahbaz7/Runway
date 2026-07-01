@@ -37,6 +37,16 @@ the **Converter** (CanPlus XML → JSON/DBC), and a **standalone `Runway.exe`** 
 - UX: listeners show a single consistent `IP:port`; **Stop/Resume** stay in one position with a
   spaced, confirming **Remove**; live card refresh + instant Stop; the packet feed persists
   across navigation (re-seeds from the server snapshot). The HEX/ASCII view mode is remembered.
+- **Per-client control**: pick which connected clients' packets appear in the feed (hide ≠
+  stop) with per-client checkboxes + All/None; each client shows a **packet count** and
+  **idle-since-last-packet**, tracked **server-side** so they survive page reloads.
+- **Continuous packet logging** (server-side): **Start/Stop log** streams every new packet to
+  a file in a **chosen folder + filename** (TXT/CSV, ASCII/HEX), timestamped
+  `DD-MMM-YYYY HH:MM:SS:zzz`. Durable — **flushed per packet + fsync'd** (crash/power-safe),
+  **append-only** (never truncates). Separate from the one-time **Download**; a **log-file**
+  button downloads the server file. Endpoints: `POST /api/log/start|stop`, `GET /api/log/status|file`.
+- Feed: sticky **`Timestamp | Payload`** header; ASCII view renders `CR`/`LF` as line breaks
+  so multi-sentence dumps read cleanly. Destructive **Close / Clear / Stop** highlighted red.
 
 ### Added — Standalone build
 - **`Runway.exe`** one-file Windows build via PyInstaller (`packaging/Runway.spec` +

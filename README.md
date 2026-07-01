@@ -25,16 +25,19 @@ single new file in `proinfo/codecs/` — nothing downstream changes.
 ## What it does (the four pillars)
 
 1. **Parse anything** — pluggable codecs per protocol. Ships with **GT06/Concox**,
-   **Teltonika Codec 8/8E**, **NMEA-0183**, a **generic hex** fallback, and a
-   **template** to add your own OEM protocol.
+   **Teltonika (Codec 8/8E/16 + GPRS 12/13/14)**, **NMEA-0183**, a **generic hex** fallback,
+   and a **template** to add your own OEM protocol.
 2. **Visualize** — a web dashboard with a live map, per-device trails, a streaming
    packet table, and a hex + decoded-tree inspector. Single device or many at once.
-3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have the device
-   stream live to a built-in TCP listener.
+3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have devices
+   stream live to the built-in **Live TCP** server (start/stop listeners, see connected
+   clients, filter/log per client).
 4. **Relay** — forward decoded (or raw) traffic onward to your platform via **TCP**,
    **webhook/HTTP**, or persist to **SQLite** (Postgres/Timescale on the roadmap).
 
-Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
+Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
+for shareable/transferable parser files, and a standalone **`Runway.exe`** build (see
+`packaging/`). Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
 
 ---
 
@@ -62,7 +65,9 @@ stream onto the map, and click any packet to inspect its raw bytes and decoded f
 ```bash
 proinfo listen --codec gt06 --port 5050        # then point the device at this host:5050
 ```
-or start a listener from the dashboard ("Live TCP listener" panel).
+or use **Capture → Live TCP** in the dashboard: start a listener (protocol/port/IP), watch
+connected clients and a live packet feed, filter or **log** per client (continuous server-side
+capture to TXT/CSV), and send downlink commands.
 
 ### Relay onward
 

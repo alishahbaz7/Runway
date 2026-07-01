@@ -303,23 +303,34 @@ pre.hex, pre.json {
 .tcp-card-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0; }
 .tcp-card-meta .err { color: var(--danger); }
 .tcp-peers { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.tcp-peers-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.tcp-peers-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.tcp-peers-head .spacer { flex: 1; }
 .tcp-peer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .tcp-peer .spacer { flex: 1; }
+.tcp-peer input[type=checkbox] { margin: 0; cursor: pointer; }
+.tcp-client-addr { }
+.tcp-client-count { font-family: var(--mono); font-size: 11px; color: var(--accent-2);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; min-width: 20px; text-align: center; }
+.tcp-client-idle { font-size: 11px; min-width: 34px; }
 button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
 /* destructive remove: sits left of Resume with a gap + muted until hovered, to avoid misclicks */
 button.ghost.mini.tcp-x { margin-right: 16px; color: var(--muted); }
 button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
 
 .tcp-feed-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tcp-feed-table th { position: sticky; top: 0; background: var(--bg); text-align: left; color: var(--muted);
+  font-weight: 600; letter-spacing: .5px; padding: 6px 8px; border-bottom: 1px solid var(--border); z-index: 1; }
 .tcp-feed-table td { padding: 4px 8px; border-bottom: 1px solid #1a212c; white-space: nowrap; }
 .tcp-feed-table td.num { text-align: right; color: var(--muted); }
-.tcp-feed-table td.tcp-raw { color: var(--accent-2); white-space: nowrap; }  /* complete packet, no wrap */
+.tcp-feed-table td.tcp-raw { color: var(--accent-2); white-space: pre-wrap; word-break: break-all; }  /* complete packet, wrapped */
 .tcp-feed-table td.tcp-time { white-space: nowrap; vertical-align: top; }
 .tcp-feed-row { cursor: pointer; }
 .tcp-feed-row:hover td { background: var(--panel-2); }
 .tcp-pkt-card { width: 720px; max-width: 94vw; max-height: 86vh; overflow: auto; }
-.tcp-pkt-head { display: flex; align-items: center; }
+.tcp-pkt-head { display: flex; align-items: center; gap: 8px; }
 .tcp-pkt-head h3 { margin: 0; }
+.tcp-pkt-head .spacer { flex: 1; }        /* push the Close button to the top-right */
 .tcp-pkt-h { margin: 12px 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 #tcp-pkt-ascii, #tcp-pkt-hex { max-height: 260px; }
 .tcp-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
@@ -339,6 +350,10 @@ button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-c
 .tcp-modal-actions button { width: auto; margin: 0; padding: 6px 14px; }
 #tcp-send-msg { font-size: 12px; }
 #tcp-send-msg.ok { color: var(--accent-2); }  #tcp-send-msg.err { color: var(--danger); }
+.tcp-log-note { margin: 2px 0 0; font-size: 12px; }
+.tcp-log-note code { background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+#tcp-log-modal .tcp-fld { flex-direction: row; align-items: center; gap: 10px; }
+#tcp-log-modal .tcp-fld select { flex: 1; }
 
 header a.nav { color: var(--muted); text-decoration: none; font-size: 12px;
   padding: 4px 10px; border: 1px solid var(--border); border-radius: 7px; }

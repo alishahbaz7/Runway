@@ -48,7 +48,10 @@
           </span>
           <span class="spacer"></span>
           <span id="tcp-feed-count" class="muted"></span>
-          <button id="tcp-feed-clear" class="ghost mini">Clear</button>
+          <button id="tcp-log" class="ghost mini" title="save the packets buffered so far (one-time)">⤓ Download</button>
+          <button id="tcp-rec" class="ghost mini" title="continuously log every new packet to a file on the server">● Start log</button>
+          <button id="tcp-recfile" class="ghost mini" style="display:none" title="download the current/last server log file">⤓ log file</button>
+          <button id="tcp-feed-clear" class="ghost mini danger">Clear</button>
         </div>
         <div id="tcp-feed"><p class="empty">Decoded packets appear here as devices send data.</p></div>
       </section>
@@ -80,13 +83,71 @@
     <div class="tcp-modal-card tcp-pkt-card">
       <div class="tcp-pkt-head">
         <h3>Packet</h3><span class="spacer"></span>
-        <button id="tcp-pkt-close" class="ghost mini">✕ Close</button>
+        <button id="tcp-pkt-close" class="ghost mini danger">✕ Close</button>
       </div>
       <div id="tcp-pkt-meta" class="muted"></div>
       <h4 class="tcp-pkt-h">ASCII</h4>
       <pre id="tcp-pkt-ascii" class="json"></pre>
       <h4 class="tcp-pkt-h">HEX</h4>
       <pre id="tcp-pkt-hex" class="json"></pre>
+    </div>
+  </div>
+
+  <!-- save log -->
+  <div id="tcp-log-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card">
+      <div class="tcp-pkt-head">
+        <h3>Download packets</h3><span class="spacer"></span>
+        <button id="tcp-log-close" class="ghost mini danger">✕</button>
+      </div>
+      <label class="tcp-fld">Format
+        <select id="tcp-log-format"><option value="txt">TXT</option><option value="csv">CSV</option></select>
+      </label>
+      <label class="tcp-fld">Clients
+        <select id="tcp-log-scope">
+          <option value="all">All clients</option>
+          <option value="selected">Selected (checked) clients only</option>
+        </select>
+      </label>
+      <label class="tcp-fld">Raw as
+        <select id="tcp-log-raw"><option value="ascii">ASCII</option><option value="hex">HEX</option></select>
+      </label>
+      <p class="muted tcp-log-note">Format: <code>timestamp | client | raw data</code></p>
+      <div class="tcp-modal-actions">
+        <span id="tcp-log-msg" class="muted"></span><span class="spacer"></span>
+        <button id="tcp-log-cancel" class="ghost">Cancel</button>
+        <button id="tcp-log-go">Download</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- start continuous logging -->
+  <div id="tcp-rec-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card">
+      <div class="tcp-pkt-head">
+        <h3>Start logging</h3><span class="spacer"></span>
+        <button id="tcp-rec-close" class="ghost mini danger">✕</button>
+      </div>
+      <p class="muted tcp-log-note">Continuously writes <b>every new packet</b> to a file on the
+        server (flushed per packet, fsync'd to disk) until you stop. Format:
+        <code>timestamp | client | raw</code></p>
+      <label class="tcp-fld">Folder
+        <input id="tcp-rec-dir" type="text" placeholder="server data/logs (default)" />
+      </label>
+      <label class="tcp-fld">File name
+        <input id="tcp-rec-name" type="text" placeholder="auto (timestamped)" />
+      </label>
+      <label class="tcp-fld">Format
+        <select id="tcp-rec-format"><option value="txt">TXT</option><option value="csv">CSV</option></select>
+      </label>
+      <label class="tcp-fld">Raw as
+        <select id="tcp-rec-raw"><option value="ascii">ASCII</option><option value="hex">HEX</option></select>
+      </label>
+      <div class="tcp-modal-actions">
+        <span id="tcp-rec-msg" class="muted"></span><span class="spacer"></span>
+        <button id="tcp-rec-cancel" class="ghost">Cancel</button>
+        <button id="tcp-rec-go">Start</button>
+      </div>
     </div>
   </div>
 
