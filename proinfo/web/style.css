@@ -10,6 +10,10 @@
   --warn: #ffb454;
   --danger: #ff6b6b;
   --mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  /* live-packet colour code: live=green(--accent-2), history=amber(--warn),
+     alarm=violet, unknown=white. "Other" packets stay neutral (uncoloured) for now. */
+  --pkt-alarm: #b57bff;
+  --pkt-unknown: #ffffff;
 }
 
 * { box-sizing: border-box; }
@@ -44,6 +48,15 @@ body {
 .topbar-name { font-size: 17px; font-weight: 600; letter-spacing: .3px; }
 .topbar-version { font-size: 11px; color: var(--muted); font-family: var(--mono); }
 .topbar-tag { font-size: 12px; color: var(--muted); margin-left: 10px; }
+/* page title + subtitle folded up from the per-page <header> into the topbar */
+.topbar-page { display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--border); }
+.topbar-page:empty { border: none; margin: 0; padding: 0; }
+.topbar-page h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .3px; white-space: nowrap; }
+.topbar-page h1 b { color: var(--accent); }
+.topbar-page .tag { color: var(--muted); font-size: 12px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-ctl { display: flex; align-items: center; gap: 8px; }
 .topbar-spacer { flex: 1; }
 .topbar-status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
 .topbar-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
@@ -115,16 +128,57 @@ button.mini { width: auto; padding: 4px 9px; font-size: 11px; margin: 0; }
 .live-badge { font-size: 10px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .live-badge.on { color: var(--accent-2); border-color: var(--accent-2); }
 
-/* demo vs live mode: the sample button only exists in demo mode */
-body.mode-live .sample-btn { display: none; }
-.mode-pop { position: fixed; z-index: 60; background: var(--panel); border: 1px solid var(--border);
-  border-radius: 9px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); min-width: 130px; }
-.mode-pop button { width: 100%; text-align: left; background: transparent; color: var(--text);
-  border: none; border-radius: 7px; padding: 7px 10px; margin: 0; font-weight: 500; cursor: pointer; }
-.mode-pop button:hover { background: var(--panel-2); }
-.mode-pop button.sel { color: var(--accent); }
-.topbar-status { cursor: pointer; }
-.topbar-status .caret { font-size: 10px; }
+/* data-mode badge — automatic: live (listener/QC up) / demo (replay) / idle */
+.topbar-status { font-weight: 600; }
+body.mode-live .topbar-status { color: var(--accent-2); }
+body.mode-demo .topbar-status { color: var(--warn); }
+body.mode-idle .topbar-status { color: var(--muted); }
+body.mode-live .topbar-status .dot { background: var(--accent-2); }
+body.mode-demo .topbar-status .dot { background: var(--warn); }
+body.mode-idle .topbar-status .dot { background: var(--muted); }
+body.api-offline .topbar-status .dot { background: var(--danger); }
+
+/* settings gear in the topbar */
+.topbar-gear { width: auto; margin: 0; padding: 5px 9px; font-size: 15px; background: transparent;
+  color: var(--muted); border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+.topbar-gear:hover { color: var(--text); background: var(--panel-2); }
+
+/* ---- modal (Settings) -------------------------------------------------- */
+.modal-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal { width: 430px; max-width: 100%; max-height: 85vh; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5); overflow: hidden; }
+.modal-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px;
+  border-bottom: 1px solid var(--border); }
+.modal-head h2 { margin: 0; font-size: 15px; }
+.modal-head .spacer { flex: 1; }
+.modal-x { width: auto; margin: 0; padding: 0 8px; font-size: 20px; line-height: 1; background: transparent;
+  color: var(--muted); border: none; border-radius: 6px; cursor: pointer; font-weight: 400; }
+.modal-x:hover { color: var(--text); background: var(--panel-2); }
+.modal-body { padding: 6px 16px 12px; overflow: auto; }
+.modal-body .sub { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+.modal-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+  border-top: 1px solid var(--border); }
+.modal-foot .spacer { flex: 1; }
+
+.feat-group { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
+  margin: 12px 0 3px; }
+.feat-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-radius: 8px; }
+.feat-row:hover { background: var(--panel-2); }
+.feat-ico { width: 18px; text-align: center; }
+.feat-label { flex: 1; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.feat-label .rail-soon { margin-left: 0; }
+
+/* toggle switch */
+.switch { position: relative; width: 38px; height: 20px; flex: none; margin: 0; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.switch .slider { position: absolute; inset: 0; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 999px; transition: background .15s, border-color .15s; }
+.switch .slider::before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
+  background: var(--muted); border-radius: 50%; transition: transform .15s, background .15s; }
+.switch input:checked + .slider { background: rgba(0, 209, 143, .22); border-color: var(--accent-2); }
+.switch input:checked + .slider::before { transform: translateX(18px); background: var(--accent-2); }
 
 /* ---- signatures + protocols pages (shared repository UI) --------------- */
 /* full-width add band */
@@ -265,27 +319,75 @@ pre.hex, pre.json {
 .muted { color: var(--muted); }
 .mono { font-family: var(--mono); }
 
-/* ---- Live TCP page ----------------------------------------------------- */
-#tcp-bar { display: flex; align-items: flex-end; gap: 12px; padding: 10px 16px; flex-wrap: wrap;
+/* ---- Live TCP + Device QC pages (shared layout) ------------------------- */
+#tcp-bar, #qc-bar { display: flex; align-items: flex-end; gap: 12px; padding: 10px 16px; flex-wrap: wrap;
   background: var(--panel); border-bottom: 1px solid var(--border); }
-#tcp-bar .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; align-self: center; }
-#tcp-bar .spacer { flex: 1; }
+#tcp-bar .addbar-label, #qc-bar .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; align-self: center; }
+#tcp-bar .spacer, #qc-bar .spacer { flex: 1; }
 .tcp-fld { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
 .tcp-fld select, .tcp-fld input { padding: 6px 8px; }
-#tcp-port { width: 90px; } #tcp-host { width: 120px; }
-#tcp-start { width: auto; padding: 7px 16px; margin: 0; }
-#tcp-msg { font-size: 12px; align-self: center; }
-#tcp-msg.ok { color: var(--accent-2); }  #tcp-msg.err { color: var(--danger); }
+#tcp-port, #qc-port { width: 90px; } #tcp-host, #qc-host { width: 120px; }
+#qc-protocol { width: 160px; } #qc-operator { width: 120px; }
+#tcp-start, #qc-start { width: auto; padding: 7px 16px; margin: 0; }
+#tcp-msg, #qc-msg { font-size: 12px; align-self: center; }
+#tcp-msg.ok, #qc-msg.ok { color: var(--accent-2); }  #tcp-msg.err, #qc-msg.err { color: var(--danger); }
 .tcp-localip { font-size: 12px; color: var(--muted); align-self: center; font-family: var(--mono); }
 .tcp-reach { font-family: var(--mono); color: var(--accent-2); }
 
-#tcp-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 460px) 1fr; }
-#tcp-listeners-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
-#tcp-feed-pane { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
-#tcp-feed { overflow-x: auto; }        /* let a complete no-wrap packet scroll horizontally */
+#tcp-main, #qc-main { flex: 1; min-height: 0; display: grid; }
+#tcp-main { grid-template-columns: minmax(340px, 460px) 1fr; }
+#qc-main { grid-template-columns: 1fr minmax(260px, 340px); }
+#tcp-devices-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
+#qc-device-pane { border-left: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
+#tcp-feed-pane, #qc-feed-pane { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+#tcp-feed, #qc-feed { overflow-x: auto; }        /* let a complete no-wrap packet scroll horizontally */
 .tcp-h { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
 .tcp-feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tcp-feed-head .spacer { flex: 1; }
+
+/* browser-style tab strip: one tab per port session, active tab joins the pane below */
+#tcp-tabs { flex: none; display: flex; align-items: flex-end; gap: 4px; padding: 8px 12px 0;
+  background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; }
+#tcp-tabs .empty { padding: 9px 6px; margin: 0; }
+.tcp-tab { display: flex; align-items: center; gap: 7px; padding: 7px 8px 7px 12px;
+  border: 1px solid var(--border); border-bottom: none; border-radius: 10px 10px 0 0;
+  background: var(--panel-2); cursor: pointer; font-size: 12px; white-space: nowrap; opacity: .75; }
+.tcp-tab:hover { opacity: 1; }
+.tcp-tab.off { opacity: .55; }
+.tcp-tab.active { background: var(--panel); border-color: var(--accent); opacity: 1;
+  margin-bottom: -1px; padding-bottom: 8px; }
+.tcp-tab-port { font-family: var(--mono); font-weight: 700; }
+.tcp-tab-sub { font-size: 11px; }
+.tcp-tab-count { font-family: var(--mono); font-size: 10.5px; color: var(--accent-2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 0 6px; }
+.tcp-tab-x { width: auto; margin: 0 0 0 2px; padding: 0 5px; font-size: 11px; line-height: 16px;
+  background: transparent; border: none; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.tcp-tab-x:hover { color: #fff; background: var(--danger); }
+/* the unstarted "New session" tab (dashed) + the "+" new-tab button */
+.tcp-tab-draft { border-style: dashed; }
+.tcp-tab-draft .tcp-tab-port { font-family: inherit; font-weight: 600; color: var(--muted); }
+.tcp-tab-add { align-self: center; width: auto; margin: 0 0 4px 2px; padding: 4px 11px;
+  font-size: 16px; line-height: 1; background: transparent; color: var(--muted);
+  border: 1px dashed var(--border); border-radius: 8px; cursor: pointer; }
+.tcp-tab-add:hover { color: var(--accent); border-color: var(--accent); }
+
+/* draft "New session" config form (replaces the old top banner; stacked to fit the pane) */
+#tcp-config { display: flex; flex-direction: column; gap: 10px; }
+#tcp-config .addbar-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; }
+#tcp-config select, #tcp-config input { width: 100%; }
+#tcp-config #tcp-start { align-self: flex-start; width: auto; padding: 8px 20px; margin: 2px 0 0; }
+#tcp-config .tcp-localip { font-size: 11px; }
+
+/* focused port session strip above the device list */
+#tcp-session { border-bottom: 1px dashed var(--border); margin-bottom: 10px; padding-bottom: 8px; }
+#tcp-session:empty { display: none; }
+
+/* device list: one row per device sending on the focused port */
+#tcp-devices { display: flex; flex-direction: column; gap: 4px; }
+#tcp-devices .tcp-peers-head { margin: 2px 0 6px; }
+.tcp-device-id { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; overflow: hidden; }
+.tcp-device-id span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcp-device-peer { font-size: 10.5px; }
 
 .tcp-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 10px 12px; margin-bottom: 10px; }
 .tcp-card.on { border-color: var(--accent); }
@@ -304,16 +406,54 @@ pre.hex, pre.json {
 .tcp-card-meta .err { color: var(--danger); }
 .tcp-peers { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--border); padding-top: 8px; }
 .tcp-peers-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.tcp-collapse { width: auto; margin: 0; padding: 0 4px; font-size: 11px; line-height: 1;
+  background: transparent; border: none; color: var(--muted); cursor: pointer; }
+.tcp-collapse:hover { color: var(--text); }
 .tcp-peers-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .tcp-peers-head .spacer { flex: 1; }
-.tcp-peer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.tcp-peer .spacer { flex: 1; }
+/* Grid, not flex: with flex, two "grow" items (name + spacer) fight over shrink budget
+   and the loser can collapse to zero width in a narrow pane. Grid assigns the checkbox/
+   dot/meta columns their own content width up front and gives 100% of whatever's left to
+   `.tcp-device-id` (which then truncates internally via its own overflow/ellipsis) — no
+   competing flexible items, so it can't collapse other columns. */
+.tcp-peer { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; font-size: 12px; }
 .tcp-peer input[type=checkbox] { margin: 0; cursor: pointer; }
+/* everything except the checkbox/dot/name (protocol tag, count, idle, send) rides in one
+   fixed-content-size cluster, the grid's last (auto) column */
+.tcp-peer-meta { display: flex; align-items: center; gap: 8px; }
 .tcp-client-addr { }
 .tcp-client-count { font-family: var(--mono); font-size: 11px; color: var(--accent-2);
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; min-width: 20px; text-align: center; }
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px;
+  min-width: 20px; text-align: center; }
 .tcp-client-idle { font-size: 11px; min-width: 34px; }
 button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
+
+/* ---- Device QC page (extends the tcp-card/-status/-dot patterns above) --- */
+/* top tabs: one per open port/session (replaces the old left session-list) */
+#qc-tabs { display: flex; gap: 8px; padding: 8px 16px; flex-wrap: wrap;
+  background: var(--panel); border-bottom: 1px solid var(--border); }
+.qc-tab { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); cursor: pointer; font-size: 12px; }
+.qc-tab.on { border-color: var(--accent); }
+.qc-tab.off { opacity: .7; }
+.qc-tab.active { box-shadow: 0 0 0 1px var(--accent) inset; }
+.qc-tab-port { font-family: var(--mono); font-weight: 700; }
+.qc-tab-sub { font-size: 11px; }
+.qc-proto { color: var(--muted); font-style: italic; }
+.qc-proto.known { color: var(--accent-2); font-style: normal; font-weight: 600; }
+/* the IMEI/device id is the device's real identity -- headline of the device-info panel */
+.qc-imei { font-family: var(--mono); font-weight: 700; font-size: 16px; color: var(--text); margin-bottom: 4px; }
+/* QC Target 2: verdict badge (feed header) + per-check pass/fail/na chips */
+.qc-verdict { font-size: 11px; font-weight: 700; letter-spacing: .5px; padding: 1px 8px; border-radius: 10px; }
+.qc-verdict-pass { color: var(--accent-2); background: rgba(0, 209, 143, .12); }
+.qc-verdict-fail { color: var(--danger); background: rgba(255, 107, 107, .12); }
+.qc-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.qc-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); cursor: default; }
+.qc-chip-pass { color: var(--accent-2); border-color: var(--accent-2); }
+.qc-chip-fail { color: var(--danger); border-color: var(--danger); }
+.qc-chip-na { color: var(--muted); }
+#qc-feed-actions { display: flex; gap: 6px; }
 /* destructive remove: sits left of Resume with a gap + muted until hovered, to avoid misclicks */
 button.ghost.mini.tcp-x { margin-right: 16px; color: var(--muted); }
 button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
@@ -324,9 +464,33 @@ button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-c
 .tcp-feed-table td { padding: 4px 8px; border-bottom: 1px solid #1a212c; white-space: nowrap; }
 .tcp-feed-table td.num { text-align: right; color: var(--muted); }
 .tcp-feed-table td.tcp-raw { color: var(--accent-2); white-space: pre-wrap; word-break: break-all; }  /* complete packet, wrapped */
-.tcp-feed-table td.tcp-time { white-space: nowrap; vertical-align: top; }
+/* Packet colour code (option B): each feed row carries a pk-<kind> class that sets --pk;
+   the timestamp cell reads it for a left-edge bar + the time text. "Other" rows have no
+   pk-* colour rule, so --pk is unset and they fall back to a transparent bar + default
+   text (neutral) — a distinct colour for them can be added later. */
+.pk-live { --pk: var(--accent-2); }
+.pk-history { --pk: var(--warn); }
+.pk-alarm { --pk: var(--pkt-alarm); }
+.pk-unknown { --pk: var(--pkt-unknown); }
+.tcp-feed-table td.tcp-time { white-space: nowrap; vertical-align: top;
+  border-left: 3px solid var(--pk, transparent); }   /* always 3px so text never shifts */
+.tcp-time-hms { color: var(--pk, var(--text)); font-variant-numeric: tabular-nums; }
+.tcp-time-date { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
 .tcp-feed-row { cursor: pointer; }
 .tcp-feed-row:hover td { background: var(--panel-2); }
+
+/* colour-code legend — hidden behind the ⓘ button in the feed toolbar (saves space) */
+.tcp-legend-wrap { position: relative; display: inline-flex; }
+.tcp-legend-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45); font-size: 11px; color: var(--muted); }
+.tcp-legend-pop[hidden] { display: none; }
+.tcp-legend-title { font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--muted); margin-bottom: 2px; }
+.pk-leg { display: inline-flex; align-items: center; gap: 6px; }
+.pk-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--pk, var(--muted));
+  border: 1px solid rgba(255, 255, 255, .15); }
 .tcp-pkt-card { width: 720px; max-width: 94vw; max-height: 86vh; overflow: auto; }
 .tcp-pkt-head { display: flex; align-items: center; gap: 8px; }
 .tcp-pkt-head h3 { margin: 0; }
@@ -362,7 +526,10 @@ header a.nav.active { color: var(--accent); border-color: var(--accent); }
 
 /* ---- shared left rail (uCANdo-style) ----------------------------------- */
 #rail { width: 208px; flex: none; background: var(--panel); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 1px; padding: 10px 8px; overflow: auto; }
+  display: flex; flex-direction: column; padding: 10px 8px; overflow: hidden; }
+#rail-nav { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 1px; }
+.rail-foot { flex: none; margin-top: 6px; padding: 8px 4px 2px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); text-align: center; }
 .rail-brand { display: flex; gap: 10px; align-items: center; padding: 6px 8px 12px; }
 .rail-logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
   color: #04121d; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 16px; }
@@ -400,6 +567,7 @@ body.rail-collapsed .rail-section,
 body.rail-collapsed .rail-soon,
 body.rail-collapsed .rail-item span:not(.rail-ico),
 body.rail-collapsed .rail-status span { display: none; }
+body.rail-collapsed .rail-foot { display: none; }   /* version hidden in icon-only strip */
 
 /* ---- parser tab bar ---------------------------------------------------- */
 #tabbar { display: flex; align-items: center; gap: 4px; padding: 6px 10px 0; background: var(--panel);

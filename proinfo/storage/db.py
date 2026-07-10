@@ -86,7 +86,39 @@ SCHEMA: list[str] = [
         created_at REAL NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS qc_sessions (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id         TEXT DEFAULT '',       -- the live-TCP job id backing this session
+        port           INTEGER NOT NULL,
+        host           TEXT DEFAULT '0.0.0.0',
+        protocol_mode  TEXT DEFAULT 'auto',   -- 'auto' | 'manual'
+        protocol       TEXT DEFAULT '',       -- requested codec name ('auto' or a specific one)
+        identified_as  TEXT DEFAULT '',       -- codec actually identified once a device connects
+        device_id      TEXT DEFAULT '',       -- IMEI / device id learned from the session
+        peer           TEXT DEFAULT '',       -- ip:port of the connected device
+        operator       TEXT DEFAULT '',
+        notes          TEXT DEFAULT '',
+        status         TEXT DEFAULT 'running',  -- running | stopped | error
+        packet_count   INTEGER DEFAULT 0,
+        capture_path   TEXT DEFAULT '',
+        capture_fmt    TEXT DEFAULT 'txt',
+        started_at     REAL NOT NULL,
+        ended_at       REAL,
+        created_at     REAL NOT NULL
+    )
+    """,
 ]
+
+# Columns added to an existing table after its initial release. SQLite has no
+# CREATE-TABLE-style "IF NOT EXISTS" for ADD COLUMN, so these are applied with a
+# PRAGMA table_info guard in Storage.init_schema() instead of a migration framework.
+_ALTER_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "qc_sessions": [
+        ("checks_json", "TEXT DEFAULT '[]'"),   # QC Target 2: last-evaluated check results
+        ("verdict", "TEXT DEFAULT ''"),         # '' | pass | fail
+    ],
+}
 
 
 class Storage:
@@ -107,6 +139,11 @@ class Storage:
         with self._lock:
             for ddl in SCHEMA:
                 self._conn.execute(ddl)
+            for table, columns in _ALTER_COLUMNS.items():
+                existing = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                for col, decl in columns:
+                    if col not in existing:
+                        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             self._conn.commit()
 
     def close(self) -> None:
@@ -200,3 +237,26 @@ class Storage:
 
     def devices(self) -> list[dict]:
         return self.list("devices", order="last_seen DESC")
+
+    # ----- QC sessions ------------------------------------------------------ #
+    def qc_sessions(self) -> list[dict]:
+        return self.list("qc_sessions", order="id DESC")
+
+    def qc_session(self, qc_id: int) -> Optional[dict]:
+        return self.get("qc_sessions", qc_id)
+
+    def qc_update(self, qc_id: int, **cols) -> None:
+        if not cols:
+            return
+        sets = ", ".join(f"{k} = ?" for k in cols)
+        self.execute(f"UPDATE qc_sessions SET {sets} WHERE id = ?",
+                     (*cols.values(), qc_id))
+
+    def qc_sessions_by_device(self, device_id: str) -> list[dict]:
+        """Every QC session ever run for this device id (IMEI), newest first — the device
+        id is the durable identity a device carries across many separate QC sessions."""
+        if not device_id:
+            return []
+        return self.query(
+            "SELECT * FROM qc_sessions WHERE device_id = ? ORDER BY id DESC", (device_id,)
+        )

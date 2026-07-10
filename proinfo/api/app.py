@@ -21,18 +21,20 @@ WS   /ws                     real-time record stream (snapshot then live)
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import re
 import sys
 import time
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from logging.handlers import RotatingFileHandler
 from pydantic import BaseModel
@@ -42,6 +44,7 @@ from ..core import registry
 from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..core.pipeline import Pipeline
+from ..qc.session import QcCaptureSink
 from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, packet_log, store
 
@@ -96,6 +99,10 @@ _jobs: dict[str, dict] = {}
 _tasks: dict[str, asyncio.Task] = {}
 _pipelines: dict[str, "Pipeline"] = {}
 _job_seq = 0
+
+# Device QC sessions: each backs onto a "qc" job (above) plus a QcCaptureSink (keyed by
+# qc_sessions.id) that learns the device's protocol/id and writes its capture file.
+_qc_sinks: dict[int, QcCaptureSink] = {}
 
 
 @asynccontextmanager
@@ -216,8 +223,15 @@ class LogStartBody(BaseModel):
     raw: str = "ascii"                 # ascii | hex
     name: str = ""                     # file name (blank = auto, timestamped)
     directory: str = ""                # folder (blank = server data/logs)
-    signature: dict = {}
-    status: str = "draft"
+
+
+class QcStartBody(BaseModel):
+    port: int
+    host: str = "0.0.0.0"
+    protocol_mode: str = "auto"         # "auto" | "manual"
+    protocol: str = "auto"              # codec name when manual; ignored (-> "auto") otherwise
+    operator: str = ""
+    notes: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -225,6 +239,25 @@ class LogStartBody(BaseModel):
 # --------------------------------------------------------------------------- #
 def _default_sinks():
     return [registry.get_sink("memory_store"), registry.get_sink("ws_broadcast")]
+
+
+def _activity_mode() -> str:
+    """Current activity for the topbar badge (auto, not user-set):
+
+    - ``live``  a live TCP listener / QC session is running (real devices dial in),
+    - ``demo``  a scripted file replay is running,
+    - ``idle``  nothing running.
+
+    Live wins when a listener and a replay are active at once. Only jobs with a live
+    asyncio task (``_tasks``) count — finished/stopped jobs linger in ``_jobs`` but are
+    not activity.
+    """
+    kinds = {_jobs[jid].get("kind") for jid in _tasks if jid in _jobs}
+    if kinds & {"listen", "qc"}:
+        return "live"
+    if "replay" in kinds:
+        return "demo"
+    return "idle"
 
 
 def _new_job(kind: str, **meta) -> str:
@@ -309,6 +342,7 @@ async def health():
         "codecs": len(registry.CODECS),
         "devices": len(store.devices),
         "subscribers": hub.subscribers,
+        "mode": _activity_mode(),
     }
 
 
@@ -605,8 +639,7 @@ def _proto_meta(p: Path) -> dict:
 
 @app.get("/api/protocols")
 async def list_protocols():
-    return [_proto_meta(p) for p in sorted(PROTOCOLS_DIR.iterdir())
-            if p.is_file() and p.suffix.lower() in PROTO_EXTS]
+    return [_proto_meta(p) for p in _proto_files()]
 
 
 @app.get("/api/protocols/{name}")
@@ -653,6 +686,75 @@ async def delete_protocol(name: str):
     if p.exists():
         p.unlink()
     return {"deleted": p.name}
+
+
+def _proto_files() -> list[Path]:
+    return sorted(p for p in PROTOCOLS_DIR.iterdir() if p.is_file() and p.suffix.lower() in PROTO_EXTS)
+
+
+@app.get("/api/protocols/export")
+async def export_protocols(name: str | None = None):
+    """Zip protocol files for instant transfer to another system.
+
+    Without ``name``: the whole repository. With ``name``: every file sharing that file's stem
+    (e.g. ``ais140.json`` + ``ais140.py`` travel together as one protocol package).
+    """
+    files = _proto_files()
+    if name:
+        stem = Path(name).stem
+        files = [p for p in files if p.stem == stem]
+        if not files:
+            raise HTTPException(404, "protocol not found")
+        zip_name = f"{stem}.zip"
+    else:
+        if not files:
+            raise HTTPException(404, "no protocols to export")
+        zip_name = "protocols-export.zip"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in files:
+            zf.write(p, arcname=p.name)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+                              headers={"Content-Disposition": f'attachment; filename="{zip_name}"'})
+
+
+@app.post("/api/protocols/import")
+async def import_protocols(file: UploadFile = File(...)):
+    """Unpack a protocol .zip (as produced by /api/protocols/export) into the repository.
+
+    Entries are validated the same way as a manual save (name pattern, allowed extension, no
+    path separators) — anything a zip-slip or unsupported file is skipped, not written.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(await file.read()))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "not a valid zip file")
+
+    imported: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        entry_name = Path(info.filename).name          # strip any directory component (zip-slip guard)
+        try:
+            dest = _proto_file(entry_name)
+        except HTTPException as exc:
+            skipped.append({"name": info.filename, "reason": str(exc.detail)})
+            continue
+        content = zf.read(info)
+        if dest.suffix.lower() == ".json":
+            try:
+                parsed = json.loads(content.decode("utf-8"))
+            except Exception as exc:
+                skipped.append({"name": info.filename, "reason": f"invalid JSON: {exc}"})
+                continue
+            dest.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+        else:
+            dest.write_bytes(content)
+        imported.append(dest.name)
+    return {"imported": imported, "skipped": skipped}
 
 
 # --------------------------------------------------------------------------- #
@@ -886,6 +988,292 @@ async def remove_job(job_id: str):
     _jobs.pop(job_id, None)
     _pipelines.pop(job_id, None)
     return {"removed": job_id}
+
+
+# --------------------------------------------------------------------------- #
+# Device QC — Target 1: intake + identify + record.
+#
+# A QC session is a "qc"-kind job (reusing the listen/job plumbing above) plus a
+# QcCaptureSink that learns the connecting device's protocol/id and writes its own
+# capture file. The qc_sessions DB row is the durable record; _qc_sinks holds the live
+# counters while the session's job is running.
+# --------------------------------------------------------------------------- #
+def _qc_capture_path(qc_id: int) -> Path:
+    d = Path(DATA_DIR) / "qc"
+    d.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%d-%b-%Y_%H-%M-%S")
+    return d / f"qc-{qc_id}-{stamp}.txt"
+
+
+def _qc_view(qc_id: int) -> dict:
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    row = dict(row)
+    sink = _qc_sinks.get(qc_id)
+    if sink is not None:                          # live counters + checks while the session runs
+        row["packet_count"] = sink.count
+        row["identified_as"] = sink.identified_as or row.get("identified_as", "")
+        row["device_id"] = sink.device_id or row.get("device_id", "")
+        row["checks"], row["verdict"] = sink.checks()
+    else:                                          # stopped: whatever was last persisted
+        row["checks"] = json.loads(row.get("checks_json") or "[]")
+    jid = row.get("job_id")
+    jv = _job_view(jid) if jid else {}
+    row["connected"] = bool(jv.get("peers"))
+    job_status = jv.get("status", row.get("status"))
+    row["job_status"] = job_status
+    # Self-heal: the underlying listener can die on its own (e.g. the port is already in
+    # use elsewhere) — that failure surfaces asynchronously on the job, not synchronously
+    # from /api/qc/start. Without this, qc_sessions.status would show "running" forever
+    # even though nothing is actually listening. Reconcile it the next time this session
+    # is viewed (list/get/poll all go through here).
+    if row["status"] == "running" and job_status in ("error", "stopped", "done"):
+        new_status = "error" if job_status == "error" else "stopped"
+        ended = time.time()
+        db.qc_update(qc_id, status=new_status, ended_at=ended,
+                     checks_json=json.dumps(row["checks"]), verdict=row["verdict"])
+        _qc_sinks.pop(qc_id, None)
+        row["status"] = new_status
+        row["ended_at"] = ended
+        row["error"] = jv.get("error", "")
+
+    # The device id (IMEI) is the device's real, durable identity — a session id/port is
+    # just this run's plumbing. Once it's known, surface every OTHER QC session ever run
+    # for that same device id, so a returning device is recognized regardless of which
+    # port/session it lands on this time.
+    row["prior_sessions"] = []
+    if row.get("device_id"):
+        row["prior_sessions"] = [
+            {"id": h["id"], "status": h["status"], "started_at": h["started_at"],
+             "ended_at": h["ended_at"], "packet_count": h["packet_count"], "port": h["port"]}
+            for h in db.qc_sessions_by_device(row["device_id"]) if h["id"] != qc_id
+        ]
+    return row
+
+
+async def _qc_publish(qc_id: int) -> None:
+    try:
+        await hub.publish({"type": "qc", "data": _qc_view(qc_id)})
+    except Exception:
+        log.exception("qc %s: failed to publish update", qc_id)
+
+
+@app.get("/api/qc")
+async def qc_list():
+    return [_qc_view(r["id"]) for r in db.qc_sessions()]
+
+
+@app.get("/api/qc/{qc_id}")
+async def qc_get(qc_id: int):
+    return _qc_view(qc_id)
+
+
+def _qc_spawn(qc_id: int, host: str, port: int, codec: str, initial_count: int = 0) -> None:
+    """(Re)start the listener + capture for an existing QC session row (start or resume)."""
+    from ..sources.tcp_server import TcpServerSource
+
+    row = db.qc_session(qc_id)
+    loop = asyncio.get_event_loop()
+
+    def _on_update(_snap: dict) -> None:
+        loop.create_task(_qc_publish(qc_id))
+
+    qc_sink = QcCaptureSink(row["capture_path"], started_at=row["started_at"], on_update=_on_update)
+    qc_sink.count = initial_count               # keep the packet count cumulative across resumes
+    _qc_sinks[qc_id] = qc_sink
+
+    async def _on_conn(kind: str, peer: str) -> None:
+        db.qc_update(qc_id, peer=peer if kind == "up" else "")
+        await _qc_publish(qc_id)
+
+    source = TcpServerSource(host=host, port=port, on_event=_on_conn)
+    jid = _new_job("qc", codec=codec, host=host, port=port, started=time.time(), peers=[])
+    db.qc_update(qc_id, job_id=jid)
+    _spawn(jid, Pipeline(source, codec, [*_default_sinks(), qc_sink]))
+
+
+@app.post("/api/qc/start")
+async def qc_start(body: QcStartBody):
+    registry.load_plugins()
+    codec = body.protocol if body.protocol_mode == "manual" else "auto"
+    if body.protocol_mode == "manual" and codec not in registry.CODECS:
+        raise HTTPException(400, f"unknown codec '{codec}'")
+
+    started = time.time()
+    qc_id = db.insert(
+        "qc_sessions", port=body.port, host=body.host, protocol_mode=body.protocol_mode,
+        protocol=codec, identified_as="", device_id="", peer="", operator=body.operator,
+        notes=body.notes, status="running", packet_count=0, capture_path="",
+        capture_fmt="txt", started_at=started, ended_at=None,
+    )
+    db.qc_update(qc_id, capture_path=str(_qc_capture_path(qc_id)))
+    try:
+        _qc_spawn(qc_id, body.host, body.port, codec)
+    except Exception as exc:
+        db.qc_update(qc_id, status="error", ended_at=time.time())
+        _qc_sinks.pop(qc_id, None)
+        raise HTTPException(500, f"could not start QC session: {exc}")
+    return _qc_view(qc_id)
+
+
+@app.post("/api/qc/{qc_id}/resume")
+async def qc_resume(qc_id: int):
+    """Resume a stopped/errored QC session under the SAME id (no new card) — the packet
+    count and capture file continue where they left off (capture file is append-only)."""
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    jid = row.get("job_id")
+    if jid and jid in _tasks:
+        return _qc_view(qc_id)                    # already running
+    db.qc_update(qc_id, status="running", ended_at=None, peer="")
+    try:
+        _qc_spawn(qc_id, row["host"], row["port"], row["protocol"],
+                 initial_count=row.get("packet_count", 0))
+    except Exception as exc:
+        db.qc_update(qc_id, status="error", ended_at=time.time())
+        _qc_sinks.pop(qc_id, None)
+        raise HTTPException(500, f"could not resume QC session: {exc}")
+    return _qc_view(qc_id)
+
+
+@app.post("/api/qc/{qc_id}/stop")
+async def qc_stop(qc_id: int):
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    jid = row.get("job_id")
+    if jid and jid in _tasks:
+        j = _jobs.get(jid)
+        if j is not None:                  # reflect immediately, same as /api/stop/{job_id}
+            j["status"] = "stopped"
+            j["ended"] = time.time()
+        _tasks[jid].cancel()
+    sink = _qc_sinks.pop(qc_id, None)
+    checks, verdict = sink.checks() if sink else (json.loads(row.get("checks_json") or "[]"), row.get("verdict", ""))
+    db.qc_update(qc_id, status="stopped", ended_at=time.time(),
+                 packet_count=(sink.count if sink else row.get("packet_count", 0)),
+                 identified_as=(sink.identified_as if sink else row.get("identified_as", "")),
+                 device_id=(sink.device_id if sink else row.get("device_id", "")),
+                 checks_json=json.dumps(checks), verdict=verdict)
+    await _qc_publish(qc_id)
+    return _qc_view(qc_id)
+
+
+@app.get("/api/qc/{qc_id}/capture")
+async def qc_capture_file(qc_id: int):
+    row = db.qc_session(qc_id)
+    if row is None or not row.get("capture_path") or not Path(row["capture_path"]).exists():
+        raise HTTPException(404, "no capture file for this QC session")
+    return FileResponse(row["capture_path"], filename=Path(row["capture_path"]).name,
+                        media_type="text/plain")
+
+
+@app.get("/api/qc/{qc_id}/report")
+async def qc_report(qc_id: int, fmt: str = "json"):
+    """QC report: verdict + every check's result/detail + device + session summary.
+
+    fmt=json (default) -> the report as a JSON object (for the in-page report view).
+    fmt=txt/csv         -> a downloadable file of the same data.
+    """
+    v = _qc_view(qc_id)
+    report = {
+        "qc_id": v["id"], "device_id": v.get("device_id") or "", "identified_as": v.get("identified_as") or "",
+        "protocol_mode": v["protocol_mode"], "port": v["port"], "host": v["host"],
+        "operator": v.get("operator") or "", "notes": v.get("notes") or "",
+        "status": v["status"], "verdict": v.get("verdict") or "",
+        "packet_count": v.get("packet_count", 0),
+        "started_at": v["started_at"], "ended_at": v.get("ended_at"),
+        "checks": v.get("checks") or [],
+        "prior_session_count": len(v.get("prior_sessions") or []),
+    }
+    if fmt not in ("csv", "txt"):
+        return report
+
+    def _ts(t):
+        return time.strftime("%d-%b-%Y %H:%M:%S", time.localtime(t)) if t else ""
+
+    lines = [
+        f"QC Report — session #{report['qc_id']}",
+        f"Device id (IMEI): {report['device_id'] or '(unidentified)'}",
+        f"Protocol: {report['identified_as'] or report['protocol_mode']}",
+        f"Port: {report['port']}    Operator: {report['operator'] or '-'}",
+        f"Started: {_ts(report['started_at'])}    Ended: {_ts(report['ended_at'])}",
+        f"Packets captured: {report['packet_count']}",
+        f"Verdict: {report['verdict'].upper() or 'N/A'}",
+        f"Prior sessions for this device: {report['prior_session_count']}",
+        "", "Checks:",
+    ]
+    for c in report["checks"]:
+        lines.append(f"  [{c['result'].upper():4}] {c['label']} — {c['detail']}")
+    if report["notes"]:
+        lines += ["", f"Notes: {report['notes']}"]
+    content = "\n".join(lines) + "\n"
+    fname = f"qc-report-{report['qc_id']}.{fmt}"
+    return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.delete("/api/qc/{qc_id}")
+async def qc_delete(qc_id: int):
+    """Clear a finished QC session from the list (must be stopped/error first, same rule
+    as removing a Live TCP job) — deletes the DB row; the capture file on disk is left
+    untouched (a separate, explicit cleanup, not implied by clearing the session list)."""
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    jid = row.get("job_id")
+    if jid and jid in _tasks:
+        raise HTTPException(400, "stop the session before clearing it")
+    db.delete("qc_sessions", qc_id)
+    _qc_sinks.pop(qc_id, None)
+    return {"deleted": qc_id}
+
+
+@app.get("/api/qc/device/{device_id}")
+async def qc_device_summary(device_id: str):
+    """Cross-session device profile for the QC "click the IMEI" drill-down: firmware/
+    vendor info plus an alarm-coverage checklist, built from every record the live store
+    has retained for this device_id (proinfo/storage/live.py's LiveStore is a process-wide
+    ring buffer keyed by device_id -- NOT scoped to one QC session -- so this reflects the
+    device's whole history across every session it has ever run, same identity model as
+    qc_sessions_by_device / prior_sessions)."""
+    records = store.device_records(device_id, limit=1000)
+    if not records:
+        raise HTTPException(404, "no records seen for this device id")
+
+    protocol = records[-1].get("protocol", "")
+    device_info: dict = {}
+    for r in records:
+        io = r.get("io") or {}
+        for key in ("firmware_version", "vendor_id"):
+            if io.get(key):
+                device_info[key] = io[key]     # last (most recent) non-empty value wins
+
+    tally: dict[str, dict] = {}
+    for r in records:
+        ts = r.get("event_time") or r.get("received_at")
+        for a in r.get("alarms") or []:
+            entry = tally.setdefault(a, {"count": 0, "last_seen": None})
+            entry["count"] += 1
+            if ts and (entry["last_seen"] is None or ts > entry["last_seen"]):
+                entry["last_seen"] = ts
+
+    catalog = getattr(registry.CODECS.get(protocol), "alarm_catalog", {}) if protocol else {}
+    alarms = [
+        {"key": key, "label": label, "seen": key in tally,
+         "count": tally.get(key, {}).get("count", 0), "last_seen": tally.get(key, {}).get("last_seen")}
+        for key, label in catalog.items()
+    ]
+    # An alarm actually observed but outside the known catalog (a different protocol with
+    # no fixed catalog, or a gap in it) still shows up -- just without a curated label.
+    alarms += [
+        {"key": key, "label": key, "seen": True, "count": v["count"], "last_seen": v["last_seen"]}
+        for key, v in tally.items() if key not in catalog
+    ]
+
+    return {"device_id": device_id, "protocol": protocol, "records_seen": len(records),
+            "device_info": device_info, "alarms": alarms}
 
 
 @app.delete("/api/data")

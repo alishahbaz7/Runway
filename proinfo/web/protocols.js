@@ -71,11 +71,15 @@
         + (s.kind === "json" && s.valid ? ` · ${s.keys} keys` : "")
         + (s.valid ? "" : " · ⚠ invalid") + " · " + fmtTime(s.modified);
       body.append(el("div", "meta", detail));
+      const exp = el("button", "ghost mini icon-only");
+      exp.innerHTML = ICON.download;
+      exp.title = "export (bundles any other file sharing this protocol's name, e.g. .json + .py)";
+      exp.onclick = (e) => { e.stopPropagation(); exportBundle(s.name); };
       const del = el("button", "ghost mini icon-only");
       del.innerHTML = ICON.trash;
       del.title = "delete";
       del.onclick = (e) => { e.stopPropagation(); removeProto(s.name); };
-      li.append(body, del);
+      li.append(body, exp, del);
       li.onclick = () => viewSaved(s.name);
       ul.appendChild(li);
     });
@@ -221,6 +225,15 @@
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
   }
 
+  // ---- export / import (instant transfer between systems) ----------------
+  function triggerDownload(url) {
+    const a = el("a"); a.href = url; a.download = "";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function exportBundle(name) {
+    triggerDownload("/api/protocols/export?name=" + encodeURIComponent(name));
+  }
+
   // ---- add / save / delete ----------------------------------------------
   $("proto-upload").addEventListener("click", () => $("proto-file").click());
   $("proto-file").addEventListener("change", (e) => {
@@ -278,17 +291,38 @@
 
   // icon labels
   $("proto-upload").innerHTML = ICON.upload + "<span>Choose file</span>";
+  $("proto-import").innerHTML = ICON.upload + "<span>Import .zip</span>";
   $("proto-edit").innerHTML = ICON.edit + "<span>Edit</span>";
   $("proto-download").innerHTML = ICON.download + "<span>Download</span>";
+  $("proto-export-all").innerHTML = ICON.download + "<span>Export all</span>";
   $("proto-delete").innerHTML = ICON.trash + "<span>Delete</span>";
   $("proto-clear").innerHTML = ICON.x + "<span>Clear</span>";
 
   // band actions (next to Save)
   $("proto-edit").addEventListener("click", () => { if (currentText != null) openEditor(currentName, currentText); });
   $("proto-download").addEventListener("click", () => { if (currentText != null) download(currentName, currentText); });
+  $("proto-export-all").addEventListener("click", () => triggerDownload("/api/protocols/export"));
   $("proto-delete").addEventListener("click", () => { if (selected) removeProto(selected); });
   $("proto-clear").addEventListener("click", clearPreview);
   $("proto-search").addEventListener("input", () => renderList($("proto-search").value || ""));
+
+  // ---- import a .zip (from Export / Export all on another system) --------
+  $("proto-import").addEventListener("click", () => $("proto-import-file").click());
+  $("proto-import-file").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!window.confirm(`Import protocols from "${f.name}"? Files with matching names will be overwritten.`)) return;
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const result = await api("/api/protocols/import", { method: "POST", body: fd });
+      const n = result.imported.length, skipped = result.skipped.length;
+      msg(skipped ? "err" : "ok",
+        `imported ${n} file(s)` + (skipped ? `, skipped ${skipped}: ${result.skipped.map((s) => s.name).join(", ")}` : ""));
+      await refresh();
+    } catch (err) { msg("err", "import failed: " + err.message); }
+  });
 
   refresh();
 })();

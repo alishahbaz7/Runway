@@ -265,3 +265,108 @@ def test_teltonika_build_command_roundtrip():
     rec = out.records[0]
     assert rec.message_type == "command"
     assert rec.extra["command_text"] == "setdigout 1"
+
+
+# --------------------------------------------------------------------------- #
+# AIS-140 (Locate 140B)
+# --------------------------------------------------------------------------- #
+def test_ais140_detect():
+    assert codec("ais140").detect(b"$LGN,VENDOR,...") == 0.9
+    assert codec("ais140").detect(b"\x78\x78\x0d\x01") == 0.0
+
+
+def test_ais140_login_normal_health_emergency():
+    c = codec("ais140")
+    sess = Session(id="t")
+    data = (FIX / "ais140_sample.log").read_bytes()
+
+    login = c.decode(data, sess)
+    assert login.ack == b"+##Received OK"
+    rec = login.records[0]
+    assert rec.message_type == "login"
+    assert rec.device_id == "862631032208018" == sess.device_id
+    assert abs(rec.position.latitude - 28.7589630) < 1e-6
+    assert abs(rec.position.longitude - 77.6277844) < 1e-6
+    data = data[login.consumed:]
+
+    normal = c.decode(data, sess)
+    assert normal.ack == b"+##Received OK"
+    rec = normal.records[0]
+    assert rec.device_id == "862631032208018"     # inherited from the login session
+    assert rec.message_type == "normal"
+    assert rec.speed_kph == 22.5
+    assert rec.heading_deg == 320.55
+    assert rec.satellites == 4
+    assert rec.gps_valid is True
+    assert rec.ignition is True
+    assert rec.alarms == ["connect_main_battery"]          # alert_id 6
+    assert rec.io["ota_update_details"] == "(192.168.1.1,SET:APN,iot)"
+    assert rec.event_time.isoformat() == "2018-03-24T06:01:22+00:00"
+    data = data[normal.consumed:]
+
+    health = c.decode(data, sess)
+    assert health.ack == b"+##Received OK"
+    rec = health.records[0]
+    assert rec.message_type == "health"
+    assert rec.battery_pct == 99
+    assert rec.io["digital_io_status"] == "001100"
+    data = data[health.consumed:]
+
+    emergency = c.decode(data, sess)
+    assert emergency.ack is None                          # no ack required for EPB
+    rec = emergency.records[0]
+    assert rec.message_type == "emergency"
+    assert rec.alarms == ["emergency"]
+    assert abs(rec.position.latitude - 30.8825130) < 1e-6
+    assert rec.io["vehicle_reg_no"] == "PB10CE0911"
+
+
+def test_ais140_resync_on_garbage():
+    c = codec("ais140")
+    good = b"$LGN,VENDOR,DL01PC9821,862631032208018,1.6.5,AIS140,28.7589630,N,77.6277844,E*54"
+    out = c.decode(b"\x00\x00junk" + good, Session(id="t"))
+    assert 0 < out.consumed <= len(b"\x00\x00junk")        # drops junk to the next '$'
+
+
+# -- real Locate 140B ("LOCT14A") wire traffic — headers/fields confirmed against a live
+# capture, which diverges from the v1.9 doc: LGN has only 7 fields (IMEI one slot earlier),
+# and PVT/HLM replace NMP/HLP with a different (but internally consistent) tail layout.
+def test_ais140_real_login_short_layout():
+    c = codec("ais140")
+    sess = Session(id="t")
+    # No vehicle-name / protocol-version literal, unlike the doc's 9-field LGN.
+    login = b"$LGN,0000,860103062389003,01.3.0,10.07757430,N,76.33675600,E*"
+    out = c.decode(login, sess)
+    rec = out.records[0]
+    assert rec.device_id == "860103062389003" == sess.device_id     # IMEI found by content, not position
+    assert abs(rec.position.latitude - 10.07757430) < 1e-6
+    assert abs(rec.position.longitude - 76.33675600) < 1e-6
+    assert rec.io["firmware_version"] == "01.3.0"
+
+
+def test_ais140_real_pvt_and_hlm():
+    c = codec("ais140")
+    sess = Session(id="t", device_id="868329087318766")
+    pvt = (b"$PVT,LOCT14A,2.2.5,NR,2,H,868329087318766,0000000000,1,03072026,152735,"
+           b"28.550457,N,77.268852,E,000.0,132.84,33,221.064,0.83,0.48,airte ,1,1,13.7,4.1,0,C,"
+           b"31,404,10,092,9305,9304,092,18,96e3,06f,13,d410,092,11,0,0,31,0010,00,027631,BC*\r\n")
+    out = c.decode(pvt, sess)
+    rec = out.records[0]
+    assert rec.message_type == "normal"                    # from packet_type NR, same as NMP
+    assert abs(rec.position.latitude - 28.550457) < 1e-6
+    assert abs(rec.position.longitude - 77.268852) < 1e-6
+    assert rec.satellites == 33
+    assert rec.altitude_m == 221.064
+    assert rec.ignition is True
+    assert rec.gsm_signal == 31
+    assert rec.odometer_m == 27631.0                        # NOT frame_number — confirmed by field count (48)
+    assert rec.io["nmr"][0] == {"cell_id": "9304", "lac": "092", "signal_strength": "18"}
+    assert rec.io["trailer_checksum"] == "BC"               # this firmware's checksum, inline — nothing after '*'
+    assert out.ack == b"+##Received OK"
+
+    hlm = b"$HLM,,01.3.0,860103062389003,100,33,8,20,1,0000,11*"
+    out2 = c.decode(hlm, sess)
+    rec2 = out2.records[0]
+    assert rec2.message_type == "health"                    # HLM maps onto the same builder as HLP
+    assert rec2.battery_pct == 100
+    assert out2.ack == b"+##Received OK"

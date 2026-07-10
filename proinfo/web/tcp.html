@@ -14,40 +14,56 @@
       <span class="tag">Run a TCP server — devices dial in, packets decode live and flow to the Dashboard</span>
     </header>
 
-    <!-- start a listener -->
-    <div id="tcp-bar">
-      <span class="addbar-label">Start listener</span>
-      <label class="tcp-fld">Protocol
-        <select id="tcp-codec"></select>
-      </label>
-      <label class="tcp-fld">Port
-        <input id="tcp-port" type="number" min="1" max="65535" value="5050" />
-      </label>
-      <label class="tcp-fld">IP
-        <input id="tcp-host" type="text" value="0.0.0.0" title="This machine's IP (auto-detected). 0.0.0.0 = all interfaces / reachable on the LAN; 127.0.0.1 = local only" />
-      </label>
-      <button id="tcp-start">▶ Start</button>
-      <span class="spacer"></span>
-      <span id="tcp-localip" class="tcp-localip"></span>
-      <span id="tcp-msg"></span>
-    </div>
+    <!-- browser-style tab strip: one tab per port session; "+" opens a new draft -->
+    <div id="tcp-tabs"></div>
 
     <main id="tcp-main">
-      <!-- LEFT: running listeners + connected clients -->
-      <section id="tcp-listeners-pane">
-        <h2 class="tcp-h">Listeners</h2>
-        <div id="tcp-listeners"><p class="empty">No listeners running. Start one above.</p></div>
+      <!-- LEFT: the "New session" config form (draft tab) OR the focused session + devices -->
+      <section id="tcp-devices-pane">
+        <!-- draft config form — shown only while the "New" tab is focused (replaces the
+             old top banner; same fields, laid out vertically to fit the pane) -->
+        <div id="tcp-config" style="display:none">
+          <span class="addbar-label">Start port session</span>
+          <label class="tcp-fld">Protocol
+            <select id="tcp-codec"></select>
+          </label>
+          <label class="tcp-fld">Port
+            <input id="tcp-port" type="number" min="1" max="65535" value="5050" />
+          </label>
+          <label class="tcp-fld">IP
+            <input id="tcp-host" type="text" value="0.0.0.0" title="This machine's IP (auto-detected). 0.0.0.0 = all interfaces / reachable on the LAN; 127.0.0.1 = local only" />
+          </label>
+          <button id="tcp-start">▶ Start</button>
+          <span id="tcp-localip" class="tcp-localip"></span>
+          <span id="tcp-msg"></span>
+        </div>
+        <div id="tcp-session"></div>
+        <div id="tcp-devices"><p class="empty">Start a port session to see devices here.</p></div>
       </section>
 
-      <!-- RIGHT: live decoded-packet feed -->
+      <!-- RIGHT: live packet feed for the focused port (RAW bytes or Parsed fields) -->
       <section id="tcp-feed-pane">
         <div class="tcp-feed-head">
-          <h2 class="tcp-h">Live packets</h2>
-          <span class="tcp-seg" title="how to show raw/unknown packet bytes">
+          <h2 class="tcp-h">Live packets <span id="tcp-feed-for" class="muted"></span></h2>
+          <span class="tcp-seg" title="show packets as raw bytes or decoded fields">
+            <button id="tcp-view-raw" class="seg on">RAW</button><button id="tcp-view-parsed" class="seg">Parsed</button>
+          </span>
+          <span class="tcp-seg" id="tcp-rawfmt-seg" title="how to show raw packet bytes">
             <button id="tcp-fmt-hex" class="seg on">HEX</button><button id="tcp-fmt-ascii" class="seg">ASCII</button>
           </span>
           <span class="spacer"></span>
           <span id="tcp-feed-count" class="muted"></span>
+          <!-- colour-code legend, tucked behind an ⓘ button to save toolbar space -->
+          <span class="tcp-legend-wrap">
+            <button id="tcp-legend-btn" class="ghost mini" title="what the packet timestamp colours mean" aria-label="packet colour legend">ⓘ</button>
+            <div id="tcp-legend" class="tcp-legend-pop" hidden>
+              <span class="tcp-legend-title">Timestamp colours</span>
+              <span class="pk-leg pk-live"><i class="pk-dot"></i>Live</span>
+              <span class="pk-leg pk-history"><i class="pk-dot"></i>History</span>
+              <span class="pk-leg pk-alarm"><i class="pk-dot"></i>Alarm</span>
+              <span class="pk-leg pk-unknown"><i class="pk-dot"></i>Unknown</span>
+            </div>
+          </span>
           <button id="tcp-log" class="ghost mini" title="save the packets buffered so far (one-time)">⤓ Download</button>
           <button id="tcp-rec" class="ghost mini" title="continuously log every new packet to a file on the server">● Start log</button>
           <button id="tcp-recfile" class="ghost mini" style="display:none" title="download the current/last server log file">⤓ log file</button>
@@ -86,6 +102,8 @@
         <button id="tcp-pkt-close" class="ghost mini danger">✕ Close</button>
       </div>
       <div id="tcp-pkt-meta" class="muted"></div>
+      <h4 class="tcp-pkt-h">Parsed</h4>
+      <pre id="tcp-pkt-parsed" class="json"></pre>
       <h4 class="tcp-pkt-h">ASCII</h4>
       <pre id="tcp-pkt-ascii" class="json"></pre>
       <h4 class="tcp-pkt-h">HEX</h4>
@@ -103,10 +121,10 @@
       <label class="tcp-fld">Format
         <select id="tcp-log-format"><option value="txt">TXT</option><option value="csv">CSV</option></select>
       </label>
-      <label class="tcp-fld">Clients
+      <label class="tcp-fld">Devices
         <select id="tcp-log-scope">
-          <option value="all">All clients</option>
-          <option value="selected">Selected (checked) clients only</option>
+          <option value="all">All devices (every port)</option>
+          <option value="selected">Selected (checked) devices on this port</option>
         </select>
       </label>
       <label class="tcp-fld">Raw as
@@ -152,6 +170,7 @@
   </div>
 
   <script src="shell.js"></script>
+  <script src="common.js"></script>
   <script src="tcp.js"></script>
 </body>
 </html>

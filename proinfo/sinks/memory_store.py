@@ -23,7 +23,11 @@ class MemoryStoreSink(Sink):
     name = "memory_store"
 
     async def handle(self, record: UnifiedRecord) -> None:
-        store.add(record)
+        d = store.add(record)
+        # ws_broadcast runs right after this sink (Pipeline awaits sinks in order) and needs
+        # the same seq the store just stamped — carry it on the record itself rather than
+        # have ws_broadcast re-derive its own (it has no access to the store's counter).
+        record.extra["seq"] = d["seq"]
         info = store.devices.get(record.device_id)
         if info is not None:
             await asyncio.get_event_loop().run_in_executor(None, self._persist, dict(info))

@@ -52,6 +52,11 @@ class Codec(ABC):
     name: str = "codec"
     display_name: str = "Codec"
     description: str = ""        # one-line summary, shown in Configuration -> Protocols
+    # Optional {alarm string -> human label} for every alarm this protocol can raise (the
+    # exact strings it appends to UnifiedRecord.alarms). Lets the QC device view show a
+    # complete pass/fail-style checklist ("seen" vs "never seen") instead of just whatever
+    # happened to occur. Leave empty for protocols with no fixed, documented alarm set.
+    alarm_catalog: dict[str, str] = {}
 
     def detect(self, sample: bytes) -> float:
         """Confidence in [0, 1] that this codec can parse ``sample``.

@@ -13,4 +13,10 @@ class WsBroadcastSink(Sink):
     name = "ws_broadcast"
 
     async def handle(self, record: UnifiedRecord) -> None:
-        await hub.publish({"type": "record", "data": record.model_dump(mode="json")})
+        data = record.model_dump(mode="json")
+        # "seq" isn't a UnifiedRecord field — memory_store stamps it onto record.extra (it
+        # owns the store's counter); hoist it to top-level so the dashboard's Sr No column,
+        # which reads live packets the same way it reads the initial /api/snapshot fetch,
+        # gets a real number instead of undefined for anything pushed after page load.
+        data["seq"] = record.extra.get("seq")
+        await hub.publish({"type": "record", "data": data})

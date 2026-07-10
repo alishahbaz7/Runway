@@ -6,13 +6,19 @@ live store, so the device then shows on the Dashboard (which reads that store).
 
 from __future__ import annotations
 
-from proinfo.core.crc import crc16_ibm
+from proinfo.core.crc import crc16_ibm, crc_itu
 
 
 def _ttk(record: bytes, codec_id: int = 0x08, count: int = 1) -> bytes:
     data = bytes([codec_id, count]) + record + bytes([count])
     return (b"\x00\x00\x00\x00" + len(data).to_bytes(4, "big")
             + data + crc16_ibm(data).to_bytes(4, "big"))
+
+
+def _gt06(proto: int, info: bytes, serial: int = 1) -> bytes:
+    length = 1 + len(info) + 2 + 2
+    body = bytes([length, proto]) + info + serial.to_bytes(2, "big")
+    return b"\x78\x78" + body + crc_itu(body).to_bytes(2, "big") + b"\x0d\x0a"
 
 
 def _rec8() -> bytes:
@@ -189,6 +195,551 @@ async def test_tcp_listen_connect_send_stop():
             # can't remove while running; after stop it drops from the list
             assert (await c.delete(f"/api/jobs/{jid}")).status_code == 200
             assert jid not in {j["id"] for j in (await c.get("/api/jobs")).json()}
+
+
+async def test_qc_start_identify_record_stop():
+    import asyncio
+    import socket
+    from pathlib import Path
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # Target 1: auto-detect protocol mode — no codec named up front.
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1",
+                                                "protocol_mode": "auto", "operator": "tester"})
+        assert r.status_code == 200
+        qc = r.json()
+        qc_id = qc["id"]
+        assert qc["status"] == "running" and qc["protocol_mode"] == "auto"
+
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None, "QC listener did not bind"
+
+        try:
+            imei = b"356307042441013"
+            writer.write(len(imei).to_bytes(2, "big") + imei)
+            await writer.drain()
+            assert await asyncio.wait_for(reader.read(1), 2) == b"\x01"
+
+            writer.write(_ttk(_rec8()))
+            await writer.drain()
+
+            # identity + live count show up without a manual protocol pick
+            await asyncio.sleep(0.3)
+            got = (await c.get(f"/api/qc/{qc_id}")).json()
+            assert got["identified_as"] == "teltonika"
+            assert got["device_id"] == imei.decode()
+            assert got["packet_count"] >= 1
+            assert got["connected"] is True
+
+            # listed among all QC sessions too
+            listed = (await c.get("/api/qc")).json()
+            assert any(s["id"] == qc_id for s in listed)
+        finally:
+            writer.close()
+            stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
+            assert stopped["status"] == "stopped"
+            await asyncio.sleep(0.15)
+
+        # capture file was written to disk with the decoded packet's IMEI + raw hex
+        cap_path = Path(stopped["capture_path"])
+        assert cap_path.exists()
+        text = cap_path.read_text(encoding="utf-8")
+        assert imei.decode() in text
+
+        # the file is also downloadable via the API
+        dl = await c.get(f"/api/qc/{qc_id}/capture")
+        assert dl.status_code == 200 and imei.decode() in dl.text
+
+        # a QC report reflects the same verdict/checks + device identity as the session
+        rep = (await c.get(f"/api/qc/{qc_id}/report")).json()
+        assert rep["device_id"] == imei.decode()
+        assert rep["verdict"] == stopped["verdict"]
+        assert any(chk["key"] == "imei_present" and chk["result"] == "pass" for chk in rep["checks"])
+
+        txt = await c.get(f"/api/qc/{qc_id}/report", params={"fmt": "txt"})
+        assert txt.status_code == 200
+        assert imei.decode() in txt.text and "Verdict:" in txt.text
+        assert f"qc-report-{qc_id}.txt" in txt.headers["content-disposition"]
+
+
+async def test_qc_resume_reuses_same_session():
+    import asyncio
+    import socket
+    from pathlib import Path
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc_id = r.json()["id"]
+
+        async def _send_handshake_and_record():
+            reader = writer = None
+            for _ in range(40):
+                try:
+                    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                    break
+                except OSError:
+                    await asyncio.sleep(0.05)
+            imei = b"356307042441013"
+            writer.write(len(imei).to_bytes(2, "big") + imei)
+            await writer.drain()
+            await asyncio.wait_for(reader.read(1), 2)
+            writer.write(_ttk(_rec8()))
+            await writer.drain()
+            await asyncio.sleep(0.2)
+            writer.close()
+
+        await _send_handshake_and_record()
+        first = (await c.get(f"/api/qc/{qc_id}")).json()
+        assert first["packet_count"] >= 2 and first["identified_as"] == "teltonika"
+
+        stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
+        assert stopped["status"] == "stopped"
+
+        # Starting a genuinely NEW session on the same port is a distinct row (by design —
+        # each device landing is its own QC record); this is what "Start" always does.
+        r2 = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        assert r2.status_code == 200 and r2.json()["id"] != qc_id
+        await c.post(f"/api/qc/{r2.json()['id']}/stop")
+
+        # Resume brings the ORIGINAL session back under the SAME id — no duplicate — and
+        # the packet count keeps climbing rather than resetting to 0.
+        resumed = (await c.post(f"/api/qc/{qc_id}/resume")).json()
+        assert resumed["id"] == qc_id and resumed["status"] == "running"
+        assert resumed["packet_count"] == first["packet_count"]     # carried over, not reset
+
+        await _send_handshake_and_record()
+        after = (await c.get(f"/api/qc/{qc_id}")).json()
+        assert after["packet_count"] > first["packet_count"]         # kept accumulating
+
+        await c.post(f"/api/qc/{qc_id}/stop")
+
+        # still exactly one row for this id; capture file has both runs appended
+        listing = [s for s in (await c.get("/api/qc")).json() if s["id"] == qc_id]
+        assert len(listing) == 1
+        text = Path(after["capture_path"]).read_text(encoding="utf-8")
+        assert text.count("356307042441013") >= 4                   # 2 handshakes + 2 AVL records
+
+
+async def test_qc_self_heals_status_on_bind_failure():
+    """A QC session whose listener fails to bind (e.g. port already taken) must not show
+    status="running" forever -- it should flip to "error" once the failure is noticed."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r1 = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc1 = r1.json()["id"]
+        # give the first listener time to actually bind before the second tries the same port
+        for _ in range(40):
+            try:
+                probe = await asyncio.open_connection("127.0.0.1", port)
+                probe[1].close()
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+
+        r2 = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc2 = r2.json()["id"]
+        assert r2.json()["status"] == "running"    # the bind failure hasn't surfaced yet (async)
+
+        # poll until the self-heal in _qc_view notices the dead job and flips status
+        healed = None
+        for _ in range(40):
+            got = (await c.get(f"/api/qc/{qc2}")).json()
+            if got["status"] != "running":
+                healed = got
+                break
+            await asyncio.sleep(0.05)
+        assert healed is not None, "qc2 never self-healed out of 'running'"
+        assert healed["status"] == "error"
+        assert healed["ended_at"] is not None
+
+        # the first session, which genuinely owns the port, is unaffected
+        assert (await c.get(f"/api/qc/{qc1}")).json()["status"] == "running"
+
+        await c.post(f"/api/qc/{qc1}/stop")
+
+
+async def test_qc_manual_mode_and_gt06_device_id_not_placeholder():
+    """Manual protocol_mode (never exercised above) + a regression guard for a real bug:
+    QcCaptureSink used to only recognise Teltonika's "teltonika-unknown" placeholder, so a
+    GT06 device's real IMEI could be masked by (or confused with) "gt06-unknown"."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "gt06"})
+        qc_id = r.json()["id"]
+        assert r.json()["protocol_mode"] == "manual" and r.json()["protocol"] == "gt06"
+
+        # unknown codec must be rejected outright
+        bad = await c.post("/api/qc/start", json={
+            "port": _free_port(), "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "not-a-codec"})
+        assert bad.status_code == 400
+
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+
+        writer.write(_gt06(0x01, bytes.fromhex("0351091270110476")))
+        await writer.drain()
+        await asyncio.wait_for(reader.read(64), 2)
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        assert got["identified_as"] == "gt06"
+        assert got["device_id"] == "351091270110476"      # the real IMEI ...
+        assert got["device_id"] != "gt06-unknown"          # ... never the placeholder
+
+        writer.close()
+        await c.post(f"/api/qc/{qc_id}/stop")
+
+
+async def test_qc_device_id_is_unique_identifier_across_sessions():
+    """The IMEI (device_id), not the session id/port, is the device's real identity: a
+    device that lands in a brand-new session must be recognised as having been QC'd
+    before, via prior_sessions -- regardless of which port/session it uses this time."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    # A distinct IMEI from the one other GT06 tests use (0351091270110476) -- this test
+    # suite shares one SQLite DB for its whole run (see conftest.py), so qc_sessions rows
+    # from other tests persist; reusing an IMEI would pollute the "first time seen" check.
+    same_imei = bytes.fromhex("0499123456789012")
+
+    async def _run_session(c, port):
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc_id = r.json()["id"]
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        writer.write(_gt06(0x01, same_imei))
+        await writer.drain()
+        await asyncio.wait_for(reader.read(64), 2)
+        await asyncio.sleep(0.3)
+        writer.close()
+        stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
+        return qc_id, stopped
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        qc1, done1 = await _run_session(c, _free_port())
+        assert done1["device_id"] == "499123456789012"
+        assert done1["prior_sessions"] == []          # first time this device has ever been seen
+
+        # a DIFFERENT device (different IMEI) in between must not pollute the history
+        other_imei_port = _free_port()
+        r = await c.post("/api/qc/start", json={"port": other_imei_port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        other_id = r.json()["id"]
+        await c.post(f"/api/qc/{other_id}/stop")
+
+        # same physical device (same IMEI), a genuinely NEW session on a DIFFERENT port
+        qc2, done2 = await _run_session(c, _free_port())
+        assert qc2 != qc1
+        assert done2["device_id"] == "499123456789012"
+        prior_ids = {p["id"] for p in done2["prior_sessions"]}
+        assert prior_ids == {qc1}                     # recognised as the same device as session 1
+        assert other_id not in prior_ids               # the unrelated device never shows up
+
+        # and querying the FIRST session again now also shows the second as prior history
+        refreshed1 = (await c.get(f"/api/qc/{qc1}")).json()
+        assert {p["id"] for p in refreshed1["prior_sessions"]} == {qc2}
+
+
+def _rec8_now() -> bytes:
+    """Same shape as _rec8() but stamped with the current time (_rec8()'s timestamp is a
+    fixed historical constant) -- needed so the packet_cadence check sees a realistic gap
+    to the IMEI handshake record instead of a multi-year one."""
+    import time as _time
+
+    ts = int(_time.time() * 1000).to_bytes(8, "big")
+    gps = (int(88.3 * 1e7).to_bytes(4, "big", signed=True)
+           + int(22.5 * 1e7).to_bytes(4, "big", signed=True)
+           + (100).to_bytes(2, "big", signed=True) + (90).to_bytes(2, "big")
+           + bytes([12]) + (60).to_bytes(2, "big"))
+    io = bytes([0, 1, 1, 239, 1, 0, 0, 0])
+    return ts + bytes([1]) + gps + io
+
+
+def _rec8_bad_fix() -> bytes:
+    """Same shape as _rec8() but 0 satellites and a 0,0 fix -- exercises the QC
+    location_fix/gps_valid_flag "fail" branches against a real decoded packet."""
+    ts = (1719318600000).to_bytes(8, "big")
+    gps = ((0).to_bytes(4, "big", signed=True) + (0).to_bytes(4, "big", signed=True)
+           + (0).to_bytes(2, "big", signed=True) + (0).to_bytes(2, "big")
+           + bytes([0]) + (0).to_bytes(2, "big"))
+    io = bytes([0, 1, 1, 239, 1, 0, 0, 0])
+    return ts + bytes([1]) + gps + io
+
+
+async def test_qc_checks_pass_with_imei_and_valid_fix():
+    """QC Target 2: a session with a real IMEI and a valid GPS fix (12 sats, lat/lon in
+    range) should show imei_present/location_fix/gps_valid_flag as pass, the not-yet-
+    applicable checks as na, and an overall pass verdict -- live, and again after Stop
+    (persisted, not just computed on the fly)."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc_id = r.json()["id"]
+
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+
+        imei = b"356307042441013"
+        writer.write(len(imei).to_bytes(2, "big") + imei)
+        await writer.drain()
+        await asyncio.wait_for(reader.read(1), 2)
+        writer.write(_ttk(_rec8_now()))
+        await writer.drain()
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        by_key = {c_["key"]: c_ for c_ in got["checks"]}
+        assert by_key["imei_present"]["result"] == "pass"
+        assert by_key["location_fix"]["result"] == "pass"
+        assert by_key["gps_valid_flag"]["result"] == "pass"
+        # the IMEI handshake record (received_at ~ now) + this AVL record (event_time ~
+        # now, hence _rec8_now over the shared _rec8 fixture) sit close together in time
+        assert by_key["packet_cadence"]["result"] == "pass"
+        assert by_key["external_voltage"]["result"] == "na"    # no range configured
+        assert got["verdict"] == "pass"
+
+        writer.close()
+        stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
+        assert stopped["verdict"] == "pass"                    # persisted, not just live
+        assert {c_["key"]: c_["result"] for c_ in stopped["checks"]} == \
+            {c_["key"]: c_["result"] for c_ in got["checks"]}
+
+
+async def test_qc_checks_fail_with_no_gps_fix():
+    """A device that never gets a GPS fix (0 satellites, 0,0 position) must fail
+    location_fix and gps_valid_flag even though its IMEI is known -- fail beats pass in
+    the overall verdict."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc_id = r.json()["id"]
+
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+
+        imei = b"356307042441099"
+        writer.write(len(imei).to_bytes(2, "big") + imei)
+        await writer.drain()
+        await asyncio.wait_for(reader.read(1), 2)
+        writer.write(_ttk(_rec8_bad_fix()))
+        await writer.drain()
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        by_key = {c_["key"]: c_ for c_ in got["checks"]}
+        assert by_key["imei_present"]["result"] == "pass"
+        assert by_key["location_fix"]["result"] == "fail"
+        assert by_key["gps_valid_flag"]["result"] == "fail"
+        assert got["verdict"] == "fail"
+
+        writer.close()
+        await c.post(f"/api/qc/{qc_id}/stop")
+
+
+def _ais140_lgn(imei: bytes, firmware: str = "01.3.0") -> bytes:
+    return f"$LGN,0000,{imei.decode()},{firmware},10.07757430,N,76.33675600,E*\r\n".encode()
+
+
+_AIS140_PVT_TEMPLATE = (
+    "LOCT14A,2.2.5,NR,{alert},H,{imei},0000000000,1,03072026,152735,"
+    "28.550457,N,77.268852,E,000.0,132.84,33,221.064,0.83,0.48,airte ,1,1,13.7,4.1,0,C,"
+    "31,404,10,092,9305,9304,092,18,96e3,06f,13,d410,092,11,0,0,31,0010,00,027631,BC")
+
+
+def _ais140_pvt(imei: bytes, alert_id: int) -> bytes:
+    return (b"$PVT," + _AIS140_PVT_TEMPLATE.format(alert=alert_id, imei=imei.decode()).encode() + b"*\r\n")
+
+
+async def test_qc_device_summary_firmware_and_alarm_coverage():
+    """QC device drill-down (click IMEI): firmware from the login packet + a checklist of
+    every alarm the AIS-140 codec's alarm_catalog defines (16 total), seen vs never-seen,
+    aggregated from proinfo.storage.live's process-wide per-device history -- not scoped
+    to this one QC session, same cross-session identity model as prior_sessions."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+    from proinfo.codecs.ais140 import Ais140Codec
+
+    def _free_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    imei = b"868329087399999"
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "ais140"})
+        qc_id = r.json()["id"]
+
+        reader = writer = None
+        for _ in range(40):
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+
+        writer.write(_ais140_lgn(imei))
+        await writer.drain()
+        await asyncio.wait_for(reader.read(64), 2)
+
+        writer.write(_ais140_pvt(imei, 4))      # low_battery
+        await writer.drain()
+        await asyncio.wait_for(reader.read(64), 2)
+
+        writer.write(_ais140_pvt(imei, 13))     # harsh_braking
+        await writer.drain()
+        await asyncio.wait_for(reader.read(64), 2)
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/device/{imei.decode()}")).json()
+        assert got["protocol"] == "ais140"
+        assert got["device_info"]["firmware_version"] == "01.3.0"
+        assert len(got["alarms"]) == len(Ais140Codec.alarm_catalog)
+        by_key = {a["key"]: a for a in got["alarms"]}
+        assert by_key["low_battery"]["seen"] is True and by_key["low_battery"]["count"] == 1
+        assert by_key["harsh_braking"]["seen"] is True and by_key["harsh_braking"]["count"] == 1
+        assert by_key["device_tampered"]["seen"] is False and by_key["device_tampered"]["count"] == 0
+
+        writer.close()
+        await c.post(f"/api/qc/{qc_id}/stop")
+
+
+async def test_qc_device_summary_404_for_unknown_device():
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/qc/device/no-such-imei-ever")
+        assert r.status_code == 404
 
 
 async def test_parse_stream_emits_result():
