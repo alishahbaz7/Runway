@@ -44,7 +44,8 @@ from ..core import registry
 from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..core.pipeline import Pipeline
-from ..qc.session import QcCaptureSink
+from ..qc import engine as qc_engine
+from ..qc.session import UNKNOWN_DEVICE_IDS, QcCaptureSink
 from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, packet_log, store
 
@@ -60,6 +61,12 @@ SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signatu
 SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
 PROTOCOLS_DIR = Path(DATA_DIR) / "protocols"       # local repository of protocol definitions
 PROTOCOLS_DIR.mkdir(parents=True, exist_ok=True)
+QC_PROFILES_DIR = Path(DATA_DIR) / "qc" / "profiles"   # per-protocol QC coverage profiles (user overrides)
+# Defaults ship inside the package (like the web assets); data/qc/profiles overrides them.
+if getattr(sys, "frozen", False):
+    QC_DEFAULTS_DIR = Path(getattr(sys, "_MEIPASS", ".")) / "proinfo" / "qc" / "profiles"
+else:
+    QC_DEFAULTS_DIR = Path(__file__).resolve().parent.parent / "qc" / "profiles"
 _SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 
 # Two runtime logs (Diagnostics → Logs):
@@ -105,10 +112,30 @@ _job_seq = 0
 _qc_sinks: dict[int, QcCaptureSink] = {}
 
 
+def _qc_reconcile_startup() -> None:
+    """Reconcile persisted QC sessions against a fresh process.
+
+    Job ids are per-process (job-1, job-2, ...): after a restart every qc_sessions row's
+    job_id points at a dead job — or worse, COLLIDES with a new job that happens to reuse
+    the same id, making an old tab show the new job's devices/live feed. And rows still
+    marked "running" belong to the previous process; nothing is listening for them now.
+    So on boot: clear every row's job_id and flip running -> stopped."""
+    now = time.time()
+    for row in db.qc_sessions():
+        updates: dict = {}
+        if row.get("job_id"):
+            updates["job_id"] = ""
+        if row.get("status") == "running":
+            updates.update(status="stopped", ended_at=row.get("ended_at") or now)
+        if updates:
+            db.qc_update(row["id"], **updates)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     registry.load_plugins()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _qc_reconcile_startup()
     # Fresh start: the live view begins empty each run. Devices appear only from data fed
     # this session (Parser ingest or live feeds) — we do NOT replay the persisted registry
     # into the live store, so a restart is a clean slate.
@@ -232,6 +259,17 @@ class QcStartBody(BaseModel):
     protocol: str = "auto"              # codec name when manual; ignored (-> "auto") otherwise
     operator: str = ""
     notes: str = ""
+
+
+class QcSkipBody(BaseModel):
+    device_id: str = ""                 # which device's coverage to skip (""=session-level)
+    keys: list[str] = []                # coverage keys the operator marks optional
+
+
+class QcFinalizeBody(BaseModel):
+    device_id: str = ""                 # which device to finalize (""=session-level)
+    verdict: str = ""                   # "" clears; else pass | conditional_pass | fail
+    note: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -1005,19 +1043,158 @@ def _qc_capture_path(qc_id: int) -> Path:
     return d / f"qc-{qc_id}-{stamp}.txt"
 
 
+def _qc_profile(protocol: str) -> Optional[dict]:
+    """The per-protocol QC coverage profile, or None. A user copy in data/qc/profiles wins;
+    otherwise the default shipped inside the package is used. Read each call so an edited
+    profile is picked up without a restart (files are small)."""
+    if not protocol:
+        return None
+    for base in (QC_PROFILES_DIR, QC_DEFAULTS_DIR):
+        p = base / f"{protocol}.json"
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return None
+
+
+def _qc_last_recv_epoch(records) -> Optional[float]:
+    """Most-recent RECEIVE time across a session's records (drives idle/timeout — uses
+    received_at, not the device's reported event_time which history packets backdate)."""
+    best = None
+    for r in records:
+        t = getattr(r, "received_at", None)
+        if t is not None:
+            e = t.timestamp()
+            if best is None or e > best:
+                best = e
+    return best
+
+
+# Worst-first ranking so a lot's verdict = its worst unit (any fail -> lot fails).
+_VERDICT_RANK = {"": 0, "pass": 1, "conditional_pass": 2, "in_progress": 3, "timeout": 4, "fail": 5}
+
+
+def _jloads_dict(s: str) -> dict:
+    try:
+        v = json.loads(s or "{}")
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def _device_verdict(cov: list, checks_verdict: str, meta: dict) -> str:
+    """Verdict for one device (or an unidentified session). Coverage-driven when a catalog
+    is present; otherwise the legacy checks pass/fail — but an abandoned session (idle past
+    the timeout) flips to 'timeout' regardless (Change 1)."""
+    if meta.get("finalized_verdict"):
+        return meta["finalized_verdict"]
+    if not meta.get("packet_count"):
+        return ""
+    if cov:
+        return qc_engine.overall_verdict(cov, meta)
+    now, last = meta.get("now"), meta.get("last_packet_epoch")
+    stale = meta.get("stale_timeout_s") or qc_engine.DEFAULT_CONFIG["stale_timeout_s"]
+    idle = (now - last) if (now and last) else None
+    if idle is not None and idle >= stale:
+        return "timeout"
+    return checks_verdict
+
+
+def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_at, now) -> list:
+    """Group a session's records by device id (IMEI) and compute per-device coverage +
+    verdict + identity. One entry per physical device — a reconnect (new peer) merges into
+    the same device rather than adding a row."""
+    from collections import OrderedDict
+    groups: "OrderedDict[str, list]" = OrderedDict()
+    for r in records:
+        did = r.device_id
+        if did and did not in UNKNOWN_DEVICE_IDS:
+            groups.setdefault(did, []).append(r)
+    stale = (profile or {}).get("stale_timeout_s")
+    out = []
+    for did, recs in groups.items():
+        cov = qc_engine.coverage(recs, catalog) if catalog else []
+        last = _qc_last_recv_epoch(recs)
+        checks, checks_verdict = qc_engine.evaluate(recs, {"device_id": did, "started_at": started_at})
+        meta = {"packet_count": len(recs), "now": now, "last_packet_epoch": last,
+                "stale_timeout_s": stale, "skipped": skipped_map.get(did) or [],
+                "finalized_verdict": finalized_map.get(did) or ""}
+        fw = vend = ""
+        for r in recs:
+            io = r.io or {}
+            fw = io.get("firmware_version") or fw
+            vend = io.get("vendor_id") or vend
+        out.append({
+            "device_id": did, "packet_count": len(recs),
+            "coverage": cov, "checks": checks,
+            "verdict": _device_verdict(cov, checks_verdict, meta),
+            "idle_s": (now - last) if last else None, "last_seen": last,
+            "peers": sorted({r.peer for r in recs if r.peer}),
+            "firmware_version": fw, "vendor_id": vend,
+            "skipped": skipped_map.get(did) or [],
+            "finalized_verdict": finalized_map.get(did) or "",
+        })
+    return out
+
+
+def _aggregate_verdict(devices: list, fallback: str) -> str:
+    """Session (tab) verdict: the worst among its devices; if none identified yet, the
+    session-level fallback (which covers the abandoned/unidentified case)."""
+    if not devices:
+        return fallback
+    return max((d["verdict"] for d in devices), key=lambda v: _VERDICT_RANK.get(v, 0))
+
+
+def _qc_compute(row: dict, sink, now: Optional[float] = None) -> dict:
+    """Everything the view/report/stop need from a QC session's records: per-device list,
+    session-level checks/coverage, and the aggregate verdict. Works off the live sink while
+    running; off the persisted snapshots once stopped."""
+    now = now or time.time()
+    skipped_map = _jloads_dict(row.get("skipped_json"))
+    finalized_map = _jloads_dict(row.get("finalized_json"))
+    if sink is not None:
+        profile = _qc_profile(row.get("identified_as") or "")
+        catalog = (profile or {}).get("coverage") or []
+        devices = _qc_devices(sink.records, catalog, profile, skipped_map, finalized_map,
+                              row.get("started_at"), now)
+        checks, checks_verdict = sink.checks()
+        sess_cov = qc_engine.coverage(sink.records, catalog) if catalog else []
+        sess_last = _qc_last_recv_epoch(sink.records)
+        sess_meta = {"packet_count": sink.count, "now": now, "last_packet_epoch": sess_last,
+                     "stale_timeout_s": (profile or {}).get("stale_timeout_s"),
+                     "skipped": skipped_map.get("") or [],
+                     "finalized_verdict": row.get("finalized_verdict") or ""}
+        fallback = _device_verdict(sess_cov, checks_verdict, sess_meta)
+        return {"devices": devices, "checks": checks, "coverage": sess_cov,
+                "verdict": _aggregate_verdict(devices, fallback),
+                "idle_s": (now - sess_last) if sess_last else None}
+    # stopped: persisted snapshots
+    return {"devices": json.loads(row.get("devices_json") or "[]"),
+            "checks": json.loads(row.get("checks_json") or "[]"),
+            "coverage": json.loads(row.get("coverage_json") or "[]"),
+            "verdict": row.get("finalized_verdict") or row.get("verdict", ""),
+            "idle_s": None}
+
+
 def _qc_view(qc_id: int) -> dict:
     row = db.qc_session(qc_id)
     if row is None:
         raise HTTPException(404, "QC session not found")
     row = dict(row)
     sink = _qc_sinks.get(qc_id)
-    if sink is not None:                          # live counters + checks while the session runs
+    if sink is not None:                          # live identity/counters while running
         row["packet_count"] = sink.count
         row["identified_as"] = sink.identified_as or row.get("identified_as", "")
         row["device_id"] = sink.device_id or row.get("device_id", "")
-        row["checks"], row["verdict"] = sink.checks()
-    else:                                          # stopped: whatever was last persisted
-        row["checks"] = json.loads(row.get("checks_json") or "[]")
+    comp = _qc_compute(row, sink)
+    row["devices"] = comp["devices"]
+    row["checks"] = comp["checks"]
+    row["coverage"] = comp["coverage"]
+    row["verdict"] = comp["verdict"]
+    row["idle_s"] = comp["idle_s"]
+    row["skipped"] = _jloads_dict(row.get("skipped_json"))
+    row["capture_mode"] = row.get("capture_mode") or "full"
     jid = row.get("job_id")
     jv = _job_view(jid) if jid else {}
     row["connected"] = bool(jv.get("peers"))
@@ -1027,12 +1204,16 @@ def _qc_view(qc_id: int) -> dict:
     # use elsewhere) — that failure surfaces asynchronously on the job, not synchronously
     # from /api/qc/start. Without this, qc_sessions.status would show "running" forever
     # even though nothing is actually listening. Reconcile it the next time this session
-    # is viewed (list/get/poll all go through here).
-    if row["status"] == "running" and job_status in ("error", "stopped", "done"):
+    # is viewed (list/get/poll all go through here). Also covers the job having VANISHED
+    # (unknown to this process, e.g. after a restart): nothing is listening then either.
+    job_gone = not jid or jid not in _jobs
+    if row["status"] == "running" and (job_gone or job_status in ("error", "stopped", "done")):
         new_status = "error" if job_status == "error" else "stopped"
         ended = time.time()
         db.qc_update(qc_id, status=new_status, ended_at=ended,
-                     checks_json=json.dumps(row["checks"]), verdict=row["verdict"])
+                     checks_json=json.dumps(row["checks"]),
+                     coverage_json=json.dumps(row["coverage"]),
+                     devices_json=json.dumps(row["devices"]), verdict=row["verdict"])
         _qc_sinks.pop(qc_id, None)
         row["status"] = new_status
         row["ended_at"] = ended
@@ -1150,13 +1331,60 @@ async def qc_stop(qc_id: int):
             j["status"] = "stopped"
             j["ended"] = time.time()
         _tasks[jid].cancel()
-    sink = _qc_sinks.pop(qc_id, None)
-    checks, verdict = sink.checks() if sink else (json.loads(row.get("checks_json") or "[]"), row.get("verdict", ""))
+    sink = _qc_sinks.get(qc_id)
+    # Evaluate with the sink's records still in hand so the persisted per-device coverage/
+    # verdict are the final ones (the sink is dropped right after).
+    row2 = dict(row)
+    if sink is not None:
+        row2["identified_as"] = sink.identified_as or row2.get("identified_as", "")
+        row2["device_id"] = sink.device_id or row2.get("device_id", "")
+    comp = _qc_compute(row2, sink)
+    _qc_sinks.pop(qc_id, None)
     db.qc_update(qc_id, status="stopped", ended_at=time.time(),
                  packet_count=(sink.count if sink else row.get("packet_count", 0)),
                  identified_as=(sink.identified_as if sink else row.get("identified_as", "")),
                  device_id=(sink.device_id if sink else row.get("device_id", "")),
-                 checks_json=json.dumps(checks), verdict=verdict)
+                 checks_json=json.dumps(comp["checks"]), coverage_json=json.dumps(comp["coverage"]),
+                 devices_json=json.dumps(comp["devices"]), verdict=comp["verdict"])
+    await _qc_publish(qc_id)
+    return _qc_view(qc_id)
+
+
+@app.post("/api/qc/{qc_id}/skip")
+async def qc_skip(qc_id: int, body: QcSkipBody):
+    """Mark coverage items optional for a device on this session (bench can't always trigger
+    every alarm). A required item that's skipped no longer blocks that device — it settles
+    as Conditional Pass instead of staying in-progress. Keyed per device_id."""
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    m = _jloads_dict(row.get("skipped_json"))
+    m[body.device_id or ""] = sorted(set(body.keys))
+    db.qc_update(qc_id, skipped_json=json.dumps(m))
+    await _qc_publish(qc_id)
+    return _qc_view(qc_id)
+
+
+@app.post("/api/qc/{qc_id}/finalize")
+async def qc_finalize(qc_id: int, body: QcFinalizeBody):
+    """Operator's explicit verdict for a device — overrides the computed state ('Pass with
+    conditions' -> conditional_pass, or an outright fail). Pass verdict='' to clear it.
+    device_id="" targets the session-level fallback (unidentified sessions)."""
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    v = body.verdict or ""
+    if v and v not in ("pass", "conditional_pass", "fail"):
+        raise HTTPException(400, "verdict must be pass, conditional_pass, fail, or empty")
+    if body.device_id:
+        m = _jloads_dict(row.get("finalized_json"))
+        if v:
+            m[body.device_id] = v
+        else:
+            m.pop(body.device_id, None)
+        db.qc_update(qc_id, finalized_json=json.dumps(m))
+    else:
+        db.qc_update(qc_id, finalized_verdict=v)
     await _qc_publish(qc_id)
     return _qc_view(qc_id)
 
@@ -1186,6 +1414,9 @@ async def qc_report(qc_id: int, fmt: str = "json"):
         "packet_count": v.get("packet_count", 0),
         "started_at": v["started_at"], "ended_at": v.get("ended_at"),
         "checks": v.get("checks") or [],
+        "coverage": v.get("coverage") or [],
+        "devices": v.get("devices") or [],
+        "skipped": v.get("skipped") or {},
         "prior_session_count": len(v.get("prior_sessions") or []),
     }
     if fmt not in ("csv", "txt"):
@@ -1207,6 +1438,16 @@ async def qc_report(qc_id: int, fmt: str = "json"):
     ]
     for c in report["checks"]:
         lines.append(f"  [{c['result'].upper():4}] {c['label']} — {c['detail']}")
+    # Per-device packet coverage (one block per device — mirrors the Raw Data sheets).
+    for d in report["devices"]:
+        skipped = set(d.get("skipped") or [])
+        lines += ["", f"Device {d['device_id']} — {str(d.get('verdict') or 'n/a').upper()}"
+                      f"  (fw {d.get('firmware_version') or '-'}, vendor {d.get('vendor_id') or '-'},"
+                      f" {d.get('packet_count', 0)} packets)"]
+        for c in d.get("coverage") or []:
+            req = "required" if c.get("required") else "optional"
+            state = ("skipped" if c["key"] in skipped else "seen" if c.get("seen") else "MISSING")
+            lines.append(f"    [{state.upper():7}] {c['label']} ({req}) — {c.get('count', 0)}×")
     if report["notes"]:
         lines += ["", f"Notes: {report['notes']}"]
     content = "\n".join(lines) + "\n"

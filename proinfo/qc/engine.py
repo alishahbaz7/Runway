@@ -17,9 +17,9 @@ from .session import UNKNOWN_DEVICE_IDS
 
 DEFAULT_CONFIG = {
     "location_window_s": 60,     # a valid GPS fix must appear within this many seconds of session start
-    "cadence_max_s": 30,         # largest allowed gap between consecutive packets
     "voltage_min": None,         # external_v range — na until an operator configures it
     "voltage_max": None,
+    "stale_timeout_s": 600,      # no data for this long (required items still missing) -> timeout
 }
 
 
@@ -54,17 +54,6 @@ def _check_gps_valid_flag(records: list[UnifiedRecord], meta: dict, config: dict
     return "fail", "gps_valid never true"
 
 
-def _check_packet_cadence(records: list[UnifiedRecord], meta: dict, config: dict) -> tuple[str, str]:
-    max_s = config["cadence_max_s"]
-    times = sorted(t for t in (_record_epoch(r) for r in records) if t is not None)
-    if len(times) < 2:
-        return "na", "fewer than 2 packets"
-    worst = max(b - a for a, b in zip(times, times[1:]))
-    if worst <= max_s:
-        return "pass", f"largest gap {worst:.0f}s"
-    return "fail", f"largest gap {worst:.0f}s > {max_s}s"
-
-
 def _check_external_voltage(records: list[UnifiedRecord], meta: dict, config: dict) -> tuple[str, str]:
     vmin, vmax = config["voltage_min"], config["voltage_max"]
     if vmin is None or vmax is None:
@@ -83,7 +72,6 @@ DEFAULT_CHECKS: list[tuple[str, str, Callable]] = [
     ("imei_present", "IMEI present", _check_imei_present),
     ("location_fix", "Valid GPS fix", _check_location_fix),
     ("gps_valid_flag", "GPS valid flag", _check_gps_valid_flag),
-    ("packet_cadence", "Packet cadence", _check_packet_cadence),
     ("external_voltage", "External voltage in range", _check_external_voltage),
 ]
 
@@ -103,3 +91,86 @@ def evaluate(records: list[UnifiedRecord], meta: dict, config: Optional[dict] = 
         result, detail = fn(records, meta, cfg)
         checks.append({"key": key, "label": label, "result": result, "detail": detail})
     return checks, _verdict(checks)
+
+
+# --------------------------------------------------------------------------- #
+# Coverage — did the device exercise each packet type / alert the QC profile expects?
+# The catalogue (which items, their match rule, required/optional) comes from the per-
+# protocol QC profile; this stays pure (the API loads the profile and passes it in).
+# --------------------------------------------------------------------------- #
+def _cov_match(rec: UnifiedRecord, match: dict) -> bool:
+    """Does a record satisfy a coverage item's match rule? Supported keys: message_type,
+    alert_id, packet_type (the codec exposes the latter two in ``io`` for AIS-140)."""
+    if not match:
+        return False
+    io = rec.io or {}
+    for k, v in match.items():
+        if k == "message_type":
+            if (rec.message_type or "") != v:
+                return False
+        elif k == "alert_id":
+            if io.get("alert_id") != v:
+                return False
+        elif k == "packet_type":
+            if io.get("packet_type") != v:
+                return False
+        else:
+            return False
+    return True
+
+
+def coverage(records: list[UnifiedRecord], catalog: list[dict]) -> list[dict]:
+    """For each expected item in the catalogue, how this session has covered it:
+    ``seen``/``count`` + the most-recent matching raw packet (the captured sample) so the
+    UI can show it on hover. ``valid`` stays ``None`` until the field validator (Step 2)."""
+    out = []
+    for item in (catalog or []):
+        matched = [r for r in records if _cov_match(r, item.get("match") or {})]
+        last = matched[-1] if matched else None
+        out.append({
+            "key": item["key"], "label": item.get("label", item["key"]),
+            "required": bool(item.get("required")),
+            # display metadata carried from the profile (UI sections + alert headers)
+            "group": item.get("group", ""), "code": item.get("code", ""),
+            "alert_id": (item.get("match") or {}).get("alert_id"),
+            "seen": bool(matched), "count": len(matched),
+            "last_raw_hex": (last.raw_hex if last else "") or "",
+            "last_seen": (_iso(last) if last else None),
+            "valid": None,
+        })
+    return out
+
+
+def _iso(r: UnifiedRecord) -> Optional[str]:
+    t = r.event_time or r.received_at
+    return t.isoformat() if t else None
+
+
+def overall_verdict(cov: list[dict], meta: dict) -> str:
+    """Coverage-driven session state (used when a QC profile exists for the protocol):
+
+    * ``""``               — no packets yet.
+    * ``in_progress``      — receiving, required set not complete, device still alive.
+    * ``timeout``          — no data for ``stale_timeout_s`` with required items missing
+      (the operator can Resume).
+    * ``pass``             — every required item seen (and valid, once Step 2 lands).
+    * ``conditional_pass`` — all non-skipped required seen, but some were skipped/optional
+      (or, later, had deviations the operator accepted).
+    * a finalized operator verdict overrides everything.
+    """
+    fin = meta.get("finalized_verdict")
+    if fin:
+        return fin
+    packet_count = meta.get("packet_count", 0)
+    if not cov or not packet_count:
+        return "in_progress" if packet_count else ""
+    skipped = set(meta.get("skipped") or [])
+    required = [c for c in cov if c["required"] and c["key"] not in skipped]
+    missing = [c for c in required if not c["seen"]]
+    if not missing:
+        return "conditional_pass" if skipped else "pass"
+    now, last = meta.get("now"), meta.get("last_packet_epoch")
+    stale = meta.get("stale_timeout_s") or DEFAULT_CONFIG["stale_timeout_s"]
+    if now and last and (now - last) >= stale:
+        return "timeout"
+    return "in_progress"

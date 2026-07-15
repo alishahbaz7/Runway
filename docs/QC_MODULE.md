@@ -2,6 +2,10 @@
 
 > **Status: Target 1 implemented** (intake + identify + record). See "Target 1 — as built"
 > below for what actually shipped, file-by-file. Targets 2-4 are still just the plan.
+>
+> **Next: QC validation** (packet coverage, template/parameter checks, alarm validation,
+> iNTouch live check, raw-packet reporting) — the full plan is in
+> **[QC_VALIDATION.md](QC_VALIDATION.md)**.
 
 Draft plan for a **Quality-Control** workflow: a device is put on a bench, dials into a fixed
 port, Runway identifies it, records its traffic, judges pass/fail, produces a report, onboards

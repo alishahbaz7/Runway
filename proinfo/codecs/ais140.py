@@ -62,7 +62,9 @@ _ACK_OK = b"+##Received OK"
 # records ever produced, connection looks "stuck" even though bytes are still arriving.
 _MAX_SENTENCE = 2048
 
-_HEADERS = (b"$LGN,", b"$NMP,", b"$HLP,", b"$EPB,", b"$PVT,", b"$HLM,", b"$NRM,")
+# $HEL is the health header real Locate 140B firmware (2.2.5) sends on the wire — the v1.9
+# doc only names $HLP/$HLM, so both are accepted (see _parse/_ack dispatch).
+_HEADERS = (b"$LGN,", b"$NMP,", b"$HLP,", b"$HEL,", b"$EPB,", b"$PVT,", b"$HLM,", b"$NRM,")
 
 _IMEI_RE = re.compile(r"^\d{14,16}$")
 _FW_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -136,7 +138,7 @@ class Ais140Codec(Codec):
 
     def _ack(self, body: str) -> bytes | None:
         header = body.split(",", 1)[0]
-        return _ACK_OK if header in ("LGN", "NMP", "HLP", "PVT", "HLM", "NRM") else None
+        return _ACK_OK if header in ("LGN", "NMP", "HLP", "HEL", "PVT", "HLM", "NRM") else None
 
     # -- dispatch ------------------------------------------------------------ #
     def _parse(self, body: str, checksum: str | None, session: Session, raw_hex: str) -> UnifiedRecord | None:
@@ -144,7 +146,7 @@ class Ais140Codec(Codec):
         if not sep:
             return None
         builder = {"LGN": self._lgn, "NMP": self._nmp, "PVT": self._nmp, "NRM": self._nmp,
-                   "HLP": self._hlp, "HLM": self._hlp, "EPB": self._epb}.get(header)
+                   "HLP": self._hlp, "HEL": self._hlp, "HLM": self._hlp, "EPB": self._epb}.get(header)
         if builder is None:
             return UnifiedRecord(device_id=session.device_id or "ais140-unknown", protocol=self.name,
                                   message_type="unknown", io={"header": header, "checksum": checksum},
@@ -224,6 +226,10 @@ class Ais140Codec(Codec):
         alert_id = self._int(self._get(f, 4))
 
         io = {
+            # vendor_id (LOCT14A) + firmware from every PVT/NMP, plus the raw packet-type code
+            # and numeric alert id — the QC coverage layer keys on these + device-info reads them.
+            "vendor_id": self._get(f, 1), "firmware_version": self._get(f, 2),
+            "packet_type": ptype, "alert_id": alert_id,
             "packet_status": self._get(f, 5), "vehicle_reg_no": self._get(f, 7),
             "pdop": self._float(self._get(f, 19)), "hdop": self._float(self._get(f, 20)),
             "network_operator": self._get(f, 21), "main_power_status": self._get(f, 23),

@@ -104,9 +104,22 @@ class TcpServerSource(Source):
     async def close(self) -> None:
         if self._server is not None:
             self._server.close()
+            # Drop live client connections too. server.close() only stops ACCEPTING new
+            # sockets — existing ones stay open, and wait_closed() then blocks on them
+            # indefinitely. So a listener stopped while a device is still connected would
+            # hang here forever: the pipeline task never finishes cancelling, its job stays
+            # in _tasks, and the session can't be removed ("stop the session first" 400s).
+            # Closing each writer ends its _handle() read loop so wait_closed() completes;
+            # a timeout is a final backstop so teardown can never block.
+            for w in list(self._writers.values()):
+                try:
+                    w.close()
+                except Exception:
+                    pass
+            self._writers.clear()
             try:
-                await self._server.wait_closed()
-            except Exception:
+                await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
+            except Exception:            # incl. TimeoutError; never let teardown hang
                 pass
             self._server = None
         await self._queue.put(None)

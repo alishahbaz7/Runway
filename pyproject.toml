@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proinfo"
-version = "1.1.1"
+version = "1.1.8"
 description = "ProInfo - Unified telematics protocol parser, visualizer & relay utility"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,7 +31,7 @@ proinfo = "proinfo.cli:main"
 include = ["proinfo*"]
 
 [tool.setuptools.package-data]
-proinfo = ["web/*"]
+proinfo = ["web/*", "qc/profiles/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

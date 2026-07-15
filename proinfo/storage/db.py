@@ -116,7 +116,16 @@ SCHEMA: list[str] = [
 _ALTER_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "qc_sessions": [
         ("checks_json", "TEXT DEFAULT '[]'"),   # QC Target 2: last-evaluated check results
-        ("verdict", "TEXT DEFAULT ''"),         # '' | pass | fail
+        ("verdict", "TEXT DEFAULT ''"),         # '' | in_progress | timeout | pass | conditional_pass | fail
+        # QC coverage (Phase A2): expected-packet coverage snapshot + the operator's
+        # skip/finalize choices + the capture-file mode.
+        ("coverage_json", "TEXT DEFAULT '[]'"),        # session-level coverage (unidentified/aggregate)
+        ("skipped_json", "TEXT DEFAULT '{}'"),         # {device_id: [coverage keys marked optional]}
+        ("finalized_verdict", "TEXT DEFAULT ''"),      # session-level operator override
+        ("finalized_json", "TEXT DEFAULT '{}'"),       # {device_id: operator-set verdict}
+        ("devices_json", "TEXT DEFAULT '[]'"),         # per-device coverage/verdict snapshot (persisted on stop)
+        ("deviations_json", "TEXT DEFAULT '[]'"),      # accepted deviations (Step 2)
+        ("capture_mode", "TEXT DEFAULT 'full'"),       # 'full' = every packet | 'sample' = one per type
     ],
 }
 

@@ -3,6 +3,65 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.8] — 2026-07-15
+
+Feature release. Headline: **Device QC** grows from a basic pass/fail into a real
+per-device qualification workflow, and **Live TCP + Device QC merge into one Capture
+page** with a per-tab Testing/QC mode.
+
+### Added — Capture page (Live TCP + Device QC merged)
+- **One page, one core module** (`capture.html`/`capture.js`) replaces the separate Live TCP
+  and Device QC pages — `tcp.html`/`qc.html` now redirect here. Each session tab picks
+  **Testing** (raw inspection, any protocol, log/download — today's Live TCP behavior) or
+  **QC** (validated per a coverage profile) when it's started; both kinds of tabs coexist,
+  each with its own feed chrome.
+- Shared core: browser-style tabs, per-port/session device list, colour-coded live feed
+  (live/history/alarm/unknown, ⓘ legend popover), packet/send modals, collapsible device
+  list, draft/"+" new-session flow — implemented once instead of duplicated across pages.
+- Rail collapses "Live TCP" + "Device QC" into a single **Capture** item.
+
+### Added — Device QC: per-device coverage & verdict
+- **Per-device grouping (by IMEI)**: a device that reconnects (new peer/port) merges into
+  one row instead of showing as a duplicate; QC coverage, checks, and verdict are computed
+  **per physical device**, not lumped across the whole port session. Multiple devices on one
+  QC port each get their own coverage view — click a device row to select it (drives the
+  feed, the summary pill, and the details modal).
+- **Coverage-driven verdict states**: `in_progress → timeout → pass / conditional_pass /
+  fail`, replacing a flat pass/fail. A session goes to **timeout** after ~10 minutes of no
+  data (regardless of whether a device ever identified) and can be **Resumed**. A required
+  item the operator marks **optional/skip** no longer blocks completion — it settles as
+  **Conditional Pass** instead, with every skip/deviation listed for the record.
+  Operator actions: **Pass with conditions** / **Mark Fail** / clear back to automatic.
+- **QC details modal redesign**: device details (IMEI / firmware / vendor id), coverage
+  split into **Packets** and **Alerts** sections (alert rows show `Label (id - CODE)`,
+  e.g. `Connect back to main battery (6 - BR)`), a **Received** column linking to the
+  captured sample packet, and hover-to-see the item's description + reference packet +
+  what was actually received. Actions live in the modal header (top-right) to keep the
+  body free for coverage. A single verdict+coverage pill (e.g. `IN PROGRESS · 2/13`)
+  replaces the old separate checks-chip row and duplicate verdict badge.
+- **QC coverage profile** (`proinfo/qc/profiles/<protocol>.json`, overridable under
+  `data/qc/profiles/`): declares the expected packet types + alert ids for a protocol,
+  which are required vs optional, and display grouping — editable without code changes.
+- New endpoints: `POST /api/qc/{id}/skip`, `POST /api/qc/{id}/finalize` (both per-device);
+  `/api/qc` and the report now return per-device `devices[]` with their own coverage.
+
+### Fixed
+- **AIS-140 / Locate 140B codec**: real firmware 2.2.5 sends the health packet as `$HEL`
+  (the v1.9 doc only names `$HLP`/`$HLM`) — health packets were misclassified as
+  `unknown`; now parsed correctly. `alert_id`, `packet_type`, `vendor_id` and
+  `firmware_version` are now exposed on every PVT/NMP record (needed for coverage keying
+  and the device-details panel).
+- **Live TCP / Capture: sessions could not be closed while a device stayed connected.**
+  `TcpServerSource.close()` called `server.wait_closed()`, which blocks forever with a live
+  socket still open — a cancelled session's task never left the running set, so stop+close
+  looped on "stop the session first". `close()` now drops every live connection (and bounds
+  the wait with a timeout) so teardown always completes.
+- QC sessions surviving a server restart (stale `job_id`, "running" forever) are now
+  reconciled on startup and self-heal on view; closing a tab no longer resurrects via a
+  late poll/WebSocket update.
+
+[1.1.8]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.8
+
 ## [1.1.0] — 2026-06-30
 
 Feature release. Headline: a **Live TCP server**. Also adds the **Protocols** repository,

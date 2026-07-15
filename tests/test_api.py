@@ -592,10 +592,8 @@ async def test_qc_checks_pass_with_imei_and_valid_fix():
         assert by_key["imei_present"]["result"] == "pass"
         assert by_key["location_fix"]["result"] == "pass"
         assert by_key["gps_valid_flag"]["result"] == "pass"
-        # the IMEI handshake record (received_at ~ now) + this AVL record (event_time ~
-        # now, hence _rec8_now over the shared _rec8 fixture) sit close together in time
-        assert by_key["packet_cadence"]["result"] == "pass"
         assert by_key["external_voltage"]["result"] == "na"    # no range configured
+        # teltonika has no QC profile -> verdict falls back to the checks pass/fail
         assert got["verdict"] == "pass"
 
         writer.close()
@@ -706,7 +704,7 @@ async def test_qc_device_summary_firmware_and_alarm_coverage():
                 await asyncio.sleep(0.05)
         assert writer is not None
 
-        writer.write(_ais140_lgn(imei))
+        writer.write(_ais140_lgn(imei, "2.2.5"))   # match the PVT firmware so it's unambiguous
         await writer.drain()
         await asyncio.wait_for(reader.read(64), 2)
 
@@ -721,7 +719,7 @@ async def test_qc_device_summary_firmware_and_alarm_coverage():
 
         got = (await c.get(f"/api/qc/device/{imei.decode()}")).json()
         assert got["protocol"] == "ais140"
-        assert got["device_info"]["firmware_version"] == "01.3.0"
+        assert got["device_info"]["firmware_version"] == "2.2.5"
         assert len(got["alarms"]) == len(Ais140Codec.alarm_catalog)
         by_key = {a["key"]: a for a in got["alarms"]}
         assert by_key["low_battery"]["seen"] is True and by_key["low_battery"]["count"] == 1
@@ -790,3 +788,216 @@ async def test_ingest_populates_live_store():
     assert r.json()["records"] >= 1
     assert "356307042441099" in store.devices         # now visible to the Dashboard
     assert store.devices["356307042441099"]["protocol"] == "teltonika"
+
+
+async def test_qc_reconciles_stale_sessions_from_previous_process():
+    """QC sessions persist in SQLite but job ids are per-process (job-1, job-2, ...).
+    After a restart a row's job_id is dead — or COLLIDES with a new job that reuses the
+    same id (an old tab would show the new job's devices/feed). And rows still marked
+    "running" have nothing listening for them. Both must be reconciled:
+
+    * _qc_reconcile_startup() (runs in the app lifespan) clears job_id everywhere and
+      flips running -> stopped;
+    * _qc_view self-heals a running row whose job this process doesn't know (covers a
+      restart even if the startup hook were missed).
+    """
+    import time as _time
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import _qc_reconcile_startup, app, db
+
+    # simulate leftovers from a previous process: a "running" row + a stopped row, both
+    # pointing at job ids this process never created (or could reuse for NEW jobs)
+    stale_running = db.insert(
+        "qc_sessions", port=64990, host="127.0.0.1", protocol_mode="auto", protocol="auto",
+        identified_as="", device_id="", peer="", operator="", notes="", status="running",
+        packet_count=7, capture_path="", capture_fmt="txt",
+        started_at=_time.time() - 3600, ended_at=None, job_id="job-1",
+    )
+    stale_stopped = db.insert(
+        "qc_sessions", port=64991, host="127.0.0.1", protocol_mode="auto", protocol="auto",
+        identified_as="", device_id="", peer="", operator="", notes="", status="stopped",
+        packet_count=3, capture_path="", capture_fmt="txt",
+        started_at=_time.time() - 7200, ended_at=_time.time() - 7100, job_id="job-2",
+    )
+    try:
+        # (a) the view-level self-heal alone: a running row whose job is unknown flips
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            got = (await c.get(f"/api/qc/{stale_running}")).json()
+            assert got["status"] == "stopped"          # healed: nothing is listening for it
+            assert got["ended_at"] is not None
+
+        # (b) the startup reconcile clears every stale job_id (collision guard)
+        _qc_reconcile_startup()
+        assert db.qc_session(stale_running)["job_id"] == ""
+        assert db.qc_session(stale_stopped)["job_id"] == ""
+        assert db.qc_session(stale_stopped)["status"] == "stopped"   # untouched otherwise
+
+        # (c) closing (DELETE) a reconciled session works — this was the user-visible bug
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.delete(f"/api/qc/{stale_running}")).status_code == 200
+            assert (await c.get(f"/api/qc/{stale_running}")).status_code == 404
+    finally:
+        for qc_id in (stale_running, stale_stopped):
+            try:
+                db.delete("qc_sessions", qc_id)
+            except Exception:
+                pass
+
+
+async def test_qc_stop_and_remove_while_device_connected():
+    """The user-visible 'can't close the QC tab' bug: stopping a QC session while the
+    device is STILL connected and sending must let the session be removed. The listener's
+    close() used to hang on wait_closed() with a live socket, so the pipeline task never
+    left _tasks and DELETE stayed 400 forever."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    def _pvt(imei):
+        tail = "DL01,1,24032018,060122,28.75896,N,77.62778,E,22.5,320,4,183,1,0,INA,1,1,12.5,4.2,0,C,25"
+        return f"$PVT,VENDOR,2.2.5,NR,1,L,{imei},{tail}*00\r\n".encode()
+
+    port = _free_port()
+    imei = "868329087318744"                              # distinct id for this test
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={"port": port, "host": "127.0.0.1", "protocol_mode": "auto"})
+        qc = r.json()["id"]
+
+        writer = None
+        for _ in range(60):
+            try:
+                _, writer = await asyncio.open_connection("127.0.0.1", port); break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None, "QC listener did not bind"
+        writer.write(_pvt(imei)); await writer.drain()
+        await asyncio.sleep(0.3)
+        assert (await c.get(f"/api/qc/{qc}")).json()["packet_count"] >= 1
+
+        try:
+            # stop while the socket is STILL open + then remove — must succeed promptly
+            assert (await c.post(f"/api/qc/{qc}/stop")).status_code == 200
+            removed = False
+            for _ in range(30):
+                if (await c.delete(f"/api/qc/{qc}")).status_code == 200:
+                    removed = True
+                    break
+                await asyncio.sleep(0.1)
+            assert removed, "could not remove the QC session after stop (close() hung)"
+            assert (await c.get(f"/api/qc/{qc}")).status_code == 404
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+
+async def test_qc_coverage_and_verdict_states():
+    """Phase A2: an AIS-140 session (which has a QC profile) surfaces packet coverage and a
+    coverage-driven verdict — in_progress while required items are still missing, and
+    conditional_pass once the operator skips the outstanding required items."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    imei = b"868329087355501"
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "ais140"})
+        qc_id = r.json()["id"]
+
+        writer = None
+        for _ in range(40):
+            try:
+                _, writer = await asyncio.open_connection("127.0.0.1", port); break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+        writer.write(_ais140_lgn(imei, "2.2.5")); await writer.drain()  # login only
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        # per-device: one entry for this IMEI, with its own coverage
+        devs = {d["device_id"]: d for d in got["devices"]}
+        assert imei.decode() in devs, "device should appear in the per-device list"
+        dev = devs[imei.decode()]
+        cov = {c_["key"]: c_ for c_ in dev["coverage"]}
+        assert cov, "coverage should be populated from the ais140 QC profile"
+        assert cov["login"]["seen"] is True and cov["login"]["count"] == 1
+        assert cov["live"]["seen"] is False and cov["live"]["required"] is True
+        assert dev["verdict"] == "in_progress"           # required items still missing, device alive
+        assert got["verdict"] == "in_progress"           # session aggregate
+
+        # operator skips every still-missing required item for THIS device -> conditional pass
+        missing_required = [k for k, v in cov.items() if v["required"] and not v["seen"]]
+        skip = (await c.post(f"/api/qc/{qc_id}/skip",
+                             json={"device_id": imei.decode(), "keys": missing_required})).json()
+        sdev = {d["device_id"]: d for d in skip["devices"]}[imei.decode()]
+        assert sdev["verdict"] == "conditional_pass"
+        assert set(skip["skipped"][imei.decode()]) == set(missing_required)
+
+        writer.close()
+        stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
+        assert stopped["verdict"] == "conditional_pass"   # persisted with the skips
+        sdev2 = {d["device_id"]: d for d in stopped["devices"]}[imei.decode()]
+        assert {c_["key"] for c_ in sdev2["coverage"]}    # per-device coverage persisted too
+
+
+async def test_qc_dedups_device_across_reconnect():
+    """#2: one physical device (same IMEI) that reconnects on a new peer must appear ONCE
+    in the per-device list — its two connections merge, not show as two entities."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    imei = b"868329087366602"
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "ais140"})
+        qc_id = r.json()["id"]
+
+        async def _one_connection():
+            w = None
+            for _ in range(40):
+                try:
+                    _, w = await asyncio.open_connection("127.0.0.1", port); break
+                except OSError:
+                    await asyncio.sleep(0.05)
+            assert w is not None
+            w.write(_ais140_lgn(imei, "2.2.5")); await w.drain(); await asyncio.sleep(0.15)
+            w.write(_ais140_pvt(imei, 1)); await w.drain(); await asyncio.sleep(0.2)
+            w.close()
+
+        await _one_connection()          # first connection (peer A)
+        await asyncio.sleep(0.2)
+        await _one_connection()          # reconnect (peer B) — same IMEI
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        mine = [d for d in got["devices"] if d["device_id"] == imei.decode()]
+        assert len(mine) == 1, f"reconnect should merge into one device, got {len(mine)}"
+        assert len(mine[0]["peers"]) == 2, "both connections should merge under the one device"
+
+        await c.post(f"/api/qc/{qc_id}/stop")

@@ -2,107 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runway · Device QC</title>
-  <link rel="stylesheet" href="style.css" />
+  <!-- Live TCP + Device QC merged into one Capture page (per-tab Testing/QC mode). -->
+  <meta http-equiv="refresh" content="0; url=capture.html" />
+  <title>Runway · Capture</title>
 </head>
-<body data-page="qc">
-  <!-- #rail is injected here by shell.js -->
-  <div id="content">
-    <header>
-      <h1>Device QC</h1>
-      <span class="tag">Land a device on a static port, identify its protocol, and record the session</span>
-    </header>
-
-    <!-- start a QC session -->
-    <div id="qc-bar">
-      <span class="addbar-label">Start QC session</span>
-      <label class="tcp-fld">Port
-        <input id="qc-port" type="number" min="1" max="65535" placeholder="e.g. 6000" />
-      </label>
-      <label class="tcp-fld">IP
-        <input id="qc-host" type="text" value="0.0.0.0" title="This machine's IP (auto-detected). 0.0.0.0 = all interfaces / reachable on the LAN; 127.0.0.1 = local only" />
-      </label>
-      <label class="tcp-fld">Protocol
-        <select id="qc-mode">
-          <option value="auto">Auto-detect</option>
-          <option value="manual">Manual selection</option>
-        </select>
-      </label>
-      <label class="tcp-fld" id="qc-protocol-fld" style="display:none">Select protocol
-        <select id="qc-protocol"></select>
-      </label>
-      <label class="tcp-fld">Operator
-        <input id="qc-operator" type="text" placeholder="optional" />
-      </label>
-      <button id="qc-start">▶ Start QC</button>
-      <span class="spacer"></span>
-      <span id="qc-localip" class="tcp-localip"></span>
-      <span id="qc-msg"></span>
-    </div>
-
-    <!-- one tab per open QC session/port -->
-    <div id="qc-tabs"><p class="empty">No QC sessions yet. Start one above.</p></div>
-
-    <main id="qc-main">
-      <!-- CENTER: live decoded-packet feed for the selected port -->
-      <section id="qc-feed-pane">
-        <div class="tcp-feed-head">
-          <h2 class="tcp-h">Live packets <span id="qc-feed-for" class="muted"></span></h2>
-          <span id="qc-feed-verdict"></span>
-          <span class="tcp-seg" title="how to show raw/unknown packet bytes">
-            <button id="qc-fmt-hex" class="seg on">HEX</button><button id="qc-fmt-ascii" class="seg">ASCII</button>
-          </span>
-          <span class="spacer"></span>
-          <span id="qc-feed-count" class="muted"></span>
-          <div id="qc-feed-actions"></div>
-          <button id="qc-feed-clear" class="ghost mini danger">Clear</button>
-        </div>
-        <div id="qc-checks-row" class="qc-checks"></div>
-        <div id="qc-feed"><p class="empty">Start a QC session and connect a device to see packets here.</p></div>
-      </section>
-
-      <!-- RIGHT: device info (firmware/vendor/alarm coverage), keyed by the selected port's IMEI -->
-      <section id="qc-device-pane">
-        <h2 class="tcp-h">Device info</h2>
-        <div id="qc-device-panel"><p class="empty">Select a port above once a device connects.</p></div>
-      </section>
-    </main>
-  </div>
-
-  <!-- full packet view -->
-  <div id="qc-pkt-modal" class="tcp-modal" style="display:none">
-    <div class="tcp-modal-card tcp-pkt-card">
-      <div class="tcp-pkt-head">
-        <h3>Packet</h3><span class="spacer"></span>
-        <button id="qc-pkt-close" class="ghost mini danger">✕ Close</button>
-      </div>
-      <div id="qc-pkt-meta" class="muted"></div>
-      <h4 class="tcp-pkt-h">ASCII</h4>
-      <pre id="qc-pkt-ascii" class="json"></pre>
-      <h4 class="tcp-pkt-h">HEX</h4>
-      <pre id="qc-pkt-hex" class="json"></pre>
-    </div>
-  </div>
-
-  <!-- QC report (verdict + checks) -->
-  <div id="qc-report-modal" class="tcp-modal" style="display:none">
-    <div class="tcp-modal-card tcp-pkt-card">
-      <div class="tcp-pkt-head">
-        <h3>QC Report <span id="qc-report-verdict" class="qc-verdict"></span></h3>
-        <span class="spacer"></span>
-        <button id="qc-report-json" class="ghost mini">⤓ JSON</button>
-        <button id="qc-report-txt" class="ghost mini">⤓ TXT</button>
-        <button id="qc-report-close" class="ghost mini danger">✕ Close</button>
-      </div>
-      <div id="qc-report-meta" class="muted"></div>
-      <h4 class="tcp-pkt-h">Checks</h4>
-      <div id="qc-report-checks" class="qc-checks"></div>
-    </div>
-  </div>
-
-  <script src="shell.js"></script>
-  <script src="common.js"></script>
-  <script src="qc.js"></script>
+<body>
+  <script>location.replace("capture.html");</script>
+  <p>Moved to <a href="capture.html">Capture</a>.</p>
 </body>
 </html>

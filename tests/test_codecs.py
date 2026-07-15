@@ -370,3 +370,32 @@ def test_ais140_real_pvt_and_hlm():
     assert rec2.message_type == "health"                    # HLM maps onto the same builder as HLP
     assert rec2.battery_pct == 100
     assert out2.ack == b"+##Received OK"
+
+
+def test_ais140_hel_header_and_pvt_io_fields():
+    """Real Locate 140B firmware 2.2.5 sends the health packet as $HEL (not the doc's $HLP);
+    and QC coverage/device-info need alert_id + vendor_id + firmware on every PVT."""
+    c = codec("ais140")
+    sess = Session(id="t")
+
+    # $HEL health header (from the real QC-report sample) must parse as health, not "unknown",
+    # and carry vendor_id (LOCT14A) + firmware for the device-details panel.
+    hel = b"$HEL,LOCT14A,2.2.5,861329080405658,68,30,0,10,600,0011,00*"
+    out = c.decode(hel, sess)
+    assert out.ack == b"+##Received OK"                     # $HEL is acknowledged like $HLP
+    rec = out.records[0]
+    assert rec.message_type == "health"                     # was "unknown" before the fix
+    assert rec.device_id == "861329080405658"
+    assert rec.io["vendor_id"] == "LOCT14A"
+    assert rec.io["firmware_version"] == "2.2.5"
+
+    # PVT now exposes the numeric alert id + packet-type code + vendor/firmware in io.
+    pvt = (b"$PVT,LOCT14A,2.2.5,BD,3,L,861329080405658,0000000000,1,13072026,112929,"
+           b"28.550419,N,77.268768,E,000.0,246.88,08,216.250,2.37,2.17,airtel,1,0,04.5,4.0,0,C,"
+           b"28,404,10,092,9305,9304,092,21,d410,092,15,96e3,06f,14,d40f,092,14,0011,00,000127,8A*\r\n")
+    rec = c.decode(pvt, sess).records[0]
+    assert rec.io["alert_id"] == 3                          # Disconnect from main battery
+    assert rec.io["packet_type"] == "BD"
+    assert rec.io["vendor_id"] == "LOCT14A"
+    assert rec.io["firmware_version"] == "2.2.5"
+    assert rec.alarms == ["disconnect_main_battery"]        # alert_id 3
