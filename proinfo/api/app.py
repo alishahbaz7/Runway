@@ -1105,6 +1105,36 @@ def _device_verdict(cov: list, checks_verdict: str, meta: dict) -> str:
     return checks_verdict
 
 
+def _qc_last_packet(recs) -> dict:
+    """Snapshot of a device's most recent traffic, for the Summary "Device details":
+    the newest record's type/alert + when it LANDED on the utility, plus the newest
+    position (lat/lon, satellites, fix) and battery voltages. Position and battery each
+    fall back to the newest record that actually carries them — e.g. a health packet has
+    no GPS fix, and a login packet has no voltages, so "the latest packet" alone would
+    blank those groups out whenever housekeeping traffic arrives last."""
+    last = recs[-1]
+    io = last.io or {}
+    out: dict = {
+        "message_type": last.message_type or "",
+        "alert_id": io.get("alert_id"),
+        "alarms": list(last.alarms or []),
+        "packet_status": io.get("packet_status") or "",
+        "received_at": last.received_at.isoformat() if last.received_at else None,
+    }
+    for r in reversed(recs):
+        if r.position is not None and r.position.latitude is not None:
+            at = r.event_time or r.received_at
+            out["position"] = {"lat": r.position.latitude, "lon": r.position.longitude,
+                               "satellites": r.satellites, "gps_valid": r.gps_valid,
+                               "at": at.isoformat() if at else None}
+            break
+    for r in reversed(recs):
+        if r.external_v is not None or r.battery_v is not None:
+            out["battery"] = {"external_v": r.external_v, "internal_v": r.battery_v}
+            break
+    return out
+
+
 def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_at, now,
                 qc_id: Optional[int] = None) -> list:
     """Group a session's records by device id (IMEI) and compute per-device coverage +
@@ -1158,6 +1188,7 @@ def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_a
             "serial": reg["serial"], "first_seen_ever": reg["first_seen"],
             "prior_qc_id": reg["last_qc_id"] if has_prior else None,
             "prior_verdict": reg["last_verdict"] if has_prior else "",
+            "last_packet": _qc_last_packet(recs),
         })
     return out
 

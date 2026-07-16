@@ -1073,3 +1073,55 @@ async def test_qc_device_serial_and_prior_status_across_sessions():
 
         w2.close()
         await c.post(f"/api/qc/{qc2}/stop")
+
+
+async def test_qc_device_last_packet_vitals():
+    """Device details vitals: each per-device entry carries a last_packet snapshot — the
+    newest record's type + landed time, the newest position (lat/lon/satellites/fix) and
+    the newest battery voltages (ext/int). Built from the user's real Locate 140B sample:
+    lat 28.550461, lon 77.268875, 28 sats, fix=1, ext 00.0V, int 3.7V."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    imei = "868329087355888"
+    pvt = (f"$PVT,LOCT14A,2.2.5,NR,1,L,{imei},0000000000,1,15072026,213722,"
+           f"28.550461,N,77.268875,E,000.0,223.52,28,224.099,0.93,0.51,airtel,0,0,00.0,3.7,"
+           f"0,C,29,404,10,092,9305,9304,092,22,96e3,06f,13,187,092,10,0,0,31,0002,01,095340,C5*\r\n").encode()
+
+    port = _free_port()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "ais140"})
+        qc_id = r.json()["id"]
+        writer = None
+        for _ in range(40):
+            try:
+                _, writer = await asyncio.open_connection("127.0.0.1", port); break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+        writer.write(pvt); await writer.drain()
+        await asyncio.sleep(0.3)
+
+        got = (await c.get(f"/api/qc/{qc_id}")).json()
+        dev = {d["device_id"]: d for d in got["devices"]}[imei]
+        lp = dev["last_packet"]
+        assert lp["message_type"] == "normal" and lp["alert_id"] == 1 and lp["packet_status"] == "L"
+        assert lp["alarms"] == []                       # alert 1 = routine location, not an alarm
+        assert lp["received_at"], "landed-on-utility time must be present"
+        assert abs(lp["position"]["lat"] - 28.550461) < 1e-6
+        assert abs(lp["position"]["lon"] - 77.268875) < 1e-6
+        assert lp["position"]["satellites"] == 28
+        assert lp["position"]["gps_valid"] is True
+        assert lp["battery"]["external_v"] == 0.0       # on internal battery in the sample
+        assert lp["battery"]["internal_v"] == 3.7
+
+        writer.close()
+        await c.post(f"/api/qc/{qc_id}/stop")

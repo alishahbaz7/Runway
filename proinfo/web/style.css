@@ -522,6 +522,13 @@ pre.hex, pre.json {
 .cov-tip-example mark { background: rgba(90, 176, 240, .28); color: var(--accent); border-radius: 3px;
   padding: 0 1px; font-weight: 700; }
 
+/* downlink send: an icon-only button (paper plane) — its name shows on ~2s hold-hover */
+button.ghost.mini.cap-send-btn { padding: 3px 7px; line-height: 0; }
+button.ghost.mini.cap-send-btn svg { display: block; }
+/* the picked command's template + purpose, under the Command select in the send modal */
+.cap-send-hint { font-size: 11px; font-family: var(--mono); margin: 2px 0 6px;
+  overflow-wrap: anywhere; }
+
 /* QC device rows (per IMEI) — click to select; the selected device drives feed + details */
 .qc-dev-row { cursor: pointer; border-radius: var(--r-2); padding: 3px 6px; }
 .qc-dev-row:hover { background: var(--hover); }

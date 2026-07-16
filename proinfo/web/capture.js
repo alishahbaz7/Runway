@@ -488,9 +488,7 @@
       meta.append(el("span", "tcp-client-idle muted", fmtIdle(c.last || 0)));
       const jid = tabJobId(t);
       if (running && c.connected && jid) {
-        const send = el("button", "ghost mini", "✉ Send");
-        send.onclick = () => openSend(jid, p);
-        meta.append(send);
+        meta.append(sendButton(() => openSend(jid, p, info.protocol || "")));
       }
       row.append(meta);
       host.append(row);
@@ -547,8 +545,7 @@
       meta.append(el("span", "tcp-client-idle muted", fmtIdle(d.last_seen || 0)));
       const cp = (d.peers || []).find((p) => connSet.has(p));
       if (running && cp && jid) {
-        const send = el("button", "ghost mini", "✉ Send");
-        send.onclick = (e) => { e.stopPropagation(); openSend(jid, cp); };
+        const send = sendButton((e) => { e.stopPropagation(); openSend(jid, cp, sess.identified_as || ""); });
         meta.append(send);
       }
       row.append(meta);
@@ -658,7 +655,7 @@
     const host = $("cap-feed");
     const t = focusedTab();
     const port = t ? (t.mode === "qc" ? t.sess.port : t.job.port) : null;
-    $("cap-feed-for").textContent = t ? (t.mode === "qc" ? `— #${t.id} :${port}` : `— :${port}`) : "";
+    $("cap-feed-for").textContent = t ? (t.mode === "qc" ? `— session #${t.id} · :${port}` : `— :${port}`) : "";
     const rows = focusRows();
     $("cap-feed-count").textContent = rows.length ? `${rows.length} shown` : "";
     if (!rows.length) {
@@ -816,25 +813,30 @@
     const content = qcRefCache[proto] || {};
     const pt = content.packet_types || {};
     const alerts = content.message_alert_ids || {};
-    const fam = item.group === "packet"
-      ? (item.code === "LGN" ? pt.LGN : item.code === "HEL" ? (pt.HLP || pt.HLM)
-        : item.code === "EPB" ? pt.EPB : (pt.PVT || pt.NMP))
-      : (pt.PVT || pt.NMP);                       // alerts ride on the NMP/PVT sentence
+    const fam = item.group === "emergency" ? pt.EPB   // emergency-server traffic is the EPB sentence
+      : item.group === "packet"
+        ? (item.code === "LGN" ? pt.LGN : item.code === "HEL" ? (pt.HLP || pt.HLM)
+          : item.code === "EPB" ? pt.EPB : (pt.PVT || pt.NMP))
+        : (pt.PVT || pt.NMP);                       // alerts ride on the NMP/PVT sentence
     const desc = (item.group === "alert" && item.alert_id != null && alerts[item.alert_id])
       ? alerts[item.alert_id] : ((fam && fam.description) || item.label);
     if (!fam || !fam.example) return { desc, parts: [] };
-    if (item.alert_id == null) return { desc, parts: [{ text: fam.example, hl: false }] };
 
     const fields = fam.fields || [];
     const ptypeField = fields.find((f) => f.name === "packet_type");
     const alertField = fields.find((f) => f.name === "alert_id");
-    // tokens[0] is the "$NMP" header itself (the split includes it), so the JSON's 1-based
-    // field index N lands at tokens[N], not tokens[N-1] — e.g. field 3 (packet_type) is
-    // tokens[3]: $NMP(0), vendor_id(1), firmware_version(2), packet_type(3), alert_id(4)…
+    // Nothing to substitute (e.g. LGN/HEL — no packet_type/alert_id in this row's terms):
+    // show the example plain.
+    if (item.alert_id == null && !(item.code && ptypeField)) {
+      return { desc, parts: [{ text: fam.example, hl: false }] };
+    }
+    // tokens[0] is the "$NMP"/"$EPB" header itself (the split includes it), so the JSON's
+    // 1-based field index N lands at tokens[N], not tokens[N-1] — e.g. NMP field 3
+    // (packet_type) is tokens[3]; EPB field 1 (packet_type EMR/SEM) is tokens[1].
     const tokens = fam.example.split(",");              // safe: packet_type/alert_id sit
     const hl = new Set();                               // well before any embedded-comma field
     if (ptypeField && item.code) { tokens[ptypeField.index] = item.code; hl.add(ptypeField.index); }
-    if (alertField) { tokens[alertField.index] = String(item.alert_id); hl.add(alertField.index); }
+    if (alertField && item.alert_id != null) { tokens[alertField.index] = String(item.alert_id); hl.add(alertField.index); }
     const parts = [];
     tokens.forEach((t, i) => { if (i > 0) parts.push({ text: ",", hl: false }); parts.push({ text: t, hl: hl.has(i) }); });
     return { desc, parts };
@@ -852,6 +854,15 @@
     clearTimeout(covTipTimer);
     covTipTimer = setTimeout(() => showCovTip(anchorEl, proto, item), COV_TIP_DELAY_MS);
   }
+  function placeCovTip(anchorEl) {
+    const r = anchorEl.getBoundingClientRect();
+    const tipRect = covTip.getBoundingClientRect();
+    let left = Math.min(r.left, window.innerWidth - tipRect.width - 8);
+    let top = r.bottom + 6;
+    if (top + tipRect.height > window.innerHeight - 8) top = r.top - tipRect.height - 6;
+    covTip.style.left = Math.max(8, left) + "px";
+    covTip.style.top = Math.max(8, top) + "px";
+  }
   function showCovTip(anchorEl, proto, item) {
     const ref = qcRefRow(proto, item);
     covTip.innerHTML = "";
@@ -863,15 +874,37 @@
       covTip.append(ex);
     }
     covTip.hidden = false;
-    const r = anchorEl.getBoundingClientRect();
-    const tipRect = covTip.getBoundingClientRect();
-    let left = Math.min(r.left, window.innerWidth - tipRect.width - 8);
-    let top = r.bottom + 6;
-    if (top + tipRect.height > window.innerHeight - 8) top = r.top - tipRect.height - 6;
-    covTip.style.left = Math.max(8, left) + "px";
-    covTip.style.top = Math.max(8, top) + "px";
+    placeCovTip(anchorEl);
   }
   function hideCovTip() { clearTimeout(covTipTimer); covTip.hidden = true; }
+
+  // Generic hold-hover tooltip for icon buttons: rest the pointer ~2s to see the name.
+  function holdTip(btn, text) {
+    btn.addEventListener("mouseenter", () => {
+      clearTimeout(covTipTimer);
+      covTipTimer = setTimeout(() => {
+        covTip.innerHTML = "";
+        covTip.append(el("div", "cov-tip-desc", text));
+        covTip.hidden = false;
+        placeCovTip(btn);
+      }, COV_TIP_DELAY_MS);
+    });
+    btn.addEventListener("mouseleave", hideCovTip);
+  }
+
+  // Downlink send button: a paper-plane icon (matches the app's line-icon set) instead of
+  // a text label; its name shows on hold-hover via holdTip.
+  const SEND_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>';
+  function sendButton(onclick) {
+    const b = el("button", "ghost mini cap-send-btn");
+    b.innerHTML = SEND_SVG;
+    b.setAttribute("aria-label", "Send command to the device");
+    holdTip(b, "Send command to the device");
+    b.onclick = onclick;
+    return b;
+  }
 
   function renderQcSummaryPanel(sess) {
     const proto = sess.identified_as || "";
@@ -880,17 +913,10 @@
     const dev = qcSelectedDevice(sess);
     const cov = (dev && dev.coverage) || [];
     const skipped = new Set((dev && dev.skipped) || []);
-    const verdict = dev ? dev.verdict : sess.verdict;
     const did = dev ? dev.device_id : "";
-
-    const vb = $("cap-qcsum-verdict");
-    vb.textContent = verdictLabel(verdict);
-    vb.className = "qc-verdict" + (verdict ? " qc-verdict-" + verdict : "");
-    $("cap-qcsum-nav").textContent =
-      qcDevices(sess).length > 1 ? `device ${qcDevices(sess).findIndex((d) => d.device_id === did) + 1}/${qcDevices(sess).length}` : "";
-    $("cap-qcsum-meta").textContent =
-      `#${sess.id} · port ${sess.port} · ${proto || sess.protocol_mode}`
-      + (sess.operator ? ` · operator: ${sess.operator}` : "");
+    // No panel-level device-nav / verdict / session-meta header: the tab + session strip +
+    // status pill already carry session, port, protocol and verdict, and the shown device
+    // is bound by its Serial badge (device list highlight + the Serial in Device details).
 
     // --- (#4) Pass/Fail actions, top-right of the panel's own mini-header ---
     const acts = $("cap-qcsum-actions");
@@ -923,6 +949,29 @@
     const kv = (k, v) => { const w = el("div", "qcd-kv"); w.append(el("span", "qcd-k", k), el("span", "qcd-v mono", v || "—")); return w; };
     dl.append(kv("Serial", dev.serial != null ? "#" + dev.serial : null),
       kv("IMEI", did), kv("Firmware", dev.firmware_version), kv("Vendor ID", dev.vendor_id));
+
+    // live vitals from the device's most recent traffic (position/battery fall back to the
+    // newest record that actually carries them — health/login packets don't have both)
+    const lp = dev.last_packet || {};
+    let lpType = null;                                  // A. Location / Alarm (id N) / <type>
+    if (lp.message_type) {
+      if ((lp.alarms || []).length) lpType = `Alarm${lp.alert_id != null ? " (id " + lp.alert_id + ")" : ""}`;
+      else if (lp.packet_status === "H") lpType = "Location (history)";
+      else if (lp.packet_status === "L" || lp.message_type === "normal") lpType = "Location (live)";
+      else lpType = lp.message_type;
+    }
+    dl.append(kv("Last packet", lpType));
+    // B. when the packet LANDED on the utility, in local time (IST here)
+    dl.append(kv(`Last received${TZ_LABEL ? " (" + TZ_LABEL + ")" : ""}`,
+      lp.received_at ? `${new Date(lp.received_at).toLocaleTimeString()} · ${fmtDate(lp.received_at)}` : null));
+    // C. latest position + satellites + fix status
+    const pos = lp.position;
+    dl.append(kv("Lat, Long", pos ? `${pos.lat.toFixed(6)}, ${pos.lon.toFixed(6)}` : null));
+    dl.append(kv("GPS", pos
+      ? `${pos.satellites != null ? pos.satellites + " sats" : "? sats"} · ${pos.gps_valid ? "fixed" : "no fix"}` : null));
+    // D. battery voltages from the latest packet carrying them
+    const fv = (v) => (v == null ? "—" : v.toFixed(1) + "V");
+    dl.append(kv("Battery (ext · int)", lp.battery ? `${fv(lp.battery.external_v)} · ${fv(lp.battery.internal_v)}` : null));
     // (#7) recall automatically: if this IMEI has a FINAL result from an EARLIER session,
     // surface it immediately — the operator shouldn't have to go searching for it.
     if (dev.prior_verdict) {
@@ -949,9 +998,11 @@
         const isSkip = skipped.has(c.key);
         const state = isSkip ? "skip" : (c.valid === false ? "bad" : c.seen ? "seen" : "pending");
         const tr = el("tr", "cov-row cov-" + state);
-        // (#3) alert rows show the id + on-wire code: "Connect back to main battery (6 - BR)"
+        // (#3) alert rows show the id + on-wire code: "Connect back to main battery (6 - BR)";
+        // emergency rows show their EPB code: "Emergency ON (EMR)" / "Emergency OFF (SEM)"
         const label = (c.group === "alert" && c.alert_id != null)
-          ? `${c.label} (${c.alert_id}${c.code ? " - " + c.code : ""})` : c.label;
+          ? `${c.label} (${c.alert_id}${c.code ? " - " + c.code : ""})`
+          : (c.group === "emergency" && c.code) ? `${c.label} (${c.code})` : c.label;
         const dot = el("td"); dot.append(el("span", "cov-dot cov-" + state)); tr.append(dot);
         const labelCell = el("td", "cov-label", label);
         // (#1)(#2) hover the ITEM NAME specifically (not anywhere in the row) and wait ~2s
@@ -998,7 +1049,10 @@
       });
       tbl.append(tb); body.append(tbl);
     };
-    covTable(cov.filter((c) => c.group !== "alert"), "Packets");
+    covTable(cov.filter((c) => c.group !== "alert" && c.group !== "emergency"), "Packets");
+    // EPB traffic goes to the EMERGENCY server (separate from the primary/alert stream),
+    // so it gets its own section: Emergency ON = EMR, Emergency OFF = SEM.
+    covTable(cov.filter((c) => c.group === "emergency"), "Emergency server");
     covTable(cov.filter((c) => c.group === "alert"), "Alerts");
 
     // --- Deviations (skipped now; invalid packets join here in Step 2) ---
@@ -1013,14 +1067,8 @@
       });
       body.append(drow);
     }
-
-    // --- Test cases (the field checks for this device) ---
-    const checks = dev.checks || [];
-    body.append(el("h4", "tcp-pkt-h", "Test cases"));
-    const crow = el("div", "qc-checks");
-    checks.forEach((c) => { const chip = el("span", "qc-chip qc-chip-" + c.result, c.label); chip.title = c.detail || ""; crow.append(chip); });
-    if (!checks.length) crow.append(el("p", "empty", "No checks evaluated yet."));
-    body.append(crow);
+    // ("Test cases" chips removed — the field checks still run backend-side and appear in
+    // the report; the Summary page is coverage-focused.)
   }
 
   // ---- QC report modal -------------------------------------------------------
@@ -1144,14 +1192,91 @@
     const a = el("a"); a.href = "/api/log/file"; document.body.appendChild(a); a.click(); a.remove();
   });
 
-  // ---- send-command modal ----------------------------------------------------
-  function openSend(job, peer) {
+  // ---- send-command modal (downlink: utility -> device) -----------------------
+  let sendCmds = [];                 // the picked protocol's ota_commands (current modal)
+  function openSend(job, peer, proto) {
     sendCtx = { job, peer };
-    $("cap-send-peer").textContent = deviceLabel(peer) === peer ? peer : `${deviceLabel(peer)} (${peer})`;
+    // headline is the DEVICE (IMEI) once identified — the transient ip:port stays as a
+    // hover tooltip only (a reconnect changes the port, never the IMEI)
+    const label = deviceLabel(peer);
+    $("cap-send-peer").textContent = label;
+    $("cap-send-peer").title = peer;
     $("cap-send-value").value = "";
     msg("cap-send-msg", "", "");
+    populateSendCommands(proto || "");
     $("cap-send-modal").style.display = "flex";
     $("cap-send-value").focus();
+  }
+  // Command catalogue from the protocol definition (data/protocols/<proto>.json →
+  // ota_commands): pick the command TYPE first (SET/GET/CLR), then a command from the
+  // list FILTERED to those supporting that type (some support all three, some only a
+  // subset — e.g. STOP is SET-only). The chosen string prefills the editable value; the
+  // SET strings carry example values the operator edits before sending. With a catalogue
+  // command chosen, Mode hides — the format is already defined for this device type.
+  const SEND_ACTIONS = ["set", "get", "clr"];
+  async function populateSendCommands(proto) {
+    const fld = $("cap-send-cmd-fld"), actFld = $("cap-send-act-fld"), modeFld = $("cap-send-mode-fld");
+    const hint = $("cap-send-cmd-hint");
+    const sel = $("cap-send-cmd"), act = $("cap-send-act");
+    sendCmds = [];
+    fld.style.display = actFld.style.display = hint.style.display = "none";
+    modeFld.style.display = "";                         // no catalogue -> plain text/hex modal
+    sel.innerHTML = ""; act.innerHTML = "";
+    if (!proto) return;
+    if (!(proto in qcRefCache)) {
+      try {
+        const def = await api(`/api/protocols/${encodeURIComponent(proto)}.json`);
+        qcRefCache[proto] = def.content || {};
+      } catch (e) { qcRefCache[proto] = {}; }
+    }
+    sendCmds = ((qcRefCache[proto].ota_commands || {}).commands) || [];
+    // normalize the older {command, function, example} shape into a SET-only entry so one
+    // rendering path handles both catalogue formats
+    sendCmds = sendCmds.map((c) => {
+      if (c.set || c.get || c.clr) return c;
+      const m = (c.command || "").match(/:([A-Z0-9]+)#/);
+      return { name: c.name || (m && m[1]) || `cmd ${c.id}`,
+               description: c.description || c.function || "", set: c.example || c.command || "" };
+    });
+    if (!sendCmds.length) return;
+
+    // command types actually present in the catalogue (usually SET/GET/CLR)
+    const types = SEND_ACTIONS.filter((a) => sendCmds.some((c) => c[a]));
+    act.innerHTML = "";
+    types.forEach((a) => act.appendChild(new Option(a.toUpperCase(), a)));
+    actFld.style.display = "";
+    fld.style.display = "";
+
+    const rebuildCommands = () => {
+      const type = act.value;
+      const prev = sel.value;
+      sel.innerHTML = "";
+      sel.appendChild(new Option("— custom (type below) —", ""));
+      sendCmds.forEach((c, i) => {
+        if (c[type]) sel.appendChild(new Option(`${c.name} — ${c.description}`, String(i)));
+      });
+      // keep the same command selected across a type switch when it supports the new type
+      if (prev && sendCmds[Number(prev)] && sendCmds[Number(prev)][type]) sel.value = prev;
+    };
+    const apply = () => {
+      // NB: the custom option's value is "" and Number("") === 0 — an index-0 command
+      // would swallow it, so resolve the empty value explicitly.
+      const c = sel.value === "" ? null : sendCmds[Number(sel.value)];
+      if (!c) {                                          // custom: free text / raw hex
+        hint.style.display = "none";
+        modeFld.style.display = "";
+        return;
+      }
+      $("cap-send-value").value = c[act.value] || "";
+      $("cap-send-mode").value = "text";                 // catalogue commands are ASCII text
+      modeFld.style.display = "none";                    // format is device-defined — no Mode
+      hint.textContent = c.description || "";
+      hint.style.display = "";
+      $("cap-send-value").focus();
+    };
+    act.onchange = () => { rebuildCommands(); apply(); };
+    sel.onchange = apply;
+    rebuildCommands();
   }
   const closeSend = () => { $("cap-send-modal").style.display = "none"; sendCtx = null; };
   $("cap-send-cancel").addEventListener("click", closeSend);

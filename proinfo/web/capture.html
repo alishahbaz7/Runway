@@ -101,26 +101,38 @@
         </div>
         <div id="cap-feed"><p class="empty">Decoded packets appear here as devices send data.</p></div>
         <!-- QC Summary view: inline (not a popup) so it lives right on the Live Packets page;
-             shows the device selected in the left list, and updates live. -->
+             shows the device selected in the left list (identified by its Serial badge +
+             IMEI in Device details — no duplicate session/port/verdict header, all of that
+             already lives on the tab, session strip and status pill), and updates live. -->
         <div id="cap-qc-summary-panel" style="display:none">
           <div class="tcp-pkt-head">
-            <span id="cap-qcsum-nav" class="muted"></span>
-            <span id="cap-qcsum-verdict" class="qc-verdict"></span>
             <span class="spacer"></span>
             <span id="cap-qcsum-actions"></span>
           </div>
-          <div id="cap-qcsum-meta" class="muted"></div>
           <div id="cap-qcsum-body"></div>
         </div>
       </section>
     </main>
   </div>
 
-  <!-- send-command popup -->
+  <!-- send-command popup (downlink: utility -> device) -->
   <div id="cap-send-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <h3>Send to <span id="cap-send-peer" class="mono"></span></h3>
-      <label class="tcp-fld">Mode
+      <!-- the protocol's known command catalogue (from data/protocols/<proto>.json
+           ota_commands): pick the command TYPE first (SET/GET/CLR), then a command from
+           the list filtered to those supporting that type — some support all three,
+           some only a subset. The chosen string prefills the editable value below. -->
+      <label class="tcp-fld" id="cap-send-act-fld" style="display:none">Command type
+        <select id="cap-send-act"></select>
+      </label>
+      <label class="tcp-fld" id="cap-send-cmd-fld" style="display:none">Command
+        <select id="cap-send-cmd"></select>
+      </label>
+      <p id="cap-send-cmd-hint" class="muted cap-send-hint" style="display:none"></p>
+      <!-- Mode only matters without a catalogue command (custom text / raw hex) — the
+           catalogue's format is already defined for the device type, so it hides. -->
+      <label class="tcp-fld" id="cap-send-mode-fld">Mode
         <select id="cap-send-mode">
           <option value="text">Text (built via codec)</option>
           <option value="hex">Raw hex</option>

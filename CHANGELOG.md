@@ -3,6 +3,49 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.20] — 2026-07-16
+
+Feature release. Headline: **two-way communication** — a command picker sends the
+Locate 140B's GPRS bench commands to a connected device — plus live **device vitals**
+and a dedicated **Emergency server** coverage section.
+
+### Added — downlink command sender (two-way)
+- The device row's Send control is now a compact paper-plane **icon** (name appears on a
+  ~2s hold-hover tooltip). Clicking opens the restructured send dialog:
+  **Send to `<IMEI>`** (the transient ip:port moves to a hover tooltip) → **Command type**
+  (SET / GET / CLR) → **Command** list *filtered to the commands supporting that type*
+  (e.g. STOP is SET-only) → editable prefilled value. Mode (text/hex) hides for catalogue
+  commands — the format is device-defined — and returns for custom entry.
+- The 13-command **bench GPRS catalogue** (VRN, STOP, HBL, HAL, RTL, LOGS, LOG2, EMTD,
+  HPTI, PIP, EIP, GIP, APN with real SET/GET/CLR strings) lives declaratively in
+  `data/protocols/ais140.json` → `ota_commands` — edit the JSON to change the picker.
+  That file is now **tracked in git** (previously ignored under `data/`): it's a shared
+  cross-tool asset the QC references and the send picker both depend on.
+
+### Added — QC Summary
+- **Device details vitals**, live from the newest traffic: last packet type
+  (Location live/history · Alarm (id N) · login/health), when it landed on the utility
+  (IST), latest lat/long + satellites + fix status, and external/internal battery
+  voltages. Position/battery each fall back to the newest record that carries them.
+- **Emergency server section** (between Packets and Alerts): EPB traffic split into
+  **Emergency ON (EMR)** and **Emergency OFF (SEM)**, both required, with received
+  sentences inline and the EPB reference (updated to a real firmware-2.2.5 capture)
+  highlighted per row. The old combined "Emergency packet" row is gone.
+- Removed the "Test cases" chips from the Summary (still computed backend-side and in
+  the report); removed the repetitive device-nav/verdict/session-meta header — the shown
+  device is bound by its Serial badge, and session/port/verdict live once in the feed
+  header, session strip and status pill ("session #N" now spelled out there).
+
+### Fixed
+- Selecting "— custom —" in the send dialog silently resolved to the first catalogue
+  command (empty option value coerced to index 0).
+- Item labels in the coverage tables now word-wrap (an app-wide `tbody td` nowrap rule
+  forbade line breaks); tiny Req/Count cells no longer break "yes" mid-word; the QC tab
+  title no longer shows an IMEI; the feed header wraps on narrow windows instead of
+  overlapping; the per-row reference-example substitution was off by one token.
+
+[1.1.20]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.20
+
 ## [1.1.14] — 2026-07-16
 
 Feature release. Headline: the QC feed gains an inline **Raw | Summary** view (no more

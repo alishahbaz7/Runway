@@ -1,0 +1,198 @@
+{
+  "schema": "1",
+  "profile": {
+    "vendor": "Locate",
+    "model": "140B",
+    "standard": "AIS-140",
+    "doc_version": "v1.9",
+    "transport": "tcp",
+    "description": "AIS-140 (India VLT mandate) ASCII/CSV protocol as implemented on the Locate 140B tracker. Comma-delimited sentences framed by $...*CC, one sentence per message. Declarative grammar only — not wired into a live ProInfo codec; add a proinfo/codecs/ codec from this file if/when live decode is needed."
+  },
+
+  "framing": {
+    "type": "delimited",
+    "start_char": "$",
+    "field_delimiter": ",",
+    "end_char": "*",
+    "checksum": {
+      "format": "2 ascii chars after *",
+      "algorithm": "unspecified",
+      "note": "Source doc calls this field '(optimal)' — read as optional. No fixed algorithm is documented, and the checksum values shown in the spec's own examples do not match a standard XOR or additive checksum over the sentence body, so this field should be treated as informational/vendor-specific rather than verified."
+    },
+    "line_terminator": "not specified in the source doc; real captures typically end each sentence with CRLF — confirm against an actual device capture before relying on it for framing."
+  },
+
+  "dispatch": {
+    "rule": "strip the leading '$', split on ',' — token[0] is the 3-letter header selecting the entry in packet_types below; token[1:] are its fields (1-based index in each packet type's field list).",
+    "headers": {
+      "LGN": "login",
+      "NMP": "normal",
+      "HLP": "health",
+      "EPB": "emergency"
+    }
+  },
+
+  "packet_types": {
+    "LGN": {
+      "name": "Login Packet",
+      "description": "First packet sent immediately after the TCP connection is established.",
+      "server_response": "+##Received OK",
+      "example": "$LGN,VENDOR,DL01PC9821,862631032208018,1.6.5,AIS140,28.7589630,N,77.6277844,E*54",
+      "fields": [
+        { "index": 1, "name": "vendor_id", "type": "ascii", "example": "VENDOR" },
+        { "index": 2, "name": "device_name", "type": "ascii", "note": "vehicle registration number the device is installed on", "example": "DL01PC9821" },
+        { "index": 3, "name": "imei", "type": "ascii", "size": 15, "example": "862631032208018" },
+        { "index": 4, "name": "firmware_version", "type": "ascii", "format": "x.x.x", "example": "1.6.5" },
+        { "index": 5, "name": "protocol_version", "type": "ascii", "example": "AIS140" },
+        { "index": 6, "name": "latitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "28.7589630" },
+        { "index": 7, "name": "latitude_dir", "type": "enum", "values": ["N", "S"], "example": "N" },
+        { "index": 8, "name": "longitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "77.6277844" },
+        { "index": 9, "name": "longitude_dir", "type": "enum", "values": ["E", "W"], "example": "E" }
+      ]
+    },
+
+    "NMP": {
+      "name": "Normal Packet",
+      "description": "Regular tracking packet, sent at defined interval, on turn detection, or on alert. The same layout carries every alert/event subtype via packet_type + alert_id.",
+      "server_response": "+##Received OK",
+      "example": "$NMP,VENDOR,1.6.5,NR,6,L,862631032208018,DL01PC9821,1,24032018,060122,28.7589630,N,77.6277844,E,022.5,320.55,04,183.5,1.0,0.3,INA Airtel,1,1,12.5,4.2,0,C,25,404,10,00D6,CFBD,-74,1806,2031,-74,1878,151,-77,1806,2012,-81,1806,2032,0001,01,000005,03.1,10.2,0,(192.168.1.1,SET:APN,iot)*49",
+      "note": "Field 51 (ota_update_details) is the remainder of the sentence after the 50th comma, up to the trailing '*' — it is itself a parenthesized, comma-separated triple, so it must NOT be split on ',' along with the rest (split with maxsplit=50).",
+      "fields": [
+        { "index": 1, "name": "vendor_id", "type": "ascii", "example": "VENDOR" },
+        { "index": 2, "name": "firmware_version", "type": "ascii", "format": "x.x.x", "example": "1.6.5" },
+        { "index": 3, "name": "packet_type", "type": "enum", "values": {
+            "NR": "Normal", "EA": "Emergency Alert", "TA": "Tamper Alert", "HP": "Health Packet",
+            "IN": "Ignition On", "IF": "Ignition Off", "BD": "Vehicle Battery Disconnect",
+            "BR": "Vehicle Battery Reconnect", "BL": "Internal Battery Low", "OT": "OTA Update Alert",
+            "RT": "Rash Turn", "HB": "Harsh Breaking", "HA": "Harsh Acceleration"
+          }, "example": "NR" },
+        { "index": 4, "name": "alert_id", "type": "uint", "ref": "message_alert_ids", "example": "6" },
+        { "index": 5, "name": "packet_status", "type": "enum", "values": {"L": "Live", "H": "History"}, "example": "L" },
+        { "index": 6, "name": "imei", "type": "ascii", "size": 15, "example": "862631032208018" },
+        { "index": 7, "name": "vehicle_reg_no", "type": "ascii", "example": "DL01PC9821" },
+        { "index": 8, "name": "gps_fix", "type": "enum", "values": {"1": "fix", "0": "invalid"}, "example": "1" },
+        { "index": 9, "name": "date", "type": "date", "format": "DDMMYYYY", "example": "24032018" },
+        { "index": 10, "name": "time", "type": "time", "format": "hhmmss", "note": "UTC", "example": "060122" },
+        { "index": 11, "name": "latitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "28.7589630" },
+        { "index": 12, "name": "latitude_dir", "type": "enum", "values": ["N", "S"], "example": "N" },
+        { "index": 13, "name": "longitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "77.6277844" },
+        { "index": 14, "name": "longitude_dir", "type": "enum", "values": ["E", "W"], "example": "E" },
+        { "index": 15, "name": "speed_kph", "type": "decimal", "format": "ddd.d", "example": "022.5" },
+        { "index": 16, "name": "heading_deg", "type": "decimal", "format": "ddd.dd", "note": "course over ground", "example": "320.55" },
+        { "index": 17, "name": "satellites", "type": "uint", "example": "04" },
+        { "index": 18, "name": "altitude_m", "type": "decimal", "note": "MSL, max 100000m", "example": "183.5" },
+        { "index": 19, "name": "pdop", "type": "decimal", "note": "max 99.0", "example": "1.0" },
+        { "index": 20, "name": "hdop", "type": "decimal", "note": "max 99.0", "example": "0.3" },
+        { "index": 21, "name": "network_operator", "type": "ascii", "example": "INA Airtel" },
+        { "index": 22, "name": "ignition", "type": "bool", "values": {"1": "on", "0": "off"}, "example": "1" },
+        { "index": 23, "name": "main_power_status", "type": "enum", "values": {"0": "vehicle battery disconnected", "1": "vehicle battery reconnected"}, "example": "1" },
+        { "index": 24, "name": "main_input_voltage", "type": "decimal", "format": "dd.d", "unit": "V", "example": "12.5" },
+        { "index": 25, "name": "internal_battery_voltage", "type": "decimal", "format": "d.d", "unit": "V", "example": "4.2" },
+        { "index": 26, "name": "emergency_status", "type": "bool", "values": {"1": "on", "0": "off"}, "example": "0" },
+        { "index": 27, "name": "tamper_alert", "type": "enum", "values": {"C": "cover closed", "O": "cover open"}, "example": "C" },
+        { "index": 28, "name": "gsm_signal", "type": "uint", "note": "0-31; 99 = not known/not detectable", "example": "25" },
+        { "index": 29, "name": "mcc", "type": "ascii", "note": "'x' when no network data", "example": "404" },
+        { "index": 30, "name": "mnc", "type": "ascii", "note": "'x' when no network data", "example": "10" },
+        { "index": 31, "name": "lac", "type": "hex_ascii", "note": "'x' when no network data", "example": "00D6" },
+        { "index": 32, "name": "cell_id", "type": "hex_ascii", "note": "'x' when no network data", "example": "CFBD" },
+        { "index": "33-44", "name": "nmr", "type": "group", "note": "4 neighbouring cells, 'x,x,x,x,x,x,x,x,x,x,x,x' when no network data", "repeat": 4, "of": [
+            { "name": "signal_strength" }, { "name": "lac" }, { "name": "cell_id" }
+          ], "example": "-74,1806,2031,-74,1878,151,-77,1806,2012,-81,1806,2032" },
+        { "index": 45, "name": "digital_input_status", "type": "bitfield", "format": "bbbb", "bits": ["din1", "din2", "din3_ignition", "din4_panic"], "example": "0001" },
+        { "index": 46, "name": "digital_output_status", "type": "bitfield", "format": "bb", "bits": ["dout1", "dout2"], "example": "01" },
+        { "index": 47, "name": "frame_number", "type": "uint", "note": "sequence number, 000001-999999", "example": "000005" },
+        { "index": 48, "name": "analog_input_1", "type": "decimal", "format": "dd.d", "unit": "V", "example": "03.1" },
+        { "index": 49, "name": "analog_input_2", "type": "decimal", "format": "dd.d", "unit": "V", "example": "10.2" },
+        { "index": 50, "name": "odometer_m", "type": "decimal", "example": "0" },
+        { "index": 51, "name": "ota_update_details", "type": "remainder", "format": "(<source>,<parameter id>,<status>)", "note": "source = IP or mobile number the command came from; status is 1/0 for a SET, or the parameter value for a GET", "example": "(192.168.1.1,SET:APN,iot)" }
+      ]
+    },
+
+    "HLP": {
+      "name": "Health Packet",
+      "description": "Regular health/telemetry packet sent at a defined interval.",
+      "server_response": "+##Received OK",
+      "example": "$HLP,VENDOR,1.6.7,868997035844909,99,30,0,20,600,001100,00*",
+      "fields": [
+        { "index": 1, "name": "vendor_id", "type": "ascii", "example": "VENDOR" },
+        { "index": 2, "name": "firmware_version", "type": "ascii", "format": "x.x.x", "example": "1.6.7" },
+        { "index": 3, "name": "imei", "type": "ascii", "size": 15, "example": "868997035844909" },
+        { "index": 4, "name": "battery_pct", "type": "uint", "range": [0, 100], "example": "99" },
+        { "index": 5, "name": "low_battery_threshold_pct", "type": "uint", "range": [0, 100], "example": "30" },
+        { "index": 6, "name": "memory_pct", "type": "uint", "range": [0, 100], "example": "0" },
+        { "index": 7, "name": "update_rate_ignition_on_s", "type": "uint", "note": "min 5s", "example": "20" },
+        { "index": 8, "name": "update_rate_ignition_off_s", "type": "uint", "note": "min 300s (5 min)", "example": "600" },
+        { "index": 9, "name": "digital_io_status", "type": "bitfield", "format": "bbbbbb", "bits": ["din1", "din2", "din3", "din4", "dout1", "dout2"], "example": "001100" },
+        { "index": 10, "name": "analog_io_status", "type": "bitfield", "format": "bb", "bits": ["ain1", "ain2"], "example": "00" }
+      ]
+    },
+
+    "EPB": {
+      "name": "Emergency Packet",
+      "description": "Sent at a defined interval while emergency state is ON, and once when the server turns emergency state off. No acknowledgement required by the device.",
+      "server_response": {
+        "default": null,
+        "stop_emergency": "+##STOP_MSG"
+      },
+      "example": "$EPB,EMR,868329087319152,NM,16072026114124,A,28.550484,N,77.268867,E,226.334,0,000.0,G,0000000000,0*5E",
+      "note": "Example is a REAL firmware-2.2.5 capture (supersedes the doc's). It confirms the v1.9 ambiguity: an extra numeric token sits between altitude and speed ('226.334,0,000.0,G'), so the doc's field indices 11+ are shifted on the wire. SEM (stop message) uses the identical layout, e.g. $EPB,SEM,868329087319152,NM,16072026114224,A,28.550484,N,77.268867,E,226.334,0,000.0,G,0000000000,0*C5",
+      "fields": [
+        { "index": 1, "name": "packet_type", "type": "enum", "values": {"EMR": "Emergency Message", "SEM": "Stop Message"}, "example": "EMR" },
+        { "index": 2, "name": "imei", "type": "ascii", "size": 15, "example": "868997035844909" },
+        { "index": 3, "name": "packet_status", "type": "enum", "values": {"NM": "Normal Packet", "SP": "Stored Packet"}, "example": "NM" },
+        { "index": 4, "name": "date_time", "type": "datetime", "format": "DDMMYYYYhhmmss", "example": "11052019104331" },
+        { "index": 5, "name": "gps_valid", "type": "enum", "values": {"A": "valid", "V": "invalid"}, "example": "A" },
+        { "index": 6, "name": "latitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "30.8825130" },
+        { "index": 7, "name": "latitude_dir", "type": "enum", "values": ["N", "S"], "example": "N" },
+        { "index": 8, "name": "longitude", "type": "decimal", "format": "dd.mmmmmmm", "example": "75.8476639" },
+        { "index": 9, "name": "longitude_dir", "type": "enum", "values": ["E", "W"], "example": "E" },
+        { "index": 10, "name": "altitude_m", "type": "decimal", "note": "MSL, max 100000m", "example": "173.50" },
+        { "index": 11, "name": "speed_kph", "type": "decimal", "format": "ddd.d", "example": "000.00" },
+        { "index": 12, "name": "provider", "type": "enum", "values": {"G": "fine GPS", "N": "coarse GPS or network-derived"}, "example": "G" },
+        { "index": 13, "name": "distance_m", "type": "decimal", "note": "distance from previous GPS fix", "example": "0" },
+        { "index": 14, "name": "vehicle_reg_no", "type": "ascii", "example": "PB10CE0911" },
+        { "index": 15, "name": "reply_number", "type": "ascii", "note": "emergency mobile number to send the test response to", "example": "09212499082" }
+      ]
+    }
+  },
+
+  "message_alert_ids": {
+    "1": "Location Update (default)",
+    "2": "Location Update (history) — buffered while GPRS was unavailable",
+    "3": "Alert – Disconnect from main battery",
+    "4": "Alert – Low battery",
+    "5": "Alert – Low battery removed",
+    "6": "Alert – Connect back to main battery",
+    "7": "Alert – Ignition ON",
+    "8": "Alert – Ignition OFF",
+    "9": "Alert – GPS box opened (optional)",
+    "10": "Alert – Emergency state ON",
+    "11": "Alert – Emergency state OFF",
+    "12": "Alert – Over-the-air parameter change",
+    "13": "Harsh Braking",
+    "14": "Harsh Acceleration",
+    "15": "Rash Turning",
+    "16": "Device Tampered (emergency button wire disconnect/cut)"
+  },
+
+  "ota_commands": {
+    "note": "Server -> device GPRS commands, sent only while a connection is established. Real bench command table (supersedes the v1.9 doc's <type> templates): each command has SET / GET / CLR variants where supported; values in the SET strings are EXAMPLES — edit before sending.",
+    "commands": [
+      { "id": 1,  "name": "VRN",  "description": "Vehicle registration number",                                  "set": "+S*R:SET:VRN#DL-3S 8576;",              "get": "+S*R:GET:VRN#;",  "clr": "+S*R:CLR:VRN##;" },
+      { "id": 2,  "name": "STOP", "description": "Emergency state OFF (stop message)",                            "set": "+##STOP_MSG" },
+      { "id": 3,  "name": "HBL",  "description": "Harsh braking threshold",                                       "set": "+S*R:SET:HBL#30;",                      "get": "+S*R:GET:HBL#;",  "clr": "+S*R:CLR:HBL#;" },
+      { "id": 4,  "name": "HAL",  "description": "Harsh acceleration threshold",                                  "set": "+S*R:SET:HAL#30;",                      "get": "+S*R:GET:HAL#;",  "clr": "+S*R:CLR:HAL#;" },
+      { "id": 5,  "name": "RTL",  "description": "Rash turning threshold",                                        "set": "+S*R:SET:RTL#35;",                      "get": "+S*R:GET:RTL#;",  "clr": "+S*R:CLR:RTL#;" },
+      { "id": 6,  "name": "LOGS", "description": "Data update rate, ignition ON (s)",                             "set": "+S*R:SET:LOGS#25;",                     "get": "+S*R:GET:LOGS#;", "clr": "+S*R:CLR:LOGS#;" },
+      { "id": 7,  "name": "LOG2", "description": "Data update rate, ignition OFF (s)",                            "set": "+S*R:SET:LOG2#600;",                    "get": "+S*R:GET:LOG2#;", "clr": "+S*R:CLR:LOG2#;" },
+      { "id": 8,  "name": "EMTD", "description": "Automatic emergency cutoff rate (emergency mode timeout, s)",   "set": "+S*R:SET:EMTD#1200;",                   "get": "+S*R:GET:EMTD#;", "clr": "+S*R:CLR:EMTD#;" },
+      { "id": 9,  "name": "HPTI", "description": "Data update rate of health packets (s)",                        "set": "+S*R:SET:HPTI#120;",                    "get": "+S*R:GET:HPTI#;", "clr": "+S*R:CLR:HPTI#;" },
+      { "id": 10, "name": "PIP",  "description": "Primary IP and port",                                           "set": "+S*R:SET:PIP#act.gpsbox.co.in,9004;",   "get": "+S*R:GET:PIP#;",  "clr": "+S*R:CLR:PIP#;" },
+      { "id": 11, "name": "EIP",  "description": "Emergency IP and port",                                         "set": "+S*R:SET:EIP#act.gpsbox.co.in,9002;",   "get": "+S*R:GET:EIP#;",  "clr": "+S*R:CLR:EIP#;" },
+      { "id": 12, "name": "GIP",  "description": "Government IP and port",                                        "set": "+S*R:SET:GIP#act.gpsbox.co.in,9002;",   "get": "+S*R:GET:GIP#;",  "clr": "+S*R:CLR:GIP#;" },
+      { "id": 13, "name": "APN",  "description": "Primary APN",                                                   "set": "+S*R:SET:APN#taisysnet;",               "get": "+S*R:GET:APN#;",  "clr": "+S*R:CLR:APN#;" }
+    ]
+  },
+
+  "source": "AIS140_Protocol_Description_v1.9.docx.pdf (Locate 140B GPS Tracker)"
+}
