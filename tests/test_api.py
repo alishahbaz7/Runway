@@ -1001,3 +1001,75 @@ async def test_qc_dedups_device_across_reconnect():
         assert len(mine[0]["peers"]) == 2, "both connections should merge under the one device"
 
         await c.post(f"/api/qc/{qc_id}/stop")
+
+
+async def test_qc_device_serial_and_prior_status_across_sessions():
+    """#6/#7: the per-device registry survives across separate QC sessions for the SAME
+    IMEI -- a reconnecting device keeps its serial number, and once one session's verdict
+    finalizes, the NEXT session for that same IMEI immediately shows the prior result
+    (serial + last-known status), without the operator having to search old sessions."""
+    import asyncio
+    import socket
+
+    from httpx import ASGITransport, AsyncClient
+
+    from proinfo.api.app import app
+
+    def _free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+    imei = b"868329087355777"
+
+    async def _run_session(c, port):
+        r = await c.post("/api/qc/start", json={
+            "port": port, "host": "127.0.0.1", "protocol_mode": "manual", "protocol": "ais140"})
+        qc_id = r.json()["id"]
+        writer = None
+        for _ in range(40):
+            try:
+                _, writer = await asyncio.open_connection("127.0.0.1", port); break
+            except OSError:
+                await asyncio.sleep(0.05)
+        assert writer is not None
+        writer.write(_ais140_lgn(imei, "2.2.5")); await writer.drain()
+        await asyncio.sleep(0.3)
+        return qc_id, writer
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # --- session 1: connect, then skip every required item so it FINALIZES as
+        # conditional_pass (same pattern as test_qc_coverage_and_verdict_states) ---
+        port1 = _free_port()
+        qc1, w1 = await _run_session(c, port1)
+        got = (await c.get(f"/api/qc/{qc1}")).json()
+        dev1 = {d["device_id"]: d for d in got["devices"]}[imei.decode()]
+        serial = dev1["serial"]
+        assert isinstance(serial, int) and serial > 0
+        assert dev1["prior_verdict"] == "", "brand-new device has no prior result yet"
+
+        missing = [k for k, v in {c_["key"]: c_ for c_ in dev1["coverage"]}.items() if v["required"] and not v["seen"]]
+        skip1 = (await c.post(f"/api/qc/{qc1}/skip",
+                              json={"device_id": imei.decode(), "keys": missing})).json()
+        dev1b = {d["device_id"]: d for d in skip1["devices"]}[imei.decode()]
+        assert dev1b["verdict"] == "conditional_pass"
+        w1.close()
+        await c.post(f"/api/qc/{qc1}/stop")
+
+        # --- session 2: a NEW session, SAME imei, different port -> same serial, and the
+        # prior session's FINAL verdict is immediately visible before this one finalizes ---
+        port2 = _free_port()
+        qc2, w2 = await _run_session(c, port2)
+        got2 = (await c.get(f"/api/qc/{qc2}")).json()
+        dev2 = {d["device_id"]: d for d in got2["devices"]}[imei.decode()]
+        assert dev2["serial"] == serial, "the same IMEI must keep the same serial across sessions"
+        assert dev2["prior_qc_id"] == qc1
+        assert dev2["prior_verdict"] == "conditional_pass"
+        assert dev2["verdict"] == "in_progress", "this NEW session hasn't finalized yet"
+
+        # the standalone device-info endpoint carries the same registry fields
+        info = (await c.get(f"/api/qc/device/{imei.decode()}")).json()
+        assert info["serial"] == serial
+        assert info["last_verdict"] == "conditional_pass"
+        assert info["last_qc_id"] == qc1
+
+        w2.close()
+        await c.post(f"/api/qc/{qc2}/stop")

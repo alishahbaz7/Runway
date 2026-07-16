@@ -62,8 +62,13 @@
       <section id="cap-feed-pane">
         <div class="tcp-feed-head">
           <h2 class="tcp-h">Live packets <span id="cap-feed-for" class="muted"></span></h2>
-          <!-- QC-only: single verdict + coverage pill (e.g. "IN PROGRESS · 2/13") — click for details -->
-          <button id="cap-qc-summary" class="qc-summary" title="QC status — click for the full breakdown" style="display:none"></button>
+          <!-- QC-only: verdict + coverage pill for the SELECTED device (e.g. "IN PROGRESS · 2/13")
+               — click it as a shortcut into the Summary view below -->
+          <button id="cap-qc-status" class="qc-summary" title="QC status for the selected device — click to open Summary" style="display:none"></button>
+          <!-- QC-only: Raw (packet stream, multi-device) | Summary (per-device coverage & details) -->
+          <span class="tcp-seg" id="cap-qc-viewseg" style="display:none" title="Raw = packet stream · Summary = per-device coverage & details">
+            <button id="cap-qc-view-raw" class="seg on">Raw</button><button id="cap-qc-view-summary" class="seg">Summary</button>
+          </span>
           <!-- Testing-only: RAW/Parsed + HEX/ASCII (QC renders per the protocol config) -->
           <span class="tcp-seg" id="cap-view-seg" title="show packets as raw bytes or decoded fields">
             <button id="cap-view-raw" class="seg on">RAW</button><button id="cap-view-parsed" class="seg">Parsed</button>
@@ -95,6 +100,18 @@
           <button id="cap-feed-clear" class="ghost mini danger">Clear</button>
         </div>
         <div id="cap-feed"><p class="empty">Decoded packets appear here as devices send data.</p></div>
+        <!-- QC Summary view: inline (not a popup) so it lives right on the Live Packets page;
+             shows the device selected in the left list, and updates live. -->
+        <div id="cap-qc-summary-panel" style="display:none">
+          <div class="tcp-pkt-head">
+            <span id="cap-qcsum-nav" class="muted"></span>
+            <span id="cap-qcsum-verdict" class="qc-verdict"></span>
+            <span class="spacer"></span>
+            <span id="cap-qcsum-actions"></span>
+          </div>
+          <div id="cap-qcsum-meta" class="muted"></div>
+          <div id="cap-qcsum-body"></div>
+        </div>
       </section>
     </main>
   </div>
@@ -133,20 +150,6 @@
       <pre id="cap-pkt-ascii" class="json"></pre>
       <h4 class="tcp-pkt-h">HEX</h4>
       <pre id="cap-pkt-hex" class="json"></pre>
-    </div>
-  </div>
-
-  <!-- QC details: per-device coverage (Packets + Alerts) + device details + actions -->
-  <div id="cap-qcdetails-modal" class="tcp-modal" style="display:none">
-    <div class="tcp-modal-card tcp-pkt-card">
-      <div class="tcp-pkt-head">
-        <h3>QC details <span id="cap-qcdetails-verdict" class="qc-verdict"></span></h3>
-        <span class="spacer"></span>
-        <span id="cap-qcdetails-actions"></span>
-        <button id="cap-qcdetails-close" class="ghost mini danger">✕ Close</button>
-      </div>
-      <div id="cap-qcdetails-meta" class="muted"></div>
-      <div id="cap-qcdetails-body"></div>
     </div>
   </div>
 

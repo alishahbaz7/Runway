@@ -52,17 +52,21 @@
   const FOCUS_KEY = "runway.cap.focus";     // focused tab key      (sessionStorage)
   const HIDDEN_KEY = "runway.cap.hidden";   // unchecked peers      (sessionStorage)
   const SELDEV_KEY = "runway.cap.seldev";   // {qcId: device_id}    (sessionStorage)
+  const QCVIEW_KEY = "runway.cap.qcview";   // "raw" | "summary"    (localStorage)
+  const HIDDENQC_KEY = "runway.cap.qchidden"; // {qcId: [device_id]} hidden from Raw (sessionStorage)
   const NEW = "__new__";           // sentinel focus key for the unstarted "New session" draft
   let draftOpen = false;
   let draftMode = "test";          // "test" | "qc" — what a new session will be
   let rawFmt = "hex";
   let viewMode = "raw";
+  let qcView = "raw";              // QC feed pane: "raw" (packet stream) | "summary" (per-device)
   let devicesCollapsed = false;
   let focus = null;                // "t:<jid>" | "q:<qcId>" | NEW | null
   const hiddenPeers = new Set();
   try {
     rawFmt = localStorage.getItem(RAWFMT_KEY) || "hex";
     viewMode = localStorage.getItem(VIEW_KEY) || "raw";
+    qcView = localStorage.getItem(QCVIEW_KEY) || "raw";
     draftMode = localStorage.getItem(MODE_KEY) || "test";
     devicesCollapsed = localStorage.getItem(DEVCOLL_KEY) === "1";
     focus = sessionStorage.getItem(FOCUS_KEY) || null;
@@ -85,6 +89,17 @@
     return devs.find((d) => d.device_id === selDev[sess.id]) || devs[0];
   }
   function selectDevice(sess, did) { selDev[sess.id] = did; saveSelDev(); renderAll(); }
+
+  // QC per-device Raw-feed visibility: {qcId: [device_id,...]} HIDDEN from the packet stream
+  // — lets the operator show all devices, a partial set, or a single device on this port,
+  // same "checkbox per row" pattern as the Testing tab's per-peer hide/show.
+  let hiddenQcRaw = {};
+  try { hiddenQcRaw = JSON.parse(sessionStorage.getItem(HIDDENQC_KEY) || "{}") || {}; } catch (e) { hiddenQcRaw = {}; }
+  const saveHiddenQc = () => {
+    try { sessionStorage.setItem(HIDDENQC_KEY, JSON.stringify(hiddenQcRaw)); } catch (e) { /* ignore */ }
+  };
+  const hiddenQcSet = (qcId) => new Set(hiddenQcRaw[qcId] || []);
+  function setHiddenQc(qcId, set) { hiddenQcRaw[qcId] = [...set]; saveHiddenQc(); }
 
   const _MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function fmtLogTs(t) {
@@ -309,7 +324,10 @@
       tab.append(el("span", "tcp-dot " + (live ? "live" : "dead")));
       tab.append(el("span", "cap-tab-mode " + (isQc ? "is-qc" : "is-test"), isQc ? "QC" : "TEST"));
       tab.append(el("span", "tcp-tab-port", String(isQc ? t.sess.port : t.job.port)));
-      tab.append(el("span", "tcp-tab-sub muted", isQc ? (t.sess.device_id || protoLabel(t.sess)) : t.job.codec));
+      // Tab subtitle = the protocol only. The IMEI does NOT belong here: a QC port can
+      // host many devices (which one would the tab name?), and the per-device identity
+      // already lives in the device list + Summary panel.
+      tab.append(el("span", "tcp-tab-sub muted", isQc ? protoLabel(t.sess) : t.job.codec));
       if (isQc && t.sess.verdict) tab.append(el("span", "qc-verdict qc-verdict-" + t.sess.verdict, verdictLabel(t.sess.verdict)));
       else if (conn) tab.append(el("span", "tcp-tab-count", String(conn)));
       const x = el("button", "tcp-tab-x", "✕");
@@ -424,13 +442,21 @@
     title.style.cursor = "pointer"; title.title = caret.title; title.onclick = toggle;
     headEl.append(title);
     headEl.append(el("span", "spacer"));
-    if (!isQc && clients.length && !devicesCollapsed) {   // Testing: bulk show/hide peers
+    if (count && !devicesCollapsed) {   // bulk show/hide in the Raw feed — all/partial/none
       const all = el("button", "ghost mini", "All");
-      all.title = "show all devices' packets";
-      all.onclick = () => { clients.forEach((c) => hiddenPeers.delete(c.peer)); saveHidden(); renderDevices(); renderFeed(); };
+      all.title = "show all devices' packets in Raw";
+      all.onclick = () => {
+        if (isQc) { setHiddenQc(t.sess.id, new Set()); }
+        else { clients.forEach((c) => hiddenPeers.delete(c.peer)); saveHidden(); }
+        renderDevices(); renderFeed();
+      };
       const none = el("button", "ghost mini", "None");
-      none.title = "hide all devices' packets";
-      none.onclick = () => { clients.forEach((c) => hiddenPeers.add(c.peer)); saveHidden(); renderDevices(); renderFeed(); };
+      none.title = "hide all devices' packets in Raw";
+      none.onclick = () => {
+        if (isQc) { setHiddenQc(t.sess.id, new Set(qcDevices(t.sess).map((d) => d.device_id))); }
+        else { clients.forEach((c) => hiddenPeers.add(c.peer)); saveHidden(); }
+        renderDevices(); renderFeed();
+      };
       headEl.append(all, none);
     }
     host.append(headEl);
@@ -471,8 +497,10 @@
     });
   }
 
-  // QC: one row PER DEVICE (by IMEI) — reconnects merge; click to select (drives the feed,
-  // the summary pill, and the details modal). Unidentified connected peers show as pending.
+  // QC: one row PER DEVICE (by IMEI) — reconnects merge. Row click selects it (drives the
+  // Summary panel + status pill); the checkbox is independent — it controls whether this
+  // device's packets show in the Raw feed, so the operator can view all devices, a partial
+  // set, or a single device on this port (same pattern as the Testing tab's per-peer hide).
   function renderQcDeviceRows(t, host, clients, running) {
     const sess = t.sess;
     const jid = tabJobId(t);
@@ -480,15 +508,35 @@
     const devices = qcDevices(sess);
     const selected = qcSelectedDevice(sess);
     const known = new Set(devices.flatMap((d) => d.peers || []));
+    const hidden = hiddenQcSet(sess.id);
 
     devices.forEach((d) => {
       const connected = (d.peers || []).some((p) => connSet.has(p));
       const isSel = selected && selected.device_id === d.device_id;
       const row = el("div", "tcp-peer qc-dev-row" + (isSel ? " sel" : ""));
       row.onclick = () => selectDevice(sess, d.device_id);
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = !hidden.has(d.device_id);
+      cb.title = "show this device's packets in the Raw feed";
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = () => {
+        const next = hiddenQcSet(sess.id);
+        cb.checked ? next.delete(d.device_id) : next.add(d.device_id);
+        setHiddenQc(sess.id, next);
+        renderFeed();
+      };
+      row.append(cb);
       row.append(el("span", "tcp-dot " + (connected ? "live" : "dead")));
       const name = el("div", "tcp-device-id");
-      name.append(el("span", "mono tcp-client-addr", d.device_id));
+      const idLine = el("span", "mono tcp-client-addr");
+      // (#6) stable per-IMEI serial — the same physical device always shows the same
+      // number, a genuinely new IMEI gets the next one.
+      if (d.serial != null) {
+        const badge = el("span", "qc-serial-badge", "#" + d.serial);
+        badge.title = "device serial " + d.serial + " — stable for this IMEI across reconnects and sessions";
+        idLine.append(badge);
+      }
+      idLine.append(document.createTextNode(d.device_id));
+      name.append(idLine);
       if ((d.peers || []).length) name.append(el("span", "muted tcp-device-peer", d.peers.join(", ")));
       row.append(name);
       const meta = el("div", "tcp-peer-meta");
@@ -507,9 +555,11 @@
       host.append(row);
     });
 
-    // connected peers that haven't identified a device yet
+    // connected peers that haven't identified a device yet (always shown in Raw — nothing
+    // to key a hide checkbox on until they identify)
     clients.filter((c) => c.connected && !known.has(c.peer)).forEach((c) => {
       const row = el("div", "tcp-peer");
+      row.append(el("span"));    // empty checkbox-column placeholder, keeps the grid aligned
       row.append(el("span", "tcp-dot live"));
       const name = el("div", "tcp-device-id");
       name.append(el("span", "mono tcp-client-addr muted", c.peer));
@@ -591,9 +641,15 @@
     if (!jid) return [];
     let rows = feed.filter((r) => r.peer && peerJob.get(r.peer) === jid);
     if (t && t.mode === "qc") {
-      // QC: show the SELECTED device's packets (its peers); if none selected/identified, all
-      const dev = qcSelectedDevice(t.sess);
-      if (dev) { const ps = new Set(dev.peers || []); rows = rows.filter((r) => ps.has(r.peer)); }
+      // Raw view: every device's packets EXCEPT those the operator hid via the device-list
+      // checkboxes — so the operator can see all devices, a partial set, or a single device.
+      // Unidentified peers (no device yet) always show — there's no checkbox for them yet.
+      const hidden = hiddenQcSet(t.sess.id);
+      if (hidden.size) {
+        const hiddenPeersSet = new Set();
+        qcDevices(t.sess).forEach((d) => { if (hidden.has(d.device_id)) (d.peers || []).forEach((p) => hiddenPeersSet.add(p)); });
+        rows = rows.filter((r) => !hiddenPeersSet.has(r.peer));
+      }
       return rows;
     }
     return rows.filter((r) => !hiddenPeers.has(r.peer));   // Testing: per-peer show/hide
@@ -717,25 +773,21 @@
     if (e.target.id === "cap-pkt-modal") $("cap-pkt-modal").style.display = "none";
   });
 
-  // ---- QC details modal: per-device coverage (Packets + Alerts) + details + actions ----
-  // Opened from the summary pill; shows the SELECTED device and stays live while open.
-  let qcDetailsFor = null;                     // qc id the modal is showing (for live updates)
+  // ---- QC Summary panel: inline (not a popup), lives right on the Live Packets page ------
+  // Toggled by the Raw|Summary segmented control; shows the SELECTED device (from the left
+  // device list) and re-renders on every poll/WS update, so it's always live.
   const qcRefCache = {};                       // protocol -> {packet_types, message_alert_ids}
+  const qcRefLoading = new Set();              // protocols currently being fetched (dedupe)
 
-  async function openQcDetails(sess) {
-    qcDetailsFor = sess.id;
-    renderQcDetails(sess);
-    $("cap-qcdetails-modal").style.display = "flex";
-    // Fetch the reference catalogue (descriptions + example packets) once per protocol,
-    // then re-render so hover tooltips get the description + reference packet.
-    const proto = sess.identified_as || "";
-    if (proto && !(proto in qcRefCache)) {
-      try {
-        const def = await api(`/api/protocols/${encodeURIComponent(proto)}.json`);
-        qcRefCache[proto] = def.content || {};
-      } catch (e) { qcRefCache[proto] = {}; }
-      if (qcDetailsFor === sess.id) renderQcDetails(sessions.get(sess.id) || sess);
-    }
+  // Fetch the reference catalogue (descriptions + example packets) once per protocol; when
+  // it lands, re-render so hover tooltips pick up the description + reference packet.
+  function ensureQcRef(proto) {
+    if (!proto || proto in qcRefCache || qcRefLoading.has(proto)) return;
+    qcRefLoading.add(proto);
+    api(`/api/protocols/${encodeURIComponent(proto)}.json`)
+      .then((def) => { qcRefCache[proto] = def.content || {}; })
+      .catch(() => { qcRefCache[proto] = {}; })
+      .finally(() => { qcRefLoading.delete(proto); renderAll(); });
   }
 
   async function setSkipped(qcId, deviceId, keys) {
@@ -752,8 +804,15 @@
     } catch (e) { msg(null, "err", "finalize failed: " + e.message); }
   }
 
-  // reference example packet + human description for a coverage item, from the protocol JSON
-  function qcRef(proto, item) {
+  // Reference description + example for a coverage item, tailored to THIS row. Every
+  // alert-id item (Live, History, and all 14 alerts) rides on the SAME generic NMP/PVT
+  // sentence in the protocol JSON — the doc only ships one static example (fixed
+  // packet_type + alert_id), so showing it verbatim made every alert row look identical.
+  // Here we substitute this row's own packet_type code + alert_id into that example and
+  // flag which tokens were substituted, so the caller can highlight exactly what THIS row
+  // expects (e.g. "EA,10" for Emergency state ON) instead of whatever the doc happened to
+  // capture. Returns {desc, parts}: parts is the example pre-split into {text, hl} tokens.
+  function qcRefRow(proto, item) {
     const content = qcRefCache[proto] || {};
     const pt = content.packet_types || {};
     const alerts = content.message_alert_ids || {};
@@ -763,11 +822,60 @@
       : (pt.PVT || pt.NMP);                       // alerts ride on the NMP/PVT sentence
     const desc = (item.group === "alert" && item.alert_id != null && alerts[item.alert_id])
       ? alerts[item.alert_id] : ((fam && fam.description) || item.label);
-    return { desc, example: (fam && fam.example) || "" };
+    if (!fam || !fam.example) return { desc, parts: [] };
+    if (item.alert_id == null) return { desc, parts: [{ text: fam.example, hl: false }] };
+
+    const fields = fam.fields || [];
+    const ptypeField = fields.find((f) => f.name === "packet_type");
+    const alertField = fields.find((f) => f.name === "alert_id");
+    // tokens[0] is the "$NMP" header itself (the split includes it), so the JSON's 1-based
+    // field index N lands at tokens[N], not tokens[N-1] — e.g. field 3 (packet_type) is
+    // tokens[3]: $NMP(0), vendor_id(1), firmware_version(2), packet_type(3), alert_id(4)…
+    const tokens = fam.example.split(",");              // safe: packet_type/alert_id sit
+    const hl = new Set();                               // well before any embedded-comma field
+    if (ptypeField && item.code) { tokens[ptypeField.index] = item.code; hl.add(ptypeField.index); }
+    if (alertField) { tokens[alertField.index] = String(item.alert_id); hl.add(alertField.index); }
+    const parts = [];
+    tokens.forEach((t, i) => { if (i > 0) parts.push({ text: ",", hl: false }); parts.push({ text: t, hl: hl.has(i) }); });
+    return { desc, parts };
   }
 
-  function renderQcDetails(sess) {
+  // Custom hover tooltip for a coverage row's Item cell — the native title= attribute can't
+  // render partial bold/highlight, which is the whole point here (#1). Shown only after the
+  // pointer rests for ~2s (like a native tooltip), not on every brief hover.
+  const COV_TIP_DELAY_MS = 2000;
+  const covTip = el("div", "cov-tip");
+  covTip.hidden = true;
+  document.body.appendChild(covTip);
+  let covTipTimer = null;
+  function scheduleCovTip(anchorEl, proto, item) {
+    clearTimeout(covTipTimer);
+    covTipTimer = setTimeout(() => showCovTip(anchorEl, proto, item), COV_TIP_DELAY_MS);
+  }
+  function showCovTip(anchorEl, proto, item) {
+    const ref = qcRefRow(proto, item);
+    covTip.innerHTML = "";
+    covTip.append(el("div", "cov-tip-desc", ref.desc));
+    if (ref.parts.length) {
+      covTip.append(el("div", "cov-tip-h", "Reference packet — expected for this row"));
+      const ex = el("div", "cov-tip-example");
+      ref.parts.forEach((p) => ex.append(p.hl ? el("mark", "", p.text) : p.text));
+      covTip.append(ex);
+    }
+    covTip.hidden = false;
+    const r = anchorEl.getBoundingClientRect();
+    const tipRect = covTip.getBoundingClientRect();
+    let left = Math.min(r.left, window.innerWidth - tipRect.width - 8);
+    let top = r.bottom + 6;
+    if (top + tipRect.height > window.innerHeight - 8) top = r.top - tipRect.height - 6;
+    covTip.style.left = Math.max(8, left) + "px";
+    covTip.style.top = Math.max(8, top) + "px";
+  }
+  function hideCovTip() { clearTimeout(covTipTimer); covTip.hidden = true; }
+
+  function renderQcSummaryPanel(sess) {
     const proto = sess.identified_as || "";
+    ensureQcRef(proto);
     const fmt = qcRawFmt(proto);
     const dev = qcSelectedDevice(sess);
     const cov = (dev && dev.coverage) || [];
@@ -775,16 +883,17 @@
     const verdict = dev ? dev.verdict : sess.verdict;
     const did = dev ? dev.device_id : "";
 
-    const vb = $("cap-qcdetails-verdict");
+    const vb = $("cap-qcsum-verdict");
     vb.textContent = verdictLabel(verdict);
     vb.className = "qc-verdict" + (verdict ? " qc-verdict-" + verdict : "");
-    $("cap-qcdetails-meta").textContent =
+    $("cap-qcsum-nav").textContent =
+      qcDevices(sess).length > 1 ? `device ${qcDevices(sess).findIndex((d) => d.device_id === did) + 1}/${qcDevices(sess).length}` : "";
+    $("cap-qcsum-meta").textContent =
       `#${sess.id} · port ${sess.port} · ${proto || sess.protocol_mode}`
-      + (sess.operator ? ` · operator: ${sess.operator}` : "")
-      + (qcDevices(sess).length > 1 ? ` · device ${qcDevices(sess).findIndex((d) => d.device_id === did) + 1}/${qcDevices(sess).length}` : "");
+      + (sess.operator ? ` · operator: ${sess.operator}` : "");
 
-    // --- (#4) Pass/Fail actions in the header top-right ---
-    const acts = $("cap-qcdetails-actions");
+    // --- (#4) Pass/Fail actions, top-right of the panel's own mini-header ---
+    const acts = $("cap-qcsum-actions");
     acts.innerHTML = "";
     if (dev) {
       const passc = el("button", "ghost mini", "✓ Pass w/ conditions");
@@ -801,7 +910,7 @@
       }
     }
 
-    const body = $("cap-qcdetails-body");
+    const body = $("cap-qcsum-body");
     body.innerHTML = "";
     if (!dev) {
       body.append(el("p", "empty", "No device identified yet — packets are still being classified."));
@@ -812,7 +921,17 @@
     body.append(el("h4", "tcp-pkt-h", "Device details"));
     const dl = el("div", "qcd-devinfo");
     const kv = (k, v) => { const w = el("div", "qcd-kv"); w.append(el("span", "qcd-k", k), el("span", "qcd-v mono", v || "—")); return w; };
-    dl.append(kv("IMEI", did), kv("Firmware", dev.firmware_version), kv("Vendor ID", dev.vendor_id));
+    dl.append(kv("Serial", dev.serial != null ? "#" + dev.serial : null),
+      kv("IMEI", did), kv("Firmware", dev.firmware_version), kv("Vendor ID", dev.vendor_id));
+    // (#7) recall automatically: if this IMEI has a FINAL result from an EARLIER session,
+    // surface it immediately — the operator shouldn't have to go searching for it.
+    if (dev.prior_verdict) {
+      const prior = el("div", "qcd-prior");
+      prior.append(el("span", "muted", "Previously tested: "));
+      prior.append(el("span", "qc-verdict qc-verdict-" + dev.prior_verdict, verdictLabel(dev.prior_verdict)));
+      prior.append(el("span", "muted", ` (session #${dev.prior_qc_id})`));
+      dl.append(prior);
+    }
     body.append(dl);
 
     // one coverage table per group (#3): Packets, then Alerts
@@ -833,37 +952,48 @@
         // (#3) alert rows show the id + on-wire code: "Connect back to main battery (6 - BR)"
         const label = (c.group === "alert" && c.alert_id != null)
           ? `${c.label} (${c.alert_id}${c.code ? " - " + c.code : ""})` : c.label;
-        // (#1) hover: description + reference packet + what was received
-        const ref = qcRef(proto, c);
-        tr.title = `${ref.desc}`
-          + (ref.example ? `\n\nReference packet:\n${ref.example}` : "")
-          + `\n\nReceived:\n${c.last_raw_hex ? rawView(c.last_raw_hex, fmt) : "not received yet"}`;
         const dot = el("td"); dot.append(el("span", "cov-dot cov-" + state)); tr.append(dot);
-        tr.append(el("td", "cov-label", label));
+        const labelCell = el("td", "cov-label", label);
+        // (#1)(#2) hover the ITEM NAME specifically (not anywhere in the row) and wait ~2s
+        // (like a native tooltip) before showing the description + reference packet with
+        // THIS row's own tokens highlighted. No "Received" section — that's already visible
+        // in the Received column itself, so repeating it here was redundant.
+        labelCell.addEventListener("mouseenter", () => scheduleCovTip(labelCell, proto, c));
+        labelCell.addEventListener("mouseleave", hideCovTip);
+        tr.append(labelCell);
         tr.append(el("td", "cov-req", c.required ? "yes" : "—"));
         tr.append(el("td", "num", c.count ? String(c.count) : ""));
-        // (#2) received packet — a link to view the captured sample
-        const rc = el("td");
+        // (#2) received packet — an inline preview of the actual captured sample (not just
+        // a "view" button), so the operator sees at a glance what came in; click for the
+        // full packet (parsed/ASCII/HEX). (#4) coverage() always hands back the MOST RECENT
+        // matching record, so this preview is always the latest one seen for this item.
+        const rc = el("td", "cov-recv");
         if (c.last_raw_hex) {
-          const view = el("button", "cov-view", "view");
-          view.title = "see the received packet";
-          view.onclick = (e) => {
+          const preview = el("span", "cov-recv-preview mono",
+            rawView(c.last_raw_hex, fmt).replace(/\s+/g, " ").trim());
+          preview.title = "click to see the full packet";
+          preview.onclick = (e) => {
             e.stopPropagation();
             openPacket({ raw_hex: c.last_raw_hex, message_type: c.label, device_id: did, protocol: proto });
           };
-          rc.append(view);
+          rc.append(preview);
         } else { rc.append(el("span", "muted", "—")); }
         tr.append(rc);
+        // (#5) Skip only matters for an item that's still missing — once it's been received
+        // there's nothing to mark optional, so the checkbox just adds clutter; hide it.
         const skc = el("td");
-        const cb = el("input"); cb.type = "checkbox"; cb.checked = isSkip;
-        cb.title = "mark optional for this device (missing -> Conditional Pass, not fail)";
-        cb.onclick = (e) => e.stopPropagation();
-        cb.onchange = () => {
-          const next = new Set(skipped);
-          cb.checked ? next.add(c.key) : next.delete(c.key);
-          setSkipped(sess.id, did, [...next]);
-        };
-        skc.append(cb); tr.append(skc);
+        if (!c.seen) {
+          const cb = el("input"); cb.type = "checkbox"; cb.checked = isSkip;
+          cb.title = "mark optional for this device (missing -> Conditional Pass, not fail)";
+          cb.onclick = (e) => e.stopPropagation();
+          cb.onchange = () => {
+            const next = new Set(skipped);
+            cb.checked ? next.add(c.key) : next.delete(c.key);
+            setSkipped(sess.id, did, [...next]);
+          };
+          skc.append(cb);
+        }
+        tr.append(skc);
         tb.append(tr);
       });
       tbl.append(tb); body.append(tbl);
@@ -892,12 +1022,6 @@
     if (!checks.length) crow.append(el("p", "empty", "No checks evaluated yet."));
     body.append(crow);
   }
-  $("cap-qcdetails-close").addEventListener("click", () => {
-    $("cap-qcdetails-modal").style.display = "none"; qcDetailsFor = null;
-  });
-  $("cap-qcdetails-modal").addEventListener("click", (e) => {
-    if (e.target.id === "cap-qcdetails-modal") { $("cap-qcdetails-modal").style.display = "none"; qcDetailsFor = null; }
-  });
 
   // ---- QC report modal -------------------------------------------------------
   let reportQcId = null;
@@ -1049,26 +1173,39 @@
     $("cap-devices").style.display = draft ? "none" : "";
     if (!draft) { renderSession(); renderDevices(); }
   }
+  // Raw | Summary — QC-only, persisted globally like the other view toggles.
+  function setQcView(v) {
+    qcView = v;
+    try { localStorage.setItem(QCVIEW_KEY, v); } catch (e) { /* ignore */ }
+    $("cap-qc-view-raw").classList.toggle("on", v === "raw");
+    $("cap-qc-view-summary").classList.toggle("on", v === "summary");
+    renderAll();
+  }
+  $("cap-qc-view-raw").addEventListener("click", () => setQcView("raw"));
+  $("cap-qc-view-summary").addEventListener("click", () => setQcView("summary"));
+
   function applyModeChrome() {
     const t = focus === NEW ? null : focusedTab();
     const isQc = !!(t && t.mode === "qc");
+    const showSummary = isQc && qcView === "summary";
     // QC renders per the protocol config — hide the RAW/Parsed + HEX/ASCII toggles.
     $("cap-view-seg").style.display = isQc ? "none" : "";
     $("cap-rawfmt-seg").style.display = (!isQc && viewMode === "raw") ? "" : "none";
+    $("cap-qc-viewseg").style.display = isQc ? "" : "none";
     $("cap-qc-actions").style.display = isQc ? "" : "none";
     $("cap-test-actions").style.display = (t && !isQc) ? "" : "none";
+    $("cap-feed-count").style.display = showSummary ? "none" : "";
+    $("cap-feed").style.display = showSummary ? "none" : "";
+    $("cap-qc-summary-panel").style.display = showSummary ? "" : "none";
     renderQcActions(t);
-    renderQcSummary(isQc ? t.sess : null);   // single verdict+coverage pill (checks live in the details modal)
-    // keep an open details modal live as coverage/verdict update
-    if (qcDetailsFor != null && $("cap-qcdetails-modal").style.display === "flex") {
-      const s = sessions.get(qcDetailsFor);
-      if (s) renderQcDetails(s);
-    }
+    renderQcStatusPill(isQc ? t.sess : null);
+    if (showSummary) renderQcSummaryPanel(t.sess);   // re-renders live on every poll/WS update
   }
-  // QC-only summary pill in the feed header: verdict + required-coverage fraction; click
-  // for the breakdown.
-  function renderQcSummary(sess) {
-    const btn = $("cap-qc-summary");
+  // QC-only status pill in the feed header: verdict + required-coverage fraction for the
+  // SELECTED device. Always visible in both Raw and Summary views; clicking it is a
+  // shortcut into the Summary view.
+  function renderQcStatusPill(sess) {
+    const btn = $("cap-qc-status");
     if (!sess) { btn.style.display = "none"; return; }
     btn.style.display = "";
     const dev = qcSelectedDevice(sess);          // the focused device (or first), else session
@@ -1085,7 +1222,7 @@
     }
     btn.textContent = label;
     btn.className = "qc-summary" + (verdict ? " qc-summary-" + verdict : "");
-    btn.onclick = () => openQcDetails(sess);
+    btn.onclick = () => setQcView("summary");
   }
   function renderAll() { renderTabs(); renderPane(); renderFeed(); applyModeChrome(); }
 
@@ -1138,6 +1275,7 @@
 
   setViewMode(viewMode);
   setRawFmt(rawFmt);
+  setQcView(qcView);
   setDraftMode(draftMode);
   loadProtocols();
   loadDefaults();

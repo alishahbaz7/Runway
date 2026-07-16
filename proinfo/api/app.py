@@ -1073,6 +1073,10 @@ def _qc_last_recv_epoch(records) -> Optional[float]:
 
 # Worst-first ranking so a lot's verdict = its worst unit (any fail -> lot fails).
 _VERDICT_RANK = {"": 0, "pass": 1, "conditional_pass": 2, "in_progress": 3, "timeout": 4, "fail": 5}
+# Only these verdicts are worth remembering in the durable qc_devices registry — writing
+# "in_progress" there would clobber a returning device's actual last result while its new
+# session is still running (see qc_device_touch's docstring).
+_FINAL_VERDICTS = {"pass", "conditional_pass", "fail", "timeout"}
 
 
 def _jloads_dict(s: str) -> dict:
@@ -1101,10 +1105,17 @@ def _device_verdict(cov: list, checks_verdict: str, meta: dict) -> str:
     return checks_verdict
 
 
-def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_at, now) -> list:
+def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_at, now,
+                qc_id: Optional[int] = None) -> list:
     """Group a session's records by device id (IMEI) and compute per-device coverage +
     verdict + identity. One entry per physical device — a reconnect (new peer) merges into
-    the same device rather than adding a row."""
+    the same device rather than adding a row.
+
+    Also touches the durable qc_devices registry for every device seen: assigns/looks up
+    its stable serial number (#6 — same IMEI always gets the same number, a genuinely new
+    IMEI gets the next one) and, once this device's verdict is FINAL, records it there so a
+    future connection of the same IMEI (in any session, even after a restart) immediately
+    shows its last known QC status (#7) instead of requiring a manual search."""
     from collections import OrderedDict
     groups: "OrderedDict[str, list]" = OrderedDict()
     for r in records:
@@ -1125,15 +1136,28 @@ def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_a
             io = r.io or {}
             fw = io.get("firmware_version") or fw
             vend = io.get("vendor_id") or vend
+        verdict = _device_verdict(cov, checks_verdict, meta)
+
+        # (#6/#7) get-or-create the serial + only persist FINAL verdicts into the registry
+        is_final = verdict in _FINAL_VERDICTS
+        reg = db.qc_device_touch(did, protocol=(profile or {}).get("protocol") or "",
+                                 qc_id=(qc_id if is_final else None), verdict=(verdict if is_final else None))
+        # "prior" is only meaningful while it's from a DIFFERENT (older) session than this
+        # one — once this session's own final verdict lands in the registry, there's
+        # nothing older left to show.
+        has_prior = bool(reg["last_qc_id"]) and reg["last_qc_id"] != qc_id
         out.append({
             "device_id": did, "packet_count": len(recs),
             "coverage": cov, "checks": checks,
-            "verdict": _device_verdict(cov, checks_verdict, meta),
+            "verdict": verdict,
             "idle_s": (now - last) if last else None, "last_seen": last,
             "peers": sorted({r.peer for r in recs if r.peer}),
             "firmware_version": fw, "vendor_id": vend,
             "skipped": skipped_map.get(did) or [],
             "finalized_verdict": finalized_map.get(did) or "",
+            "serial": reg["serial"], "first_seen_ever": reg["first_seen"],
+            "prior_qc_id": reg["last_qc_id"] if has_prior else None,
+            "prior_verdict": reg["last_verdict"] if has_prior else "",
         })
     return out
 
@@ -1157,7 +1181,7 @@ def _qc_compute(row: dict, sink, now: Optional[float] = None) -> dict:
         profile = _qc_profile(row.get("identified_as") or "")
         catalog = (profile or {}).get("coverage") or []
         devices = _qc_devices(sink.records, catalog, profile, skipped_map, finalized_map,
-                              row.get("started_at"), now)
+                              row.get("started_at"), now, qc_id=row.get("id"))
         checks, checks_verdict = sink.checks()
         sess_cov = qc_engine.coverage(sink.records, catalog) if catalog else []
         sess_last = _qc_last_recv_epoch(sink.records)
@@ -1513,8 +1537,11 @@ async def qc_device_summary(device_id: str):
         for key, v in tally.items() if key not in catalog
     ]
 
+    reg = db.qc_device_registry(device_id) or {}
     return {"device_id": device_id, "protocol": protocol, "records_seen": len(records),
-            "device_info": device_info, "alarms": alarms}
+            "device_info": device_info, "alarms": alarms,
+            "serial": reg.get("serial"), "first_seen_ever": reg.get("first_seen"),
+            "last_verdict": reg.get("last_verdict") or "", "last_qc_id": reg.get("last_qc_id")}
 
 
 @app.delete("/api/data")

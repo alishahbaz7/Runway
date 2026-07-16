@@ -87,6 +87,19 @@ SCHEMA: list[str] = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS qc_devices (
+        device_id     TEXT PRIMARY KEY,       -- IMEI — the durable identity across reconnects/sessions
+        serial        INTEGER NOT NULL,       -- stable per-IMEI serial: 1st new device seen = 1, 2nd = 2, ...
+        first_seen    REAL NOT NULL,
+        last_seen     REAL,
+        last_protocol TEXT DEFAULT '',
+        last_qc_id    INTEGER,                -- the QC session that produced last_verdict (its OWN id once final)
+        last_verdict  TEXT DEFAULT ''          -- last FINAL verdict (pass/conditional_pass/fail/timeout) — never
+                                                -- overwritten by a still-in_progress session, so a returning
+                                                -- device's prior result stays visible until this run finalizes
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS qc_sessions (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,
         job_id         TEXT DEFAULT '',       -- the live-TCP job id backing this session
@@ -269,3 +282,49 @@ class Storage:
         return self.query(
             "SELECT * FROM qc_sessions WHERE device_id = ? ORDER BY id DESC", (device_id,)
         )
+
+    # ----- QC device registry (persistent, IMEI-keyed) ---------------------- #
+    def qc_device_touch(self, device_id: str, *, protocol: str = "",
+                        qc_id: Optional[int] = None, verdict: Optional[str] = None) -> dict:
+        """Get-or-create the durable registry row for this IMEI: assigns the next
+        incrementing serial number the FIRST time this device is ever seen (never
+        reassigned after that — a reconnect of the same IMEI always gets the same
+        number), and bumps last_seen. Pass qc_id/verdict only when the caller has a
+        FINAL verdict to record (the caller is responsible for not passing an
+        in-progress one) — that way a returning device's prior result stays visible
+        in the registry for the whole time its new session is still running.
+        Get-or-create must be atomic (two devices connecting at once must never race
+        onto the same serial), so this bypasses execute()/query_one() and holds the
+        lock across the whole read-modify-write itself."""
+        now = time.time()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM qc_devices WHERE device_id = ?", (device_id,)).fetchone()
+            if row is None:
+                nxt = self._conn.execute(
+                    "SELECT COALESCE(MAX(serial), 0) + 1 AS n FROM qc_devices").fetchone()["n"]
+                self._conn.execute(
+                    "INSERT INTO qc_devices "
+                    "(device_id, serial, first_seen, last_seen, last_protocol, last_qc_id, last_verdict) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (device_id, nxt, now, now, protocol, qc_id, verdict or ""),
+                )
+            else:
+                updates: dict[str, Any] = {"last_seen": now}
+                if protocol:
+                    updates["last_protocol"] = protocol
+                if verdict is not None:
+                    updates["last_qc_id"] = qc_id
+                    updates["last_verdict"] = verdict
+                set_clause = ", ".join(f"{k} = ?" for k in updates)
+                self._conn.execute(f"UPDATE qc_devices SET {set_clause} WHERE device_id = ?",
+                                   (*updates.values(), device_id))
+            self._conn.commit()
+            return dict(self._conn.execute(
+                "SELECT * FROM qc_devices WHERE device_id = ?", (device_id,)).fetchone())
+
+    def qc_device_registry(self, device_id: str) -> Optional[dict]:
+        """Read-only lookup — no last_seen bump, no row creation (unlike qc_device_touch)."""
+        if not device_id:
+            return None
+        return self.query_one("SELECT * FROM qc_devices WHERE device_id = ?", (device_id,))

@@ -461,22 +461,39 @@ pre.hex, pre.json {
 .cap-idle { color: var(--muted); }
 .cap-idle.stale { color: var(--warn); font-weight: 600; }
 
-/* ---- QC details modal: device info + coverage table ---------------------- */
-#cap-qcdetails-modal .tcp-pkt-card { width: 940px; }          /* wider — coverage is dense */
-.qcd-devinfo { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 2px 0 10px; }
+/* ---- QC Summary panel: device info + coverage table ----------------------- */
+.qcd-devinfo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; margin: 2px 0 10px; }
 .qcd-kv { display: flex; flex-direction: column; gap: 1px; }
 .qcd-k { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
 .qcd-v { font-size: 13px; }
 .qcd-actions { display: flex; gap: 8px; margin: 4px 0 10px; }
-.cov-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* (#6) stable per-IMEI serial badge — same physical device always shows the same number */
+.qc-serial-badge { display: inline-block; margin-right: 6px; padding: 0 6px; font-size: 10.5px;
+  font-weight: 700; color: var(--accent); background: var(--sel); border-radius: var(--r-1); }
+/* (#7) a returning device's prior FINAL result, recalled automatically */
+.qcd-prior { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+/* Fixed column widths (all percentages, none "auto" — avoids browser ambiguity over which
+   column absorbs the remainder) so the table stays predictable regardless of content length;
+   Received gets the majority share since the captured packet is the main thing to read.
+   Long text WRAPS within its column instead of stretching the layout or getting truncated. */
+.cov-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .cov-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 10px;
   text-transform: uppercase; letter-spacing: .5px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-.cov-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); }
-.cov-table td.num { text-align: right; font-family: var(--mono); color: var(--muted); }
-.cov-row { cursor: help; }                                    /* hover shows the raw packet */
+.cov-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-subtle);
+  /* the app-wide `tbody td` rule sets white-space:nowrap, and nowrap forbids ALL line
+     breaks — overflow-wrap alone can't wrap under it, the text just overflows into the
+     next column. Re-enable normal wrapping here explicitly. */
+  white-space: normal; overflow-wrap: anywhere; }
+.cov-table th:nth-child(1), .cov-table td:nth-child(1) { width: 3%; }      /* status dot */
+.cov-table th:nth-child(2), .cov-table td:nth-child(2) { width: 18%; }     /* Item */
+.cov-table th:nth-child(3), .cov-table td:nth-child(3) { width: 7%; }      /* Req */
+.cov-table th:nth-child(4), .cov-table td:nth-child(4) { width: 8%; }      /* Count */
+.cov-table th:nth-child(5), .cov-table td:nth-child(5) { width: 52%; }     /* Received — the main event */
+.cov-table th:nth-child(6), .cov-table td:nth-child(6) { width: 12%; }     /* Skip */
+.cov-table td.num { text-align: right; font-family: var(--mono); color: var(--muted); white-space: nowrap; }
 .cov-row:hover td { background: var(--hover); }
-.cov-label { width: 100%; }
-.cov-req { color: var(--muted); font-size: 11px; }
+.cov-label { width: 100%; cursor: help; }                     /* (#2) hover HERE for the tooltip */
+.cov-req { color: var(--muted); font-size: 11px; white-space: nowrap; }  /* never break "yes" mid-word */
 .cov-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--dot-dead); }
 .cov-dot.cov-seen { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
 .cov-dot.cov-bad { background: var(--danger); }
@@ -486,10 +503,24 @@ pre.hex, pre.json {
 .cov-row.cov-seen .cov-label { color: var(--text); }
 .cov-row.cov-bad .cov-label { color: var(--danger); }
 .cov-row.cov-skip .cov-label { color: var(--muted); text-decoration: line-through; }
-.cov-view { width: auto; margin: 0; padding: 1px 8px; font-size: 10.5px; background: transparent;
-  border: 1px solid var(--border); border-radius: var(--r-1); color: var(--accent); cursor: pointer; }
-.cov-view:hover { border-color: var(--accent); background: var(--sel); }
-#cap-qcdetails-actions { display: inline-flex; gap: 6px; }
+/* Received column: an inline preview of the actual captured packet (not just a button) —
+   wraps within the fixed column rather than truncating; click opens the full HEX/ASCII view. */
+.cov-recv-preview { display: block; color: var(--accent-2); cursor: pointer;
+  white-space: normal; word-break: break-all; overflow-wrap: anywhere; }
+.cov-recv-preview:hover { color: var(--accent); text-decoration: underline; }
+#cap-qcsum-actions { display: inline-flex; gap: 6px; }
+
+/* Custom hover tooltip for a coverage row — replaces the native title= (which can't bold
+   anything) so the packet-type/alert-id tokens this row actually expects can be highlighted. */
+.cov-tip { position: fixed; z-index: 95; max-width: 420px; padding: 8px 10px; font-size: 11.5px;
+  line-height: 1.5; background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--r-2); box-shadow: var(--shadow-md); pointer-events: none; }
+.cov-tip[hidden] { display: none; }
+.cov-tip-desc { color: var(--text); margin-bottom: 6px; }
+.cov-tip-h { font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 6px 0 2px; }
+.cov-tip-example { font-family: var(--mono); word-break: break-all; }
+.cov-tip-example mark { background: rgba(90, 176, 240, .28); color: var(--accent); border-radius: 3px;
+  padding: 0 1px; font-weight: 700; }
 
 /* QC device rows (per IMEI) — click to select; the selected device drives feed + details */
 .qc-dev-row { cursor: pointer; border-radius: var(--r-2); padding: 3px 6px; }
@@ -503,8 +534,12 @@ pre.hex, pre.json {
 #tcp-devices-pane, #qc-devices-pane, #cap-devices-pane { border-right: 1px solid var(--border); padding: 14px 16px; overflow: auto; background: var(--panel); }
 #tcp-feed-pane, #qc-feed-pane, #cap-feed-pane { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
 #tcp-feed, #qc-feed, #cap-feed { overflow-x: auto; }        /* let a complete no-wrap packet scroll horizontally */
+/* QC Summary panel: inline sibling of #cap-feed (Raw|Summary toggle shows one or the other) */
+#cap-qc-summary-panel .tcp-pkt-head { margin-bottom: 4px; }
 .tcp-h { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
-.tcp-feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* wrap: on a narrow window the many header controls (pill, toggles, actions) would
+   otherwise squeeze/overlap each other — wrapping onto a second row keeps them clickable */
+.tcp-feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tcp-feed-head .spacer { flex: 1; }
 
 /* browser-style tab strip: one tab per port session, active tab joins the pane below */

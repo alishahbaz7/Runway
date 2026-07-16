@@ -3,6 +3,55 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.14] — 2026-07-16
+
+Feature release. Headline: the QC feed gains an inline **Raw | Summary** view (no more
+popup), and a **persistent, IMEI-keyed device registry** gives every device a stable
+serial number and automatic recall of its last QC result.
+
+### Added — QC Summary view (inline, replaces the details popup)
+- **Raw | Summary toggle** right on the Live Packets pane: *Raw* is the packet stream,
+  *Summary* shows the selected device's full qualification view (device details, Packets +
+  Alerts coverage, deviations, test cases, Pass-with-conditions / Fail actions) inline in
+  the same pane — live-updating, no modal overlay. The status pill (`IN PROGRESS · 2/13`)
+  stays visible in both views and jumps to Summary on click.
+- **Multi-device Raw selection**: each QC device row has a checkbox (plus All/None) to show
+  every device, a partial set, or a single device in the Raw stream — same pattern as the
+  Testing tab's per-peer filtering. Row-click still separately selects the Summary device.
+- **Received column** in the coverage tables shows an inline preview of the actual latest
+  captured packet per item (click for the full parsed/ASCII/HEX view), replacing the old
+  "view" button; the Skip checkbox hides once an item has been received.
+- **Per-row reference tooltips**: hovering an Item name (and only the name, after a ~2s
+  rest) shows its description plus the reference sentence rewritten for *that* row — the
+  expected packet-type code and alert id substituted in and highlighted (e.g. Emergency
+  state ON highlights `EA`,`10`), instead of one generic example for every alert.
+- Coverage tables use fixed column widths with proper word-wrap (Received gets the
+  majority share); alert rows read `Label (id - CODE)`, e.g. `Connect back to main
+  battery (6 - BR)`.
+
+### Added — persistent device registry (IMEI-keyed)
+- New durable `qc_devices` table: every device that ever identifies on a QC session gets a
+  **stable serial number** (`#1`, `#2`, …) — the same IMEI keeps its number across
+  reconnects, sessions, and restarts; a genuinely new IMEI gets the next one. Shown as a
+  badge in the device list and in the Summary device details.
+- **Automatic QC-status recall**: the moment a known IMEI connects to any listener, the
+  Summary panel shows its last FINAL result ("Previously tested: CONDITIONAL (session
+  #N)") while the new run is still in progress. In-progress sessions never overwrite the
+  registry — only final verdicts (pass / conditional pass / fail / timeout) are recorded.
+
+### Fixed
+- Coverage-table Item labels never wrapped (an app-wide `tbody td { white-space: nowrap }`
+  rule silently forbade line breaks) and overflowed under the Req column; they now wrap
+  within their own cell.
+- The QC tab title no longer shows an IMEI (a port can host many devices) — protocol only.
+- On narrow windows the feed-header controls could overlap and block clicks; the header
+  now wraps onto a second row.
+- The per-row reference example previously corrupted two fields via an off-by-one token
+  substitution (the `$NMP` header occupies token 0); fixed and verified against the real
+  sentence layout.
+
+[1.1.14]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.14
+
 ## [1.1.8] — 2026-07-15
 
 Feature release. Headline: **Device QC** grows from a basic pass/fail into a real
