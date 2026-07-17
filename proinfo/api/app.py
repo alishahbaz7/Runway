@@ -34,7 +34,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from logging.handlers import RotatingFileHandler
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..core.pipeline import Pipeline
 from ..qc import engine as qc_engine
+from ..qc import report as qc_report_builder
 from ..qc.session import UNKNOWN_DEVICE_IDS, QcCaptureSink
 from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, packet_log, store
@@ -112,6 +113,36 @@ _job_seq = 0
 _qc_sinks: dict[int, QcCaptureSink] = {}
 
 
+def _infer_protocol_from_devices(devices_json: str) -> tuple[str, int]:
+    """Recover a session's lost protocol identity from its persisted per-device coverage:
+    the QC profile whose catalogue contains every coverage key the devices carry is the
+    profile that generated them. Heals rows damaged by the pre-1.1.22 self-heal path,
+    which saved devices/coverage but never identified_as/packet_count. Returns
+    (protocol, total_packets) — ("", 0) when nothing can be inferred."""
+    try:
+        devices = json.loads(devices_json or "[]")
+        keys = {c.get("key") for d in devices for c in (d.get("coverage") or [])}
+        packets = sum(d.get("packet_count") or 0 for d in devices)
+    except Exception:
+        return "", 0
+    if not keys:
+        return "", 0
+    for base in (QC_PROFILES_DIR, QC_DEFAULTS_DIR):
+        try:
+            profiles = sorted(base.glob("*.json"))
+        except Exception:
+            continue
+        for p in profiles:
+            try:
+                prof = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            catalog = {i.get("key") for i in prof.get("coverage") or []}
+            if catalog and keys <= catalog:
+                return prof.get("protocol") or p.stem, packets
+    return "", 0
+
+
 def _qc_reconcile_startup() -> None:
     """Reconcile persisted QC sessions against a fresh process.
 
@@ -119,7 +150,8 @@ def _qc_reconcile_startup() -> None:
     job_id points at a dead job — or worse, COLLIDES with a new job that happens to reuse
     the same id, making an old tab show the new job's devices/live feed. And rows still
     marked "running" belong to the previous process; nothing is listening for them now.
-    So on boot: clear every row's job_id and flip running -> stopped."""
+    So on boot: clear every row's job_id and flip running -> stopped. Rows that lost
+    their protocol identity to the old self-heal bug get it back from their coverage."""
     now = time.time()
     for row in db.qc_sessions():
         updates: dict = {}
@@ -127,8 +159,30 @@ def _qc_reconcile_startup() -> None:
             updates["job_id"] = ""
         if row.get("status") == "running":
             updates.update(status="stopped", ended_at=row.get("ended_at") or now)
+        if not row.get("identified_as") and row.get("devices_json"):
+            proto, packets = _infer_protocol_from_devices(row["devices_json"])
+            if proto:
+                updates["identified_as"] = proto
+                if not row.get("packet_count") and packets:
+                    updates["packet_count"] = packets
         if updates:
             db.qc_update(row["id"], **updates)
+
+
+def _backup_db_daily() -> None:
+    """One consistent DB copy per day under data/backups/ (kept 14 days). The DB now
+    carries QC business records — device serials, verdicts, lot details, audit — so a
+    corrupted or fat-fingered file must never be the only copy."""
+    try:
+        bdir = Path(DATA_DIR) / "backups"
+        dest = bdir / f"proinfo-{time.strftime('%Y-%m-%d')}.db"
+        if not dest.exists():
+            db.backup(str(dest))
+            log.info("daily DB backup written: %s", dest)
+        for old in sorted(bdir.glob("proinfo-*.db"))[:-14]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        log.exception("daily DB backup failed")
 
 
 @asynccontextmanager
@@ -136,6 +190,13 @@ async def lifespan(_: FastAPI):
     registry.load_plugins()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     _qc_reconcile_startup()
+    _backup_db_daily()
+    try:
+        import openpyxl  # noqa: F401
+    except ImportError:                 # surface at boot, not when the operator clicks Download
+        log.warning("openpyxl is NOT installed in this Python (%s) — the XLS QC report "
+                    "export will fail; run: %s -m pip install openpyxl",
+                    sys.executable, sys.executable)
     # Fresh start: the live view begins empty each run. Devices appear only from data fed
     # this session (Parser ingest or live feeds) — we do NOT replay the persisted registry
     # into the live store, so a restart is a clean slate.
@@ -264,12 +325,30 @@ class QcStartBody(BaseModel):
 class QcSkipBody(BaseModel):
     device_id: str = ""                 # which device's coverage to skip (""=session-level)
     keys: list[str] = []                # coverage keys the operator marks optional
+    reason: str = ""                    # why (goes on the report's Deviations + audit)
 
 
 class QcFinalizeBody(BaseModel):
     device_id: str = ""                 # which device to finalize (""=session-level)
     verdict: str = ""                   # "" clears; else pass | conditional_pass | fail
     note: str = ""
+
+
+# The bench-only report fields, typed into the app instead of into Excel afterwards.
+# Whitelisted so the report merge stays predictable (unknown keys are dropped).
+QC_LOT_FIELDS = {"lot_id", "lot_size", "pcb_number", "observation",
+                 "corrective_action", "approved_by"}
+QC_MANUAL_FIELDS = {"mobile_no", "data_on_intouch", "all_io_static", "harness",
+                    "battery_charging", "ignition_on_intouch", "ignition_off_intouch",
+                    "plugged_alarm_intouch", "cota", "fota", "sms_command",
+                    "gprs_command", "serial_command", "power_ma_without_ign",
+                    "power_ma_with_ign", "field_testing", "remarks"}
+
+
+class QcLotBody(BaseModel):
+    lot: dict = {}                      # session-level lot fields (QC_LOT_FIELDS)
+    device_id: str = ""                 # optional: per-device manual values follow
+    fields: dict = {}                   # per-device manual fields (QC_MANUAL_FIELDS)
 
 
 # --------------------------------------------------------------------------- #
@@ -374,6 +453,14 @@ def _record_capture(job: dict, records: int, nbytes: int) -> None:
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
 async def health():
+    # deps: optional-at-import packages the UI warns about BEFORE they fail at use time
+    # (e.g. openpyxl missing meant the XLS report 500'd only when the operator clicked
+    # Download — on the wrong Python env that's the worst possible moment to find out)
+    try:
+        import openpyxl  # noqa: F401
+        has_openpyxl = True
+    except ImportError:
+        has_openpyxl = False
     return {
         "status": "ok",
         "version": __version__,
@@ -381,6 +468,7 @@ async def health():
         "devices": len(store.devices),
         "subscribers": hub.subscribers,
         "mode": _activity_mode(),
+        "deps": {"openpyxl": has_openpyxl},
     }
 
 
@@ -1087,6 +1175,24 @@ def _jloads_dict(s: str) -> dict:
         return {}
 
 
+def _jloads_list(s: str) -> list:
+    try:
+        v = json.loads(s or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _qc_audit(qc_id: int, row: dict, action: str, **fields) -> None:
+    """Append one operator-action entry to the session's audit trail (who skipped or
+    finalized what, when, and why) — the report's Deviations section reads it, so a
+    Conditional Pass is always accountable."""
+    entries = _jloads_list(row.get("audit_json"))
+    entries.append({"at": time.time(), "action": action,
+                    "operator": row.get("operator") or "", **fields})
+    db.qc_update(qc_id, audit_json=json.dumps(entries))
+
+
 def _device_verdict(cov: list, checks_verdict: str, meta: dict) -> str:
     """Verdict for one device (or an unidentified session). Coverage-driven when a catalog
     is present; otherwise the legacy checks pass/fail — but an abandoned session (idle past
@@ -1136,10 +1242,14 @@ def _qc_last_packet(recs) -> dict:
 
 
 def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_at, now,
-                qc_id: Optional[int] = None) -> list:
-    """Group a session's records by device id (IMEI) and compute per-device coverage +
-    verdict + identity. One entry per physical device — a reconnect (new peer) merges into
-    the same device rather than adding a row.
+                qc_id: Optional[int] = None, ledger=None) -> list:
+    """One entry per physical device (keyed by IMEI) with coverage + verdict + identity —
+    a reconnect (new peer) merges into the same device rather than adding a row.
+
+    Coverage/vitals come from the sink's incremental **ledger** when one is supplied —
+    the records list is a bounded window and must never be the source of truth for the
+    verdict (a long session would forget its own history). The window-based fallback
+    remains for callers without a ledger (rebuilds, legacy tests).
 
     Also touches the durable qc_devices registry for every device seen: assigns/looks up
     its stable serial number (#6 — same IMEI always gets the same number, a genuinely new
@@ -1152,20 +1262,36 @@ def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_a
         did = r.device_id
         if did and did not in UNKNOWN_DEVICE_IDS:
             groups.setdefault(did, []).append(r)
+    device_ids = list(groups)
+    if ledger is not None:
+        device_ids = ledger.device_ids() or device_ids
     stale = (profile or {}).get("stale_timeout_s")
     out = []
-    for did, recs in groups.items():
-        cov = qc_engine.coverage(recs, catalog) if catalog else []
-        last = _qc_last_recv_epoch(recs)
+    for did in device_ids:
+        recs = groups.get(did) or []
+        vit = ledger.vitals(did) if ledger is not None else {}
+        if ledger is not None and vit:
+            cov = ledger.coverage(did, catalog) if catalog else []
+            last = vit["last_recv_epoch"]
+            n_packets = vit["packet_count"]
+            peers = vit["peers"]
+            fw, vend = vit["firmware_version"], vit["vendor_id"]
+            last_packet = vit["last_packet"]
+        else:                                    # window fallback (no ledger supplied)
+            cov = qc_engine.coverage(recs, catalog) if catalog else []
+            last = _qc_last_recv_epoch(recs)
+            n_packets = len(recs)
+            peers = sorted({r.peer for r in recs if r.peer})
+            fw = vend = ""
+            for r in recs:
+                io = r.io or {}
+                fw = io.get("firmware_version") or fw
+                vend = io.get("vendor_id") or vend
+            last_packet = _qc_last_packet(recs) if recs else {}
         checks, checks_verdict = qc_engine.evaluate(recs, {"device_id": did, "started_at": started_at})
-        meta = {"packet_count": len(recs), "now": now, "last_packet_epoch": last,
+        meta = {"packet_count": n_packets, "now": now, "last_packet_epoch": last,
                 "stale_timeout_s": stale, "skipped": skipped_map.get(did) or [],
                 "finalized_verdict": finalized_map.get(did) or ""}
-        fw = vend = ""
-        for r in recs:
-            io = r.io or {}
-            fw = io.get("firmware_version") or fw
-            vend = io.get("vendor_id") or vend
         verdict = _device_verdict(cov, checks_verdict, meta)
 
         # (#6/#7) get-or-create the serial + only persist FINAL verdicts into the registry
@@ -1177,18 +1303,18 @@ def _qc_devices(records, catalog, profile, skipped_map, finalized_map, started_a
         # nothing older left to show.
         has_prior = bool(reg["last_qc_id"]) and reg["last_qc_id"] != qc_id
         out.append({
-            "device_id": did, "packet_count": len(recs),
+            "device_id": did, "packet_count": n_packets,
             "coverage": cov, "checks": checks,
             "verdict": verdict,
             "idle_s": (now - last) if last else None, "last_seen": last,
-            "peers": sorted({r.peer for r in recs if r.peer}),
+            "peers": peers,
             "firmware_version": fw, "vendor_id": vend,
             "skipped": skipped_map.get(did) or [],
             "finalized_verdict": finalized_map.get(did) or "",
             "serial": reg["serial"], "first_seen_ever": reg["first_seen"],
             "prior_qc_id": reg["last_qc_id"] if has_prior else None,
             "prior_verdict": reg["last_verdict"] if has_prior else "",
-            "last_packet": _qc_last_packet(recs),
+            "last_packet": last_packet,
         })
     return out
 
@@ -1212,7 +1338,8 @@ def _qc_compute(row: dict, sink, now: Optional[float] = None) -> dict:
         profile = _qc_profile(row.get("identified_as") or "")
         catalog = (profile or {}).get("coverage") or []
         devices = _qc_devices(sink.records, catalog, profile, skipped_map, finalized_map,
-                              row.get("started_at"), now, qc_id=row.get("id"))
+                              row.get("started_at"), now, qc_id=row.get("id"),
+                              ledger=getattr(sink, "ledger", None))
         checks, checks_verdict = sink.checks()
         sess_cov = qc_engine.coverage(sink.records, catalog) if catalog else []
         sess_last = _qc_last_recv_epoch(sink.records)
@@ -1250,6 +1377,13 @@ def _qc_view(qc_id: int) -> dict:
     row["idle_s"] = comp["idle_s"]
     row["skipped"] = _jloads_dict(row.get("skipped_json"))
     row["capture_mode"] = row.get("capture_mode") or "full"
+    # how this protocol's raw bytes should be shown (from the QC profile) — the UI uses
+    # this instead of hardcoding protocol names; "" = unknown (UI falls back to sniffing)
+    row["raw_view"] = (_qc_profile(row.get("identified_as") or "") or {}).get("raw_view") or ""
+    row["lot"] = _jloads_dict(row.get("lot_json"))            # lot details typed in-app
+    row["manual"] = _jloads_dict(row.get("manual_json"))      # {device_id: manual columns}
+    row["audit"] = _jloads_list(row.get("audit_json"))        # skip/finalize history
+    row["reports"] = _jloads_list(row.get("reports_json"))    # printed-report log
     jid = row.get("job_id")
     jv = _job_view(jid) if jid else {}
     row["connected"] = bool(jv.get("peers"))
@@ -1265,7 +1399,14 @@ def _qc_view(qc_id: int) -> dict:
     if row["status"] == "running" and (job_gone or job_status in ("error", "stopped", "done")):
         new_status = "error" if job_status == "error" else "stopped"
         ended = time.time()
+        # Persist identity + counters too (row carries the live sink's values when the
+        # sink is still around) — without them a self-healed session came back with
+        # identified_as=""/packet_count=0, losing its protocol (ASCII/HEX raw view, the
+        # report's QC profile) even though its devices/coverage were saved.
         db.qc_update(qc_id, status=new_status, ended_at=ended,
+                     identified_as=row.get("identified_as") or "",
+                     device_id=row.get("device_id") or "",
+                     packet_count=row.get("packet_count") or 0,
                      checks_json=json.dumps(row["checks"]),
                      coverage_json=json.dumps(row["coverage"]),
                      devices_json=json.dumps(row["devices"]), verdict=row["verdict"])
@@ -1311,12 +1452,52 @@ def _qc_spawn(qc_id: int, host: str, port: int, codec: str, initial_count: int =
 
     row = db.qc_session(qc_id)
     loop = asyncio.get_event_loop()
+    # Identity already persisted for this session (protocol + device id). Kept so the
+    # identity is written to the DB the MOMENT it's learned from the wire — not only on a
+    # clean stop. A session that ends without one (crash, restart, dead listener) must not
+    # come back as identified_as="" — that would make the Summary/report lose the
+    # protocol's raw view (ASCII vs HEX) and the report its QC profile.
+    persisted = {"identified_as": row.get("identified_as") or "",
+                 "device_id": row.get("device_id") or ""}
+    persist_last = {"t": 0.0}
 
-    def _on_update(_snap: dict) -> None:
+    def _on_update(snap: dict) -> None:
+        ident = snap.get("identified_as") or ""
+        did = snap.get("device_id") or ""
+        if (ident and ident != persisted["identified_as"]) or (did and did != persisted["device_id"]):
+            persisted["identified_as"] = ident or persisted["identified_as"]
+            persisted["device_id"] = did or persisted["device_id"]
+            db.qc_update(qc_id, identified_as=persisted["identified_as"],
+                         device_id=persisted["device_id"])
+        # Durable summary while RUNNING (throttled): devices/coverage/count used to be
+        # persisted only on a clean Stop, so a crash or server restart blanked the
+        # stopped card until the session was resumed. Now the snapshot lands every few
+        # seconds, so the summary survives any kind of interruption.
+        now_m = time.monotonic()
+        if now_m - persist_last["t"] >= 5.0:
+            persist_last["t"] = now_m
+            try:
+                row2 = dict(db.qc_session(qc_id) or {})
+                row2["identified_as"] = persisted["identified_as"] or row2.get("identified_as", "")
+                comp = _qc_compute(row2, qc_sink)
+                db.qc_update(qc_id, packet_count=qc_sink.count,
+                             checks_json=json.dumps(comp["checks"]),
+                             coverage_json=json.dumps(comp["coverage"]),
+                             devices_json=json.dumps(comp["devices"]), verdict=comp["verdict"])
+            except Exception:
+                log.exception("qc %s: periodic summary persist failed", qc_id)
         loop.create_task(_qc_publish(qc_id))
 
-    qc_sink = QcCaptureSink(row["capture_path"], started_at=row["started_at"], on_update=_on_update)
-    qc_sink.count = initial_count               # keep the packet count cumulative across resumes
+    qc_sink = QcCaptureSink(row["capture_path"], started_at=row["started_at"], on_update=_on_update,
+                            catalog_loader=lambda proto: (_qc_profile(proto) or {}).get("coverage"))
+    # Same-session retention: re-decode this session's own capture file (append-only
+    # across resumes) so a resume/restart carries on with the full Summary — packets,
+    # coverage, device details — instead of starting blank. New session => no file yet.
+    try:
+        qc_sink.rehydrate(row.get("identified_as") or codec)
+    except Exception:
+        log.exception("qc %s: could not rehydrate capture %s", qc_id, row.get("capture_path"))
+    qc_sink.count = max(qc_sink.count, initial_count)   # cumulative across resumes
     _qc_sinks[qc_id] = qc_sink
 
     async def _on_conn(kind: str, peer: str) -> None:
@@ -1414,8 +1595,14 @@ async def qc_skip(qc_id: int, body: QcSkipBody):
     if row is None:
         raise HTTPException(404, "QC session not found")
     m = _jloads_dict(row.get("skipped_json"))
-    m[body.device_id or ""] = sorted(set(body.keys))
+    before = set(m.get(body.device_id or "") or [])
+    after = set(body.keys)
+    m[body.device_id or ""] = sorted(after)
     db.qc_update(qc_id, skipped_json=json.dumps(m))
+    if after != before:                              # audit the change, with the why
+        _qc_audit(qc_id, row, "skip", device_id=body.device_id,
+                  added=sorted(after - before), removed=sorted(before - after),
+                  reason=body.reason or "")
     await _qc_publish(qc_id)
     return _qc_view(qc_id)
 
@@ -1440,6 +1627,32 @@ async def qc_finalize(qc_id: int, body: QcFinalizeBody):
         db.qc_update(qc_id, finalized_json=json.dumps(m))
     else:
         db.qc_update(qc_id, finalized_verdict=v)
+    _qc_audit(qc_id, row, "finalize", device_id=body.device_id,
+              verdict=v, reason=body.note or "")
+    await _qc_publish(qc_id)
+    return _qc_view(qc_id)
+
+
+@app.post("/api/qc/{qc_id}/lot")
+async def qc_lot(qc_id: int, body: QcLotBody):
+    """Save the bench-only report fields typed into the app (lot details + per-device
+    manual columns) so the exported workbook is the COMPLETE deliverable — no editing
+    the Excel by hand afterwards. Unknown keys are dropped (whitelisted merge)."""
+    row = db.qc_session(qc_id)
+    if row is None:
+        raise HTTPException(404, "QC session not found")
+    updates: dict = {}
+    if body.lot:
+        lot = _jloads_dict(row.get("lot_json"))
+        lot.update({k: str(v) for k, v in body.lot.items() if k in QC_LOT_FIELDS})
+        updates["lot_json"] = json.dumps(lot)
+    if body.device_id and body.fields:
+        manual = _jloads_dict(row.get("manual_json"))
+        dev = manual.setdefault(body.device_id, {})
+        dev.update({k: str(v) for k, v in body.fields.items() if k in QC_MANUAL_FIELDS})
+        updates["manual_json"] = json.dumps(manual)
+    if updates:
+        db.qc_update(qc_id, **updates)
     await _qc_publish(qc_id)
     return _qc_view(qc_id)
 
@@ -1508,6 +1721,70 @@ async def qc_report(qc_id: int, fmt: str = "json"):
     content = "\n".join(lines) + "\n"
     fname = f"qc-report-{report['qc_id']}.{fmt}"
     return PlainTextResponse(content, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.get("/api/qc/{qc_id}/export")
+async def qc_export(qc_id: int, fmt: str = "xlsx", devices: str = ""):
+    """The per-lot QC report workbook: Sheet 1 "Summary" (one row per device) + one sheet
+    per selected device, titled with its IMEI, carrying the Summary view's coverage detail.
+
+    fmt=xlsx (default) -> Excel workbook.
+    fmt=csv            -> ZIP of CSVs, one per would-be sheet (CSV has no sheets).
+    devices            -> comma-separated device ids (IMEIs) to include; empty = all.
+    """
+    if fmt not in ("xlsx", "csv"):
+        raise HTTPException(400, "fmt must be xlsx or csv")
+    view = _qc_view(qc_id)
+    all_devs = view.get("devices") or []
+    if not all_devs:
+        raise HTTPException(400, "no identified devices on this QC session yet")
+    wanted = {d for d in devices.split(",") if d}
+    devs = [d for d in all_devs if d.get("device_id") in wanted] if wanted else all_devs
+    if not devs:
+        raise HTTPException(400, "none of the requested devices exist on this session")
+    # The report is the lot's FINAL deliverable — an in-progress device can't be printed.
+    # The operator marks its missing required items as Skip (-> Conditional Pass), waits
+    # for the test to settle, or unticks the device to leave it out.
+    incomplete = qc_report_builder.incomplete_devices(devs)
+    if incomplete:
+        names = ", ".join(d.get("device_id") or "?" for d in incomplete)
+        raise HTTPException(409, f"QC is not completed for {names} — mark the missing "
+                                 "required items as Skip (device closes as Conditional "
+                                 "Pass) or untick the device; only completed devices can "
+                                 "be printed")
+    profile = _qc_profile(view.get("identified_as") or "")
+    if fmt == "xlsx":
+        try:
+            data = qc_report_builder.build_xlsx(view, devs, profile)
+        except ImportError:
+            raise HTTPException(500, "openpyxl is not installed on the server — "
+                                     "pip install openpyxl (or use fmt=csv)")
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        fname = qc_report_builder.report_filename(view, profile, "xlsx")
+    else:
+        data = qc_report_builder.build_csv_zip(view, devs, profile)
+        mime = "application/zip"
+        fname = qc_report_builder.report_filename(view, profile, "zip")
+    # Archive the exact printed bytes: the report is a QC record — a regeneration after
+    # later edits must never silently replace what was actually handed over. Every print
+    # lands in data/reports/ and in the session's printed-report log (shown in the UI).
+    try:
+        import hashlib
+        rdir = Path(DATA_DIR) / "reports"
+        rdir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        apath = rdir / f"qc{qc_id}-{stamp}-{len(devs)}dev.{'xlsx' if fmt == 'xlsx' else 'zip'}"
+        apath.write_bytes(data)
+        row = db.qc_session(qc_id) or {}
+        entries = _jloads_list(row.get("reports_json"))
+        entries.append({"at": time.time(), "fmt": fmt, "file": str(apath),
+                        "devices": [d.get("device_id") for d in devs],
+                        "sha256": hashlib.sha256(data).hexdigest()})
+        db.qc_update(qc_id, reports_json=json.dumps(entries))
+    except Exception:
+        log.exception("qc %s: could not archive the printed report", qc_id)
+    return Response(content=data, media_type=mime,
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 @app.delete("/api/qc/{qc_id}")

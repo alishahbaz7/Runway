@@ -43,7 +43,7 @@ def register_sink(cls: Type[Sink]) -> Type[Sink]:
 # lives inside the archive. Fall back to this explicit list so plugins still register.
 # Keep in sync when adding a plugin module (the normal filesystem path needs no change).
 _FROZEN_FALLBACK = {
-    "proinfo.codecs": ["teltonika", "gt06", "nmea", "generic_hex", "custom_template"],
+    "proinfo.codecs": ["teltonika", "gt06", "ais140", "nmea", "generic_hex", "custom_template"],
     "proinfo.sources": ["file_replay", "tcp_server"],
     "proinfo.sinks": ["console", "memory_store", "ws_broadcast", "webhook", "tcp_relay"],
 }

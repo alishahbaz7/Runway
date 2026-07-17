@@ -94,6 +94,32 @@ def evaluate(records: list[UnifiedRecord], meta: dict, config: Optional[dict] = 
 
 
 # --------------------------------------------------------------------------- #
+# Field validation (Step 2) — a packet that MATCHES a coverage item must also carry
+# sane fields, otherwise "OK" would silently certify garbage. One failing packet marks
+# the item INVALID (a deviation -> Conditional Pass, visible with its reason), it never
+# stays a silent OK. Deliberately conservative: only checks that hold for every
+# protocol (coordinate ranges, impossible timestamps) — protocol-specific rules can
+# come from the profile later.
+# --------------------------------------------------------------------------- #
+def validate_record(r: UnifiedRecord) -> Optional[str]:
+    """Reason this record's fields are implausible, or None when it looks sane."""
+    try:
+        pos = r.position
+        if pos is not None and pos.latitude is not None:
+            if not (-90.0 <= pos.latitude <= 90.0) or not (-180.0 <= pos.longitude <= 180.0):
+                return f"position out of range ({pos.latitude}, {pos.longitude})"
+            if r.gps_valid and pos.latitude == 0.0 and pos.longitude == 0.0:
+                return "0,0 position while claiming a GPS fix"
+        if r.event_time is not None and r.received_at is not None:
+            drift = (r.event_time - r.received_at).total_seconds()
+            if drift > 86400:                    # event stamped >1 day in the future
+                return "event time more than a day ahead of receive time"
+    except Exception:
+        return None                              # never let validation break decoding
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Coverage — did the device exercise each packet type / alert the QC profile expects?
 # The catalogue (which items, their match rule, required/optional) comes from the per-
 # protocol QC profile; this stays pure (the API loads the profile and passes it in).
@@ -127,6 +153,7 @@ def coverage(records: list[UnifiedRecord], catalog: list[dict]) -> list[dict]:
     for item in (catalog or []):
         matched = [r for r in records if _cov_match(r, item.get("match") or {})]
         last = matched[-1] if matched else None
+        reasons = [reason for r in matched if (reason := validate_record(r))]
         out.append({
             "key": item["key"], "label": item.get("label", item["key"]),
             "required": bool(item.get("required")),
@@ -136,7 +163,8 @@ def coverage(records: list[UnifiedRecord], catalog: list[dict]) -> list[dict]:
             "seen": bool(matched), "count": len(matched),
             "last_raw_hex": (last.raw_hex if last else "") or "",
             "last_seen": (_iso(last) if last else None),
-            "valid": None,
+            "valid": (False if reasons else True) if matched else None,
+            "invalid_reason": reasons[-1] if reasons else "",
         })
     return out
 
@@ -168,7 +196,10 @@ def overall_verdict(cov: list[dict], meta: dict) -> str:
     required = [c for c in cov if c["required"] and c["key"] not in skipped]
     missing = [c for c in required if not c["seen"]]
     if not missing:
-        return "conditional_pass" if skipped else "pass"
+        # invalid packets are deviations too (Step 2): everything arrived, but not all of
+        # it was sane -> Conditional Pass, with the reasons on the Deviations list
+        has_invalid = any(c.get("valid") is False for c in cov if c["key"] not in skipped)
+        return "conditional_pass" if (skipped or has_invalid) else "pass"
     now, last = meta.get("now"), meta.get("last_packet_epoch")
     stale = meta.get("stale_timeout_s") or DEFAULT_CONFIG["stale_timeout_s"]
     if now and last and (now - last) >= stale:

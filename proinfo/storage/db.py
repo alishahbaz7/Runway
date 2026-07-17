@@ -139,6 +139,12 @@ _ALTER_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("devices_json", "TEXT DEFAULT '[]'"),         # per-device coverage/verdict snapshot (persisted on stop)
         ("deviations_json", "TEXT DEFAULT '[]'"),      # accepted deviations (Step 2)
         ("capture_mode", "TEXT DEFAULT 'full'"),       # 'full' = every packet | 'sample' = one per type
+        # Lot report (v1.1.21): the bench-only fields typed into the app instead of into
+        # Excel afterwards, the operator-action audit trail, and the printed-report log.
+        ("lot_json", "TEXT DEFAULT '{}'"),             # session-level lot details (lot size, PCB no, sign-off)
+        ("manual_json", "TEXT DEFAULT '{}'"),          # {device_id: {manual column -> value}}
+        ("audit_json", "TEXT DEFAULT '[]'"),           # [{at, action, device_id, ...}] skip/finalize history
+        ("reports_json", "TEXT DEFAULT '[]'"),         # [{at, fmt, file, devices, sha256}] printed reports
     ],
 }
 
@@ -171,6 +177,17 @@ class Storage:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def backup(self, dest_path: str) -> None:
+        """Consistent online copy of the whole DB (sqlite backup API — WAL-safe, unlike a
+        plain file copy which can catch a checkpoint mid-write)."""
+        os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
+        with self._lock:
+            dest = sqlite3.connect(dest_path)
+            try:
+                self._conn.backup(dest)
+            finally:
+                dest.close()
 
     # ----- generic helpers ------------------------------------------------- #
     def execute(self, sql: str, params: tuple = ()) -> int:

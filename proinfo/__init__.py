@@ -3,4 +3,4 @@
 Pro(tocol) + Info(rmation).
 """
 
-__version__ = "1.1.20"
+__version__ = "1.1.22"

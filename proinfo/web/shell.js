@@ -322,6 +322,18 @@
     link.href = "data:image/svg+xml," + encodeURIComponent(mark);
   })();
 
+  // ---- environment banner: server/UI mismatch + missing dependencies ------
+  // Static files are re-read from disk on every load, but API routes live in the server
+  // PROCESS — after a code update the two can silently diverge (new button, old API:
+  // "Not Found" at the worst moment). Same for a missing optional dependency (openpyxl):
+  // it used to surface only when the operator clicked Download. Say both loudly, up top.
+  const UI_VERSION = "1.1.22";   // bump together with pyproject.toml / __init__.py
+  const envWarn = document.createElement("div");
+  envWarn.id = "env-warn";
+  envWarn.style.display = "none";
+  const appEl = document.getElementById("app");
+  document.body.insertBefore(envWarn, appEl);
+
   // ---- version + liveness + data mode from the API (polled) --------------
   function refreshStatus() {
     fetch("/api/health").then((r) => r.json()).then((d) => {
@@ -329,6 +341,15 @@
       const v = document.getElementById("rail-version");
       if (v && d.version) v.textContent = "v" + d.version;
       if (d.mode && d.mode !== mode) { mode = d.mode; applyMode(); }
+      const warns = [];
+      if (d.version && d.version !== UI_VERSION) {
+        warns.push(`Server is v${d.version} but this page is v${UI_VERSION} — restart the server to load the updated code.`);
+      }
+      if (d.deps && d.deps.openpyxl === false) {
+        warns.push("openpyxl is not installed in the server's Python — the XLS QC report will fail (CSV still works). Run: pip install openpyxl");
+      }
+      envWarn.textContent = warns.join("  ·  ");
+      envWarn.style.display = warns.length ? "" : "none";
     }).catch(() => {
       document.body.classList.add("api-offline");      // dot goes red; label keeps last mode
     });

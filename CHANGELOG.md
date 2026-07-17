@@ -3,6 +3,137 @@
 All notable changes to **Runway** (package `proinfo`) are recorded here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.22] — 2026-07-17
+
+Fix release. Headline: **a QC session now retains its full Summary across any
+interruption** — Stop/Resume, a crash, or a full server restart. Resuming yesterday's
+session no longer starts the packet tables blank.
+
+### Fixed
+- **Resuming a QC session no longer blanks the Summary.** Coverage and device details
+  were computed from in-memory records only, so a resume (or a server restart followed
+  by Resume) restarted the Summary from zero even though every packet was safely in the
+  session's capture file. On resume the capture sink now **rehydrates**: it re-decodes
+  its own append-only capture file (`QcCaptureSink.rehydrate`), restoring the packet
+  tables, per-item counts and captured samples, device identity, the coverage ledger and
+  original receive timestamps — the session carries on exactly where it left off. The
+  protocol persisted on the session row is used for re-decoding; sessions that never
+  identified fall back to auto-detection, and unreadable lines are skipped.
+- **The Summary survives a crash too**: per-device coverage/verdict/packet count are now
+  persisted to the DB every few seconds while a session runs (previously only on a clean
+  Stop), so a session that dies without one still shows its data in the list, before any
+  Resume.
+
+### Added
+- **Coverage ledger** (`proinfo/qc/ledger.py`): per-device QC state now *accumulates* —
+  every record is folded in exactly once as it arrives, so a long session can no longer
+  "forget" coverage it already earned when old packets fall out of the bounded in-memory
+  window. Also the enforcement point for field validation: one implausible packet marks
+  its coverage item INVALID (with the reason) instead of a silent OK.
+- **Field validation (Step 2)**: packets matched to a coverage item are sanity-checked
+  (coordinate ranges, 0,0-with-fix, event time >1 day in the future). An invalid item is
+  a deviation — the device settles as **Conditional Pass** (never a clean PASS) with the
+  reason printed on the report's Deviations section.
+- **Lot details typed in-app** (▤ Lot details on the QC tab): the bench-only report
+  fields — Mobile No, Data on Intouch, All I/O, Harness, Battery Charging, Ignition
+  On/Off (Intouch), Plugged/Unplugged Alarm, COTA/FOTA, SMS/GPRS/Serial Command, power
+  consumption (mA), Field Testing, Remarks per device, plus Lot/Batch id, Lot Size, PCB
+  Number, Observation, Corrective Action and Quality Approved By — are saved with the
+  session (`POST /api/qc/{id}/lot`) and **merged into the exported workbook**, so the
+  download is the complete deliverable with no hand-editing in Excel.
+- **Skip/finalize audit trail**: every skip asks for a reason (one prompt on "Skip
+  missing"), and the report's Deviations section prints *what was skipped, why, by whom
+  and when*. Finalize actions are audited too (`audit` on the session view).
+- **Printed-report archive**: every successful export is saved verbatim under
+  `data/reports/` (with a SHA-256 in the session's print log) and the export dialog
+  shows "Printed ×N — last …", so the exact handed-over file is always recoverable and
+  a re-print of a since-edited session is a conscious act.
+- **Environment self-check banner**: every page compares its own version against
+  `/api/health` and warns "restart the server" on mismatch (the stale-process trap),
+  and warns when the server's Python lacks `openpyxl` (which used to surface only when
+  the operator clicked Download). The server also logs a boot-time warning.
+- **Daily DB backup**: one consistent copy per day under `data/backups/` (kept 14 days,
+  sqlite online-backup API) — serials, verdicts, lot details and audit now live in that
+  file, so it must never be the only copy.
+- **`run-server.bat` pins the server's Python**: it creates and uses a repo-local
+  `.venv` (installing dependencies on first run / when missing) instead of whatever
+  `python` is first on PATH — three different Pythons on the bench machine is how the
+  openpyxl surprise happened.
+
+### Housekeeping
+- `ais140-unknown` added to `UNKNOWN_DEVICE_IDS` — the placeholder could previously
+  surface as a real device row in the QC UI before the IMEI was learned.
+- Frozen (PyInstaller) builds: `ais140` added to the plugin fallback list so the codec
+  still registers when module discovery comes up empty inside the archive, and the
+  default QC coverage profiles (`proinfo/qc/profiles`) are now bundled into the exe —
+  previously the packaged build had no coverage catalogue unless a user copy existed
+  under `data/qc/profiles`.
+
+[1.1.22]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.22
+
+## [1.1.21] — 2026-07-17
+
+Feature release. Headline: the **downloadable QC report** (XLS/CSV) — the per-lot
+deliverable modelled on the bench's reference workbook (LOCATE 140B), exported straight
+from the Capture page.
+
+### Added — QC report export (XLS/CSV)
+- **⤓ Report** button in the QC tab's feed header opens the export dialog: pick
+  **Excel workbook (.xlsx)** or **CSV (.zip — one file per sheet)** and download.
+  The format choice is remembered (localStorage).
+- **Device selection lives in "Devices on this port"**: the same tick that filters the
+  Raw feed now also decides which devices are in the report (all ticked by default).
+  The dialog lists exactly who's included — serial badge, IMEI, live verdict — and
+  updates as ticks change.
+- **Sheet 1 "Summary"**: inspection header block (date, item name from the QC profile,
+  session/port/operator, total devices tested, blank **Lot Size**) + one row per
+  device — S.No, IMEI, serial, firmware, vendor, packet count, then **one column per
+  coverage item** (OK / SKIP / MISSING / — / INVALID), required-coverage fraction,
+  verdict (colour-filled), remarks (skipped/invalid items).
+- **Reference-sheet placeholders for the bench-only fields**: every column of the lot
+  sheet the utility can't observe ships **blank for hand entry** — Mobile No, Data on
+  Intouch, All I/O (On Static), Harness, Battery Charging, Ignition On/Off (Intouch),
+  Plugged/Unplugged Alarm on Intouch, COTA, FOTA, SMS/GPRS/Serial Command, power
+  consumption (mA) with/without ignition, Field Testing — while GSM Fix / GPS Fix /
+  Data on Static auto-fill "OK" from the observed traffic. Below the table sits the
+  reference sign-off footer (Observation, Firmware Version, PCB Number, Corrective
+  Action, Final Result, Quality Tested/Approved By, tested-on IP:Port).
+- **One sheet per device, named by its IMEI** — the QC Summary view on paper: device
+  details (identity, vitals, last position/battery), then the Packets / Emergency
+  server / Alerts tables with status, code, required, count, last-received time and
+  the **actual raw packet** (ASCII for text protocols per the profile's `raw_view`,
+  spaced hex otherwise). Deviations listed at the end; protocols without a coverage
+  profile fall back to the pass/fail checks table.
+- Backend: `GET /api/qc/{id}/export?fmt=xlsx|csv&devices=<imei,...>` (empty = all
+  devices; works on live *and* stopped sessions). Builder in `proinfo/qc/report.py`
+  (framework-free); new runtime dependency **openpyxl** (lazy-imported — CSV export
+  works without it), bundled in the PyInstaller spec.
+- Download name mirrors the bench's own files: `<item label> QC-<dd-mm-yyyy>-S<id>`.
+- **Completion gate**: the report is the lot's *final* deliverable, so a device still
+  **IN PROGRESS** blocks printing. The export dialog highlights the incomplete devices,
+  names the missing required items, and offers one-click **Skip missing** (the device
+  closes as **Conditional Pass**) — Download stays disabled until every included device
+  has settled (pass / conditional / fail / timeout). The API enforces the same rule
+  (HTTP 409), and unticking a device simply leaves it out.
+
+### Changed
+- The old checks popup's button is now **✓ Checks** (its JSON/TXT downloads are
+  unchanged) — "Report" now always means the XLS/CSV deliverable.
+
+### Fixed
+- **A QC session that ended without a clean Stop lost its protocol identity** (the
+  self-heal path persisted devices/coverage but not `identified_as`/`packet_count`),
+  so the Summary and the report fell back to HEX raw packets and 0 packets. Three-layer
+  fix: identity is now written to the DB the moment the first packet identifies the
+  protocol; the self-heal path persists identity + counters; and on startup, rows
+  already damaged get their protocol back by matching their persisted coverage keys
+  against the QC profiles.
+- **Raw view is now declarative**: the session carries the profile's `raw_view`, the UI
+  and the report use it instead of a hardcoded protocol list — and when the identity is
+  genuinely unknown, printable packets are sniffed and shown as ASCII rather than hex.
+
+[1.1.21]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.21
+
 ## [1.1.20] — 2026-07-16
 
 Feature release. Headline: **two-way communication** — a command picker sends the

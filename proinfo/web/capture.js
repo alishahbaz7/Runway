@@ -111,10 +111,25 @@
       + `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}:${p3(d.getMilliseconds())}`;
   }
   const rawView = (hex, fmt) => (!hex ? "" : fmt === "ascii" ? hexToAscii(hex) : hexSpaced(hex));
-  // QC renders per the protocol (no user toggle): text protocols show ASCII, binary show HEX.
-  // (Interim heuristic by protocol name; moves to the QC config profile in a later phase.)
+  // QC renders per the protocol (no user toggle): text protocols show ASCII, binary show
+  // HEX. The QC profile's raw_view (sess.raw_view) is authoritative; the protocol-name set
+  // covers profiles without one; and when the identity is unknown (e.g. a session that
+  // ended without a clean stop), sniffing a sample packet keeps $-ASCII sentences readable
+  // instead of collapsing to hex.
   const ASCII_PROTOCOLS = new Set(["ais140", "nmea"]);
-  const qcRawFmt = (proto) => (ASCII_PROTOCOLS.has(proto) ? "ascii" : "hex");
+  const looksAscii = (hex) => {
+    if (!hex) return false;
+    const n = Math.min(hex.length, 128);           // sample the first 64 bytes
+    let printable = 0;
+    for (let i = 0; i + 1 < n; i += 2) {
+      const b = parseInt(hex.slice(i, i + 2), 16);
+      if ((b >= 32 && b < 127) || b === 10 || b === 13 || b === 9) printable++;
+    }
+    return printable / (n / 2) >= 0.9;
+  };
+  const qcRawFmt = (sess, sampleHex) => (sess && sess.raw_view) ? sess.raw_view
+    : (ASCII_PROTOCOLS.has((sess && sess.identified_as) || "") || looksAscii(sampleHex))
+      ? "ascii" : "hex";
 
   function mapJobPeers(j) {
     (j.peers || []).forEach((p) => peerJob.set(p, j.id));
@@ -444,14 +459,14 @@
     headEl.append(el("span", "spacer"));
     if (count && !devicesCollapsed) {   // bulk show/hide in the Raw feed — all/partial/none
       const all = el("button", "ghost mini", "All");
-      all.title = "show all devices' packets in Raw";
+      all.title = "tick every device (shown in Raw + included in the QC report)";
       all.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set()); }
         else { clients.forEach((c) => hiddenPeers.delete(c.peer)); saveHidden(); }
         renderDevices(); renderFeed();
       };
       const none = el("button", "ghost mini", "None");
-      none.title = "hide all devices' packets in Raw";
+      none.title = "untick every device (hidden from Raw + left out of the QC report)";
       none.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set(qcDevices(t.sess).map((d) => d.device_id))); }
         else { clients.forEach((c) => hiddenPeers.add(c.peer)); saveHidden(); }
@@ -514,7 +529,7 @@
       const row = el("div", "tcp-peer qc-dev-row" + (isSel ? " sel" : ""));
       row.onclick = () => selectDevice(sess, d.device_id);
       const cb = el("input"); cb.type = "checkbox"; cb.checked = !hidden.has(d.device_id);
-      cb.title = "show this device's packets in the Raw feed";
+      cb.title = "show this device's packets in the Raw feed + include it in the QC report";
       cb.onclick = (e) => e.stopPropagation();
       cb.onchange = () => {
         const next = hiddenQcSet(sess.id);
@@ -605,13 +620,26 @@
     });
   }, 1000);
 
-  // ---- QC extras: report/capture actions (checks + verdict now live in the pill/modal) ----
+  // ---- QC extras: report/checks/capture actions (verdict lives in the pill/modal) ----
   function renderQcActions(t) {
     const host = $("cap-qc-actions");
     host.innerHTML = "";
     if (!t || t.mode !== "qc") return;
+    if (qcDevices(t.sess).length) {
+      const exp = el("button", "ghost mini", "⤓ Report");
+      exp.title = "download the QC report (XLS/CSV): Summary sheet + one sheet per ticked device";
+      exp.onclick = () => openExport(t.sess);
+      host.append(exp);
+    }
+    if (qcDevices(t.sess).length) {
+      const lot = el("button", "ghost mini", "▤ Lot details");
+      lot.title = "type the bench-only report fields (mobile no, power, COTA/FOTA, sign-off) — they print on the report";
+      lot.onclick = () => openLot(t.sess);
+      host.append(lot);
+    }
     if (t.sess.checks && t.sess.checks.length) {
-      const rep = el("button", "ghost mini", "📄 Report");
+      const rep = el("button", "ghost mini", "✓ Checks");
+      rep.title = "view this session's pass/fail checks";
       rep.onclick = () => openReport(t.id);
       host.append(rep);
     }
@@ -622,6 +650,198 @@
       host.append(dl);
     }
   }
+
+  // ---- QC report export (XLS/CSV): Summary sheet + one sheet per selected device ------
+  // Scope = the devices TICKED in "Devices on this port" (the same tick that filters the
+  // Raw feed) — all ticked by default; untick a row to leave that device out.
+  const REPORTFMT_KEY = "runway.cap.reportfmt";   // "xlsx" | "csv"  (localStorage)
+  let exportQcId = null;
+  const exportSelection = (sess) => {
+    const hidden = hiddenQcSet(sess.id);
+    return qcDevices(sess).filter((d) => !hidden.has(d.device_id));
+  };
+  function openExport(sess) {
+    exportQcId = sess.id;
+    try { $("cap-export-format").value = localStorage.getItem(REPORTFMT_KEY) || "xlsx"; } catch (e) { /* ignore */ }
+    msg("cap-export-msg", "", "");
+    renderExportDevices();
+    $("cap-export-modal").style.display = "flex";
+  }
+  // A device is printable only once its QC has SETTLED (pass/conditional/fail/timeout);
+  // in-progress blocks the report — matches the backend gate on /api/qc/{id}/export.
+  const exportIncomplete = (d) => !d.verdict || d.verdict === "in_progress";
+  const exportMissing = (d) => {
+    const skipped = new Set(d.skipped || []);
+    return (d.coverage || []).filter((c) => c.required && !c.seen && !skipped.has(c.key));
+  };
+  // Included-device list inside the modal — re-rendered on every renderAll() while open,
+  // so ticking rows in the device list / skipping items updates it (and the gate) live.
+  function renderExportDevices() {
+    if (exportQcId == null || $("cap-export-modal").style.display === "none") return;
+    const sess = sessions.get(exportQcId);
+    const host = $("cap-export-devs");
+    host.innerHTML = "";
+    if (!sess) return;
+    const all = qcDevices(sess);
+    const sel = exportSelection(sess);
+    host.append(el("div", "muted", `${sel.length} of ${all.length} device${all.length === 1 ? "" : "s"} included:`));
+    let blocked = 0;
+    sel.forEach((d) => {
+      const bad = exportIncomplete(d);
+      if (bad) blocked++;
+      const row = el("div", "cap-export-dev mono" + (bad ? " cap-export-bad" : ""));
+      if (d.serial != null) row.append(el("span", "qc-serial-badge", "#" + d.serial));
+      row.append(document.createTextNode(d.device_id));
+      if (d.verdict) row.append(el("span", "qc-verdict qc-verdict-" + d.verdict, verdictLabel(d.verdict)));
+      if (bad) {
+        const miss = exportMissing(d);
+        if (miss.length) {
+          const info = el("span", "cap-export-miss muted",
+            `${miss.length} required item${miss.length === 1 ? "" : "s"} missing`);
+          info.title = "missing: " + miss.map((c) => c.label).join(", ");
+          row.append(info);
+          const skip = el("button", "ghost mini", "Skip missing");
+          skip.title = "mark the missing required items as Skip — the device closes as "
+            + "CONDITIONAL PASS and can be printed:\n" + miss.map((c) => c.label).join(", ");
+          skip.onclick = () => {
+            // the reason lands on the report's Deviations section + the audit trail —
+            // a Conditional Pass on a QC certificate must be accountable
+            const reason = window.prompt(
+              "Reason for skipping (printed on the report's Deviations):", "");
+            if (reason === null) return;               // cancelled
+            setSkipped(sess.id, d.device_id,
+              [...(d.skipped || []), ...miss.map((c) => c.key)], reason);
+          };
+          row.append(skip);
+        } else {
+          row.append(el("span", "cap-export-miss muted", "still receiving — not settled yet"));
+        }
+      }
+      host.append(row);
+    });
+    if (!sel.length) host.append(el("p", "err", "No devices ticked — tick at least one in the device list."));
+    // print history: every download is archived server-side; show it so a re-print of a
+    // since-edited session is a conscious act, not an accident
+    const prints = sess.reports || [];
+    if (prints.length) {
+      const lastAt = prints[prints.length - 1].at;
+      host.append(el("div", "muted cap-export-prior",
+        `Printed ×${prints.length} — last ${lastAt ? new Date(lastAt * 1000).toLocaleString() : ""}`
+        + " (archived in data/reports)"));
+    }
+    $("cap-export-warn").style.display = blocked ? "" : "none";
+    $("cap-export-go").disabled = !sel.length || blocked > 0;
+  }
+  const closeExport = () => { $("cap-export-modal").style.display = "none"; exportQcId = null; };
+  $("cap-export-close").addEventListener("click", closeExport);
+  $("cap-export-cancel").addEventListener("click", closeExport);
+  $("cap-export-modal").addEventListener("click", (e) => { if (e.target.id === "cap-export-modal") closeExport(); });
+  $("cap-export-go").addEventListener("click", () => {
+    const sess = exportQcId != null ? sessions.get(exportQcId) : null;
+    if (!sess) return;
+    const sel = exportSelection(sess);
+    if (!sel.length) { msg("cap-export-msg", "err", "tick at least one device in the device list"); return; }
+    const blocked = sel.filter(exportIncomplete);
+    if (blocked.length) {
+      msg("cap-export-msg", "err", "QC not completed — skip the missing items or untick: "
+        + blocked.map((d) => d.device_id).join(", "));
+      return;
+    }
+    const fmt = $("cap-export-format").value;
+    try { localStorage.setItem(REPORTFMT_KEY, fmt); } catch (e) { /* ignore */ }
+    // send the explicit id list only when it's a subset — the default (all) needs no param
+    const subset = sel.length !== qcDevices(sess).length;
+    const q = subset ? "&devices=" + encodeURIComponent(sel.map((d) => d.device_id).join(",")) : "";
+    const a = el("a");
+    a.href = `/api/qc/${sess.id}/export?fmt=${fmt}${q}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    msg("cap-export-msg", "ok", `report requested — ${sel.length} device${sel.length === 1 ? "" : "s"}, ${fmt === "xlsx" ? "Excel" : "CSV zip"}`);
+  });
+
+  // ---- Lot details: bench-only report fields typed in-app ---------------------
+  // Session-level lot/sign-off fields + per-device manual columns. Saved server-side
+  // (POST /api/qc/{id}/lot) so the exported report is the complete deliverable — no
+  // editing the Excel by hand afterwards. Field keys mirror the API whitelists.
+  const LOT_FIELDS = [
+    ["lot_id", "Lot / Batch id"], ["lot_size", "Lot size"], ["pcb_number", "PCB number"],
+    ["observation", "Observation"], ["corrective_action", "Corrective action"],
+    ["approved_by", "Quality approved by"],
+  ];
+  const MANUAL_FIELDS = [
+    ["mobile_no", "Mobile No"], ["data_on_intouch", "Data on Intouch"],
+    ["all_io_static", "All Input and Output (On Static)"], ["harness", "Harness"],
+    ["battery_charging", "Battery Charging"], ["ignition_on_intouch", "Ignition On (Intouch)"],
+    ["ignition_off_intouch", "Ignition Off (Intouch)"],
+    ["plugged_alarm_intouch", "Plugged/Unplugged Alarm on Intouch"],
+    ["cota", "COTA"], ["fota", "FOTA"], ["sms_command", "SMS Command"],
+    ["gprs_command", "GPRS Command"], ["serial_command", "Serial Command"],
+    ["power_ma_without_ign", "Power without Ignition (mA)"],
+    ["power_ma_with_ign", "Power with Ignition ON (mA)"],
+    ["field_testing", "Field Testing"], ["remarks", "Remarks"],
+  ];
+  let lotQcId = null;
+  let lotDraft = { lot: {}, manual: {} };    // unsaved edits, staged per device until Save
+  let lotDev = "";                           // device whose manual fields are displayed
+
+  function lotInputs(host, defs, values, onInput) {
+    host.innerHTML = "";
+    defs.forEach(([key, label]) => {
+      const w = el("label", "tcp-fld cap-lot-fld");
+      w.append(document.createTextNode(label));
+      const inp = el("input");
+      inp.type = "text";
+      inp.value = values[key] || "";
+      inp.placeholder = "—";
+      inp.oninput = () => onInput(key, inp.value);
+      w.append(inp);
+      host.append(w);
+    });
+  }
+  function renderLotDevice(sess) {
+    const saved = (sess.manual || {})[lotDev] || {};
+    const vals = { ...saved, ...(lotDraft.manual[lotDev] || {}) };
+    lotInputs($("cap-lot-fields"), MANUAL_FIELDS, vals,
+      (k, v) => { (lotDraft.manual[lotDev] = lotDraft.manual[lotDev] || {})[k] = v; });
+  }
+  function openLot(sess) {
+    lotQcId = sess.id;
+    lotDraft = { lot: {}, manual: {} };
+    const devs = qcDevices(sess);
+    lotDev = (qcSelectedDevice(sess) || devs[0] || {}).device_id || "";
+    const sel = $("cap-lot-dev");
+    sel.innerHTML = "";
+    devs.forEach((d) => sel.appendChild(
+      new Option(`${d.serial != null ? "#" + d.serial + " " : ""}${d.device_id}`, d.device_id)));
+    sel.value = lotDev;
+    // edits are staged per device (oninput), so switching devices loses nothing
+    sel.onchange = () => { lotDev = sel.value; renderLotDevice(sess); };
+    lotInputs($("cap-lot-sess"), LOT_FIELDS, { ...(sess.lot || {}), ...lotDraft.lot },
+      (k, v) => { lotDraft.lot[k] = v; });
+    renderLotDevice(sess);
+    msg("cap-lot-msg", "", "");
+    $("cap-lot-modal").style.display = "flex";
+  }
+  const closeLot = () => { $("cap-lot-modal").style.display = "none"; lotQcId = null; };
+  $("cap-lot-close").addEventListener("click", closeLot);
+  $("cap-lot-cancel").addEventListener("click", closeLot);
+  $("cap-lot-modal").addEventListener("click", (e) => { if (e.target.id === "cap-lot-modal") closeLot(); });
+  $("cap-lot-save").addEventListener("click", async () => {
+    if (lotQcId == null) return;
+    try {
+      let s = null;
+      if (Object.keys(lotDraft.lot).length) {
+        s = await postJSON(`/api/qc/${lotQcId}/lot`, { lot: lotDraft.lot });
+      }
+      for (const [did, fields] of Object.entries(lotDraft.manual)) {
+        if (Object.keys(fields).length) {
+          s = await postJSON(`/api/qc/${lotQcId}/lot`, { device_id: did, fields });
+        }
+      }
+      if (s) { sessions.set(lotQcId, s); renderAll(); }
+      lotDraft = { lot: {}, manual: {} };
+      msg("cap-lot-msg", "ok", "saved — these values print on the report");
+    } catch (e) { msg("cap-lot-msg", "err", "save failed: " + e.message); }
+  });
 
   // ---- live feed (right) -----------------------------------------------------
   function ingest(rec) {
@@ -667,7 +887,8 @@
     // QC forces raw view in the protocol's format; Testing honours the user's toggles.
     const isQc = t && t.mode === "qc";
     const view = isQc ? "raw" : viewMode;
-    const fmt = isQc ? qcRawFmt(t.sess.identified_as || "") : rawFmt;
+    const sample = rows.length ? (rows.find((r) => r.raw_hex) || {}).raw_hex : "";
+    const fmt = isQc ? qcRawFmt(t.sess, sample) : rawFmt;
     host.innerHTML = "";
     const tbl = el("table", "tcp-feed-table");
     const thead = el("thead");
@@ -787,9 +1008,10 @@
       .finally(() => { qcRefLoading.delete(proto); renderAll(); });
   }
 
-  async function setSkipped(qcId, deviceId, keys) {
+  async function setSkipped(qcId, deviceId, keys, reason) {
     try {
-      const s = await postJSON(`/api/qc/${qcId}/skip`, { device_id: deviceId, keys });
+      const s = await postJSON(`/api/qc/${qcId}/skip`,
+        { device_id: deviceId, keys, reason: reason || "" });
       sessions.set(qcId, s); renderAll();
     } catch (e) { msg(null, "err", "skip failed: " + e.message); }
   }
@@ -909,9 +1131,9 @@
   function renderQcSummaryPanel(sess) {
     const proto = sess.identified_as || "";
     ensureQcRef(proto);
-    const fmt = qcRawFmt(proto);
     const dev = qcSelectedDevice(sess);
     const cov = (dev && dev.coverage) || [];
+    const fmt = qcRawFmt(sess, ((cov.find((c) => c.last_raw_hex)) || {}).last_raw_hex);
     const skipped = new Set((dev && dev.skipped) || []);
     const did = dev ? dev.device_id : "";
     // No panel-level device-nav / verdict / session-meta header: the tab + session strip +
@@ -1349,7 +1571,7 @@
     btn.className = "qc-summary" + (verdict ? " qc-summary-" + verdict : "");
     btn.onclick = () => setQcView("summary");
   }
-  function renderAll() { renderTabs(); renderPane(); renderFeed(); applyModeChrome(); }
+  function renderAll() { renderTabs(); renderPane(); renderFeed(); applyModeChrome(); renderExportDevices(); }
 
   async function refreshAll() {
     try {

@@ -11,8 +11,13 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 # Paths in a .spec are relative to the spec's folder (packaging/), so reach up with ../.
-# Bundle the static web UI at proinfo/web (app.py looks for it under _MEIPASS/proinfo/web).
-datas = [("../proinfo/web", "proinfo/web")]
+# Bundle the static web UI at proinfo/web (app.py looks for it under _MEIPASS/proinfo/web)
+# and the default QC coverage profiles (app.py: _MEIPASS/proinfo/qc/profiles — without
+# them the packaged exe has no coverage catalogue until a user copy lands in data/).
+datas = [
+    ("../proinfo/web", "proinfo/web"),
+    ("../proinfo/qc/profiles", "proinfo/qc/profiles"),
+]
 
 # uvicorn loads its protocol/loop backends by string; websockets and the proinfo plugins
 # are imported dynamically — collect them all so nothing is missing at runtime.
@@ -20,7 +25,9 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("proinfo")
     + collect_submodules("websockets")
-    + ["multipart", "anyio"]
+    # openpyxl is imported lazily by qc/report.py (XLS QC report export)
+    + collect_submodules("openpyxl")
+    + ["multipart", "anyio", "et_xmlfile"]
 )
 
 a = Analysis(

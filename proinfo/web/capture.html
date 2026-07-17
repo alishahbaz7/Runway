@@ -165,11 +165,12 @@
     </div>
   </div>
 
-  <!-- QC report (verdict + checks) -->
+  <!-- QC checks (verdict + pass/fail checks; the downloadable report lives in the
+       export modal below) -->
   <div id="cap-report-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card tcp-pkt-card">
       <div class="tcp-pkt-head">
-        <h3>QC Report <span id="cap-report-verdict" class="qc-verdict"></span></h3>
+        <h3>QC Checks <span id="cap-report-verdict" class="qc-verdict"></span></h3>
         <span class="spacer"></span>
         <button id="cap-report-json" class="ghost mini">⤓ JSON</button>
         <button id="cap-report-txt" class="ghost mini">⤓ TXT</button>
@@ -178,6 +179,64 @@
       <div id="cap-report-meta" class="muted"></div>
       <h4 class="tcp-pkt-h">Checks</h4>
       <div id="cap-report-checks" class="qc-checks"></div>
+    </div>
+  </div>
+
+  <!-- QC report export: Sheet 1 = lot Summary, then one sheet per device named by its
+       IMEI with the Summary view's packet detail. The devices INCLUDED are the ones
+       ticked in "Devices on this port" (same tick as the Raw-feed filter). -->
+  <div id="cap-export-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card">
+      <div class="tcp-pkt-head">
+        <h3>Download QC report</h3><span class="spacer"></span>
+        <button id="cap-export-close" class="ghost mini danger">✕</button>
+      </div>
+      <p class="muted tcp-log-note">Sheet 1 is the lot <b>Summary</b> (one row per device);
+        each device below gets its own sheet named by <b>IMEI</b> with its packet coverage and
+        the last raw packet received per item. Tick/untick devices in
+        <b>Devices on this port</b> to change what's included.</p>
+      <!-- completion gate: an IN PROGRESS device blocks printing until its missing
+           required items are skipped (-> Conditional Pass) or the test settles -->
+      <p id="cap-export-warn" class="cap-export-warn" style="display:none"><b>QC is not
+        completed</b> — required items are still missing on the highlighted devices. Mark
+        them as <b>Skip</b> (the device closes as <b>Conditional Pass</b>) or untick the
+        device; only completed devices can be printed.</p>
+      <div id="cap-export-devs" class="cap-export-devs"></div>
+      <label class="tcp-fld">Format
+        <select id="cap-export-format">
+          <option value="xlsx">Excel workbook (.xlsx)</option>
+          <option value="csv">CSV (.zip — one file per sheet)</option>
+        </select>
+      </label>
+      <div class="tcp-modal-actions">
+        <span id="cap-export-msg" class="muted"></span><span class="spacer"></span>
+        <button id="cap-export-cancel" class="ghost">Cancel</button>
+        <button id="cap-export-go">⤓ Download</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lot details: the bench-only report fields (manual columns + sign-off) typed here
+       instead of into the Excel afterwards — the exported report is the complete
+       deliverable. Saved on the server with the session. -->
+  <div id="cap-lot-modal" class="tcp-modal" style="display:none">
+    <div class="tcp-modal-card tcp-pkt-card">
+      <div class="tcp-pkt-head">
+        <h3>Lot details</h3><span class="spacer"></span>
+        <button id="cap-lot-close" class="ghost mini danger">✕</button>
+      </div>
+      <p class="muted tcp-log-note">These values fill the report's manual columns and its
+        sign-off block — type them once here and every print carries them. Anything left
+        blank stays a blank placeholder on the sheet.</p>
+      <h4 class="tcp-pkt-h">Lot / sign-off</h4>
+      <div id="cap-lot-sess" class="cap-lot-grid"></div>
+      <h4 class="tcp-pkt-h">Device&nbsp; <select id="cap-lot-dev" class="cap-lot-devsel"></select></h4>
+      <div id="cap-lot-fields" class="cap-lot-grid"></div>
+      <div class="tcp-modal-actions">
+        <span id="cap-lot-msg" class="muted"></span><span class="spacer"></span>
+        <button id="cap-lot-cancel" class="ghost">Close</button>
+        <button id="cap-lot-save">Save</button>
+      </div>
     </div>
   </div>
 
