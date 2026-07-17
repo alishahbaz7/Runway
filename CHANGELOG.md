@@ -24,6 +24,40 @@ session no longer starts the packet tables blank.
   Stop), so a session that dies without one still shows its data in the list, before any
   Resume.
 
+### Changed — QC Capture UI
+- **Summary is now the default (and primary) view** of the Live Packets pane; Raw is the
+  secondary tab. The Summary/Raw toggle lists Summary first. (An operator who explicitly
+  switched to Raw before keeps that choice — only the first-time default changed.)
+- **Feed header decluttered**: the "session #N · :port" caption is gone from the QC feed
+  header (that identity already lives on the tab and the session strip); the **Checks**
+  popup button, and the **Pass w/ conditions** / **Fail** buttons in the Summary panel,
+  were removed. (The underlying `/finalize` and `/report` endpoints are unchanged.)
+
+### Changed — Send command
+- **IP/port SET drafts pre-fill with the live session's port.** Picking PIP/EIP/GIP in
+  the send dialog now drafts `+S*R:SET:EIP#182.71.127.231,<this session's port>;` — the
+  host is the bench's constant server address (authored in the protocol definition,
+  updated to `182.71.127.231`), the port is whatever port the tab is listening on, so
+  the device dials back to the right listener without hand-editing.
+- **Send to multiple devices at once**: when several devices are connected on the port,
+  the send dialog lists them with tick-boxes (the device whose ✈ was clicked is ticked
+  by default) and sends the command to every ticked one, reporting per-device failures.
+
+### Changed — QC report
+- **The Summary sheet no longer carries the per-packet coverage columns** (Login …
+  Device Tampered). That detail stays on each device's own IMEI sheet; the lot Summary
+  keeps one readable row per device (identity, bench columns, required-coverage
+  fraction, verdict, remarks) — matching the reference sheet's altitude.
+
+### Changed — QC skip rule
+- **Only bench-waivable items can be skipped.** The QC profile now marks items
+  `"skippable": true`; a Skip control appears in the Summary only for those, and
+  `POST /api/qc/{id}/skip` rejects (HTTP 400) any attempt to skip a mandatory item — so
+  the rule is enforced server-side, not just hidden in the UI. For AIS-140 the skippable
+  set is the five hard-to-trigger events: **Low battery, Low battery removed, Harsh
+  Braking, Harsh Acceleration, Rash Turning** (all now `required` + `skippable`); every
+  other item is mandatory. `skippable` is carried through `engine.coverage` and the ledger.
+
 ### Added
 - **Coverage ledger** (`proinfo/qc/ledger.py`): per-device QC state now *accumulates* —
   every record is folded in exactly once as it arrives, so a long session can no longer

@@ -902,8 +902,9 @@ async def test_qc_stop_and_remove_while_device_connected():
 
 async def test_qc_coverage_and_verdict_states():
     """Phase A2: an AIS-140 session (which has a QC profile) surfaces packet coverage and a
-    coverage-driven verdict — in_progress while required items are still missing, and
-    conditional_pass once the operator skips the outstanding required items."""
+    coverage-driven verdict — in_progress while required items are still missing. Under the
+    skip rule only the profile's `skippable` items may be waived (a mandatory item's skip is
+    rejected), and the operator's explicit 'Pass with conditions' verdict finalizes it."""
     import asyncio
     import socket
 
@@ -943,17 +944,32 @@ async def test_qc_coverage_and_verdict_states():
         assert dev["verdict"] == "in_progress"           # required items still missing, device alive
         assert got["verdict"] == "in_progress"           # session aggregate
 
-        # operator skips every still-missing required item for THIS device -> conditional pass
-        missing_required = [k for k, v in cov.items() if v["required"] and not v["seen"]]
+        # a MANDATORY missing item cannot be skipped — the backend rejects it outright
+        mandatory_missing = [k for k, v in cov.items()
+                             if v["required"] and not v["seen"] and not v["skippable"]]
+        assert mandatory_missing, "a login-only session has mandatory items outstanding"
+        bad = await c.post(f"/api/qc/{qc_id}/skip",
+                           json={"device_id": imei.decode(), "keys": mandatory_missing[:1]})
+        assert bad.status_code == 400, "mandatory items must not be skippable"
+
+        # the profile's skippable items CAN be waived, but mandatory ones are still missing,
+        # so the device stays in_progress (skipping doesn't jump it to conditional on its own)
+        skippable_missing = [k for k, v in cov.items() if v["skippable"] and not v["seen"]]
+        assert skippable_missing, "the bench-waivable alerts should be outstanding"
         skip = (await c.post(f"/api/qc/{qc_id}/skip",
-                             json={"device_id": imei.decode(), "keys": missing_required})).json()
+                             json={"device_id": imei.decode(), "keys": skippable_missing})).json()
         sdev = {d["device_id"]: d for d in skip["devices"]}[imei.decode()]
-        assert sdev["verdict"] == "conditional_pass"
-        assert set(skip["skipped"][imei.decode()]) == set(missing_required)
+        assert set(skip["skipped"][imei.decode()]) == set(skippable_missing)
+        assert sdev["verdict"] == "in_progress", "mandatory items still missing -> not conditional yet"
+
+        # the operator's explicit 'Pass with conditions' verdict finalizes the device
+        fin = (await c.post(f"/api/qc/{qc_id}/finalize",
+                            json={"device_id": imei.decode(), "verdict": "conditional_pass"})).json()
+        assert {d["device_id"]: d for d in fin["devices"]}[imei.decode()]["verdict"] == "conditional_pass"
 
         writer.close()
         stopped = (await c.post(f"/api/qc/{qc_id}/stop")).json()
-        assert stopped["verdict"] == "conditional_pass"   # persisted with the skips
+        assert stopped["verdict"] == "conditional_pass"   # persisted with the finalize
         sdev2 = {d["device_id"]: d for d in stopped["devices"]}[imei.decode()]
         assert {c_["key"] for c_ in sdev2["coverage"]}    # per-device coverage persisted too
 
@@ -1036,8 +1052,8 @@ async def test_qc_device_serial_and_prior_status_across_sessions():
         return qc_id, writer
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        # --- session 1: connect, then skip every required item so it FINALIZES as
-        # conditional_pass (same pattern as test_qc_coverage_and_verdict_states) ---
+        # --- session 1: connect, then FINALIZE with the operator's explicit verdict so it
+        # settles as conditional_pass (mandatory items can't be skipped to force a pass) ---
         port1 = _free_port()
         qc1, w1 = await _run_session(c, port1)
         got = (await c.get(f"/api/qc/{qc1}")).json()
@@ -1046,10 +1062,9 @@ async def test_qc_device_serial_and_prior_status_across_sessions():
         assert isinstance(serial, int) and serial > 0
         assert dev1["prior_verdict"] == "", "brand-new device has no prior result yet"
 
-        missing = [k for k, v in {c_["key"]: c_ for c_ in dev1["coverage"]}.items() if v["required"] and not v["seen"]]
-        skip1 = (await c.post(f"/api/qc/{qc1}/skip",
-                              json={"device_id": imei.decode(), "keys": missing})).json()
-        dev1b = {d["device_id"]: d for d in skip1["devices"]}[imei.decode()]
+        fin1 = (await c.post(f"/api/qc/{qc1}/finalize",
+                             json={"device_id": imei.decode(), "verdict": "conditional_pass"})).json()
+        dev1b = {d["device_id"]: d for d in fin1["devices"]}[imei.decode()]
         assert dev1b["verdict"] == "conditional_pass"
         w1.close()
         await c.post(f"/api/qc/{qc1}/stop")

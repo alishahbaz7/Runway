@@ -1597,6 +1597,17 @@ async def qc_skip(qc_id: int, body: QcSkipBody):
     m = _jloads_dict(row.get("skipped_json"))
     before = set(m.get(body.device_id or "") or [])
     after = set(body.keys)
+    # Only items the profile marks skippable may be waived — mandatory items cannot be
+    # skipped (enforced here, not just hidden in the UI). Validate only NEWLY-ADDED keys:
+    # skips recorded before this rule existed are grandfathered so they stay removable
+    # (rejecting the whole list would lock the operator out of unticking anything).
+    # No catalog (unknown protocol) -> no restriction, so a missing profile never blocks.
+    catalog = (_qc_profile(row.get("identified_as") or "") or {}).get("coverage") or []
+    if catalog:
+        skippable = {c["key"] for c in catalog if c.get("skippable")}
+        bad = sorted(k for k in (after - before) if k not in skippable)
+        if bad:
+            raise HTTPException(400, f"these items are mandatory and cannot be skipped: {', '.join(bad)}")
     m[body.device_id or ""] = sorted(after)
     db.qc_update(qc_id, skipped_json=json.dumps(m))
     if after != before:                              # audit the change, with the why

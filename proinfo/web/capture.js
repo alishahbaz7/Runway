@@ -59,14 +59,14 @@
   let draftMode = "test";          // "test" | "qc" — what a new session will be
   let rawFmt = "hex";
   let viewMode = "raw";
-  let qcView = "raw";              // QC feed pane: "raw" (packet stream) | "summary" (per-device)
+  let qcView = "summary";          // QC feed pane: "summary" (per-device, default) | "raw" (packet stream)
   let devicesCollapsed = false;
   let focus = null;                // "t:<jid>" | "q:<qcId>" | NEW | null
   const hiddenPeers = new Set();
   try {
     rawFmt = localStorage.getItem(RAWFMT_KEY) || "hex";
     viewMode = localStorage.getItem(VIEW_KEY) || "raw";
-    qcView = localStorage.getItem(QCVIEW_KEY) || "raw";
+    qcView = localStorage.getItem(QCVIEW_KEY) || "summary";
     draftMode = localStorage.getItem(MODE_KEY) || "test";
     devicesCollapsed = localStorage.getItem(DEVCOLL_KEY) === "1";
     focus = sessionStorage.getItem(FOCUS_KEY) || null;
@@ -503,7 +503,7 @@
       meta.append(el("span", "tcp-client-idle muted", fmtIdle(c.last || 0)));
       const jid = tabJobId(t);
       if (running && c.connected && jid) {
-        meta.append(sendButton(() => openSend(jid, p, info.protocol || "")));
+        meta.append(sendButton(() => openSend(jid, p, info.protocol || "", t.job && t.job.port)));
       }
       row.append(meta);
       host.append(row);
@@ -560,7 +560,13 @@
       meta.append(el("span", "tcp-client-idle muted", fmtIdle(d.last_seen || 0)));
       const cp = (d.peers || []).find((p) => connSet.has(p));
       if (running && cp && jid) {
-        const send = sendButton((e) => { e.stopPropagation(); openSend(jid, cp, sess.identified_as || ""); });
+        // every currently-connected device on this port — the send modal offers them as
+        // extra recipients so one command (e.g. SET:EIP) can go to the whole bench at once
+        const recips = devices
+          .map((dd) => ({ peer: (dd.peers || []).find((p) => connSet.has(p)),
+                          label: (dd.serial != null ? `#${dd.serial} ` : "") + dd.device_id }))
+          .filter((r) => r.peer);
+        const send = sendButton((e) => { e.stopPropagation(); openSend(jid, cp, sess.identified_as || "", sess.port, recips); });
         meta.append(send);
       }
       row.append(meta);
@@ -637,12 +643,6 @@
       lot.onclick = () => openLot(t.sess);
       host.append(lot);
     }
-    if (t.sess.checks && t.sess.checks.length) {
-      const rep = el("button", "ghost mini", "✓ Checks");
-      rep.title = "view this session's pass/fail checks";
-      rep.onclick = () => openReport(t.id);
-      host.append(rep);
-    }
     if (t.sess.capture_path) {
       const dl = el("button", "ghost mini", "⤓ Capture");
       dl.title = "download this session's capture file";
@@ -700,19 +700,29 @@
             `${miss.length} required item${miss.length === 1 ? "" : "s"} missing`);
           info.title = "missing: " + miss.map((c) => c.label).join(", ");
           row.append(info);
-          const skip = el("button", "ghost mini", "Skip missing");
-          skip.title = "mark the missing required items as Skip — the device closes as "
-            + "CONDITIONAL PASS and can be printed:\n" + miss.map((c) => c.label).join(", ");
-          skip.onclick = () => {
-            // the reason lands on the report's Deviations section + the audit trail —
-            // a Conditional Pass on a QC certificate must be accountable
-            const reason = window.prompt(
-              "Reason for skipping (printed on the report's Deviations):", "");
-            if (reason === null) return;               // cancelled
-            setSkipped(sess.id, d.device_id,
-              [...(d.skipped || []), ...miss.map((c) => c.key)], reason);
-          };
-          row.append(skip);
+          // only the profile's skippable items can be waived — mandatory ones must be
+          // exercised (or the device settles as TIMEOUT once idle past the threshold)
+          const waivable = miss.filter((c) => (c.skippable !== undefined ? c.skippable : true));
+          if (waivable.length) {
+            const skip = el("button", "ghost mini",
+              waivable.length === miss.length ? "Skip missing" : `Skip ${waivable.length} skippable`);
+            skip.title = "mark the missing skippable items as Skip:\n"
+              + waivable.map((c) => c.label).join(", ")
+              + (waivable.length === miss.length
+                ? "\nThe device closes as CONDITIONAL PASS and can be printed."
+                : "\nThe rest are mandatory and cannot be skipped — the device settles "
+                  + "once they arrive (or as TIMEOUT after going idle).");
+            skip.onclick = () => {
+              // the reason lands on the report's Deviations section + the audit trail —
+              // a Conditional Pass on a QC certificate must be accountable
+              const reason = window.prompt(
+                "Reason for skipping (printed on the report's Deviations):", "");
+              if (reason === null) return;               // cancelled
+              setSkipped(sess.id, d.device_id,
+                [...(d.skipped || []), ...waivable.map((c) => c.key)], reason);
+            };
+            row.append(skip);
+          }
         } else {
           row.append(el("span", "cap-export-miss muted", "still receiving — not settled yet"));
         }
@@ -875,7 +885,9 @@
     const host = $("cap-feed");
     const t = focusedTab();
     const port = t ? (t.mode === "qc" ? t.sess.port : t.job.port) : null;
-    $("cap-feed-for").textContent = t ? (t.mode === "qc" ? `— session #${t.id} · :${port}` : `— :${port}`) : "";
+    // QC: session id + port already live on the tab and the session strip, so the feed
+    // header stays clean; Testing keeps the port hint since it has no session strip.
+    $("cap-feed-for").textContent = t && t.mode !== "qc" ? `— :${port}` : "";
     const rows = focusRows();
     $("cap-feed-count").textContent = rows.length ? `${rows.length} shown` : "";
     if (!rows.length) {
@@ -1015,13 +1027,6 @@
       sessions.set(qcId, s); renderAll();
     } catch (e) { msg(null, "err", "skip failed: " + e.message); }
   }
-  async function finalizeVerdict(qcId, deviceId, verdict) {
-    try {
-      const s = await postJSON(`/api/qc/${qcId}/finalize`, { device_id: deviceId, verdict });
-      sessions.set(qcId, s); renderAll();
-      msg(null, "ok", verdict ? `marked ${verdictLabel(verdict)}` : "verdict cleared");
-    } catch (e) { msg(null, "err", "finalize failed: " + e.message); }
-  }
 
   // Reference description + example for a coverage item, tailored to THIS row. Every
   // alert-id item (Live, History, and all 14 alerts) rides on the SAME generic NMP/PVT
@@ -1140,24 +1145,6 @@
     // status pill already carry session, port, protocol and verdict, and the shown device
     // is bound by its Serial badge (device list highlight + the Serial in Device details).
 
-    // --- (#4) Pass/Fail actions, top-right of the panel's own mini-header ---
-    const acts = $("cap-qcsum-actions");
-    acts.innerHTML = "";
-    if (dev) {
-      const passc = el("button", "ghost mini", "✓ Pass w/ conditions");
-      passc.title = "accept the skipped/deviated items and pass this device";
-      passc.onclick = () => finalizeVerdict(sess.id, did, "conditional_pass");
-      const failb = el("button", "ghost mini danger", "✕ Fail");
-      failb.onclick = () => finalizeVerdict(sess.id, did, "fail");
-      acts.append(passc, failb);
-      if (dev.finalized_verdict) {
-        const clr = el("button", "ghost mini", "↺ Clear");
-        clr.title = "hand back to the automatic verdict";
-        clr.onclick = () => finalizeVerdict(sess.id, did, "");
-        acts.append(clr);
-      }
-    }
-
     const body = $("cap-qcsum-body");
     body.innerHTML = "";
     if (!dev) {
@@ -1252,10 +1239,13 @@
           rc.append(preview);
         } else { rc.append(el("span", "muted", "—")); }
         tr.append(rc);
-        // (#5) Skip only matters for an item that's still missing — once it's been received
-        // there's nothing to mark optional, so the checkbox just adds clutter; hide it.
+        // (#5) Skip only matters for an item that's still missing AND that the profile
+        // marks skippable — the mandatory items can't be waived, and a received item has
+        // nothing to mark optional. Otherwise the checkbox is just clutter; hide it.
+        // (skippable === undefined means an old backend / pre-update snapshot that doesn't
+        // carry the flag yet — fall back to showing the control; the server still enforces.)
         const skc = el("td");
-        if (!c.seen) {
+        if (!c.seen && (c.skippable !== undefined ? c.skippable : true)) {
           const cb = el("input"); cb.type = "checkbox"; cb.checked = isSkip;
           cb.title = "mark optional for this device (missing -> Conditional Pass, not fail)";
           cb.onclick = (e) => e.stopPropagation();
@@ -1292,44 +1282,6 @@
     // ("Test cases" chips removed — the field checks still run backend-side and appear in
     // the report; the Summary page is coverage-focused.)
   }
-
-  // ---- QC report modal -------------------------------------------------------
-  let reportQcId = null;
-  async function openReport(qcId) {
-    reportQcId = qcId;
-    $("cap-report-verdict").textContent = "";
-    $("cap-report-meta").textContent = "loading…";
-    $("cap-report-checks").innerHTML = "";
-    $("cap-report-modal").style.display = "flex";
-    try {
-      const r = await api(`/api/qc/${qcId}/report`);
-      const v = $("cap-report-verdict");
-      v.textContent = r.verdict ? r.verdict.toUpperCase() : "";
-      v.className = "qc-verdict" + (r.verdict ? " qc-verdict-" + r.verdict : "");
-      const started = r.started_at ? new Date(r.started_at * 1000).toLocaleString() : "—";
-      const ended = r.ended_at ? new Date(r.ended_at * 1000).toLocaleString() : "—";
-      $("cap-report-meta").textContent =
-        `#${r.qc_id} · ${r.device_id || "(unidentified)"} · ${r.identified_as || r.protocol_mode}`
-        + ` · port ${r.port} · ${r.packet_count} packets · ${started} → ${ended}`
-        + (r.operator ? ` · operator: ${r.operator}` : "")
-        + (r.prior_session_count ? ` · seen before ×${r.prior_session_count}` : "");
-      const host = $("cap-report-checks");
-      (r.checks || []).forEach((c) => {
-        const chip = el("span", "qc-chip qc-chip-" + c.result, c.label);
-        chip.title = c.detail || "";
-        host.append(chip);
-      });
-      if (!(r.checks || []).length) host.append(el("p", "empty", "No checks evaluated yet."));
-    } catch (e) {
-      $("cap-report-meta").textContent = "failed to load: " + e.message;
-    }
-  }
-  $("cap-report-close").addEventListener("click", () => { $("cap-report-modal").style.display = "none"; });
-  $("cap-report-modal").addEventListener("click", (e) => {
-    if (e.target.id === "cap-report-modal") $("cap-report-modal").style.display = "none";
-  });
-  $("cap-report-json").addEventListener("click", () => { if (reportQcId != null) window.open(`/api/qc/${reportQcId}/report`, "_blank"); });
-  $("cap-report-txt").addEventListener("click", () => { if (reportQcId != null) window.open(`/api/qc/${reportQcId}/report?fmt=txt`, "_blank"); });
 
   // ---- Testing: log export + continuous logging ------------------------------
   function openLog() {
@@ -1416,13 +1368,33 @@
 
   // ---- send-command modal (downlink: utility -> device) -----------------------
   let sendCmds = [];                 // the picked protocol's ota_commands (current modal)
-  function openSend(job, peer, proto) {
-    sendCtx = { job, peer };
+  // port: this session's listening port — substituted into IP,port SET drafts (see apply()).
+  // recipients: every connected device on this port [{label, peer}] — when there's more
+  // than one, the modal shows a tick-list so one command can go to several devices.
+  function openSend(job, peer, proto, port, recipients) {
+    sendCtx = { job, peer, port: port || null, sel: new Set([peer]),
+                multi: !!(recipients && recipients.length > 1) };
     // headline is the DEVICE (IMEI) once identified — the transient ip:port stays as a
     // hover tooltip only (a reconnect changes the port, never the IMEI)
     const label = deviceLabel(peer);
     $("cap-send-peer").textContent = label;
     $("cap-send-peer").title = peer;
+    const rec = $("cap-send-recips");
+    rec.innerHTML = "";
+    rec.style.display = sendCtx.multi ? "" : "none";
+    if (sendCtx.multi) {
+      recipients.forEach((r) => {
+        const lab = el("label", "cap-send-recip");
+        const cb = el("input"); cb.type = "checkbox"; cb.checked = r.peer === peer;
+        cb.onchange = () => {
+          cb.checked ? sendCtx.sel.add(r.peer) : sendCtx.sel.delete(r.peer);
+          $("cap-send-peer").textContent = sendCtx.sel.size === 1
+            ? deviceLabel([...sendCtx.sel][0]) : `${sendCtx.sel.size} devices`;
+        };
+        lab.append(cb, el("span", "mono", r.label), el("span", "muted tcp-device-peer", r.peer));
+        rec.append(lab);
+      });
+    }
     $("cap-send-value").value = "";
     msg("cap-send-msg", "", "");
     populateSendCommands(proto || "");
@@ -1489,7 +1461,14 @@
         modeFld.style.display = "";
         return;
       }
-      $("cap-send-value").value = c[act.value] || "";
+      let v = c[act.value] || "";
+      // IP,port setters (PIP/EIP/GIP): the host in the catalogue is the bench's constant
+      // server address; the PORT becomes THIS session's listening port — the one the
+      // device must dial back to (e.g. "+S*R:SET:EIP#182.71.127.231,4082;" on port 4082).
+      if (act.value === "set" && sendCtx && sendCtx.port) {
+        v = v.replace(/#([^,;#]+),(\d{1,5});/, `#$1,${sendCtx.port};`);
+      }
+      $("cap-send-value").value = v;
       $("cap-send-mode").value = "text";                 // catalogue commands are ASCII text
       modeFld.style.display = "none";                    // format is device-defined — no Mode
       hint.textContent = c.description || "";
@@ -1504,12 +1483,20 @@
   $("cap-send-cancel").addEventListener("click", closeSend);
   $("cap-send-go").addEventListener("click", async () => {
     if (!sendCtx) return;
-    const body = { peer: sendCtx.peer, mode: $("cap-send-mode").value, value: $("cap-send-value").value };
-    if (!body.value.trim()) { msg("cap-send-msg", "err", "enter a value"); return; }
-    try {
-      const r = await postJSON("/api/send/" + sendCtx.job, body);
-      msg("cap-send-msg", "ok", `sent ${r.sent} bytes (${r.hex.slice(0, 24)}${r.hex.length > 24 ? "…" : ""})`);
-    } catch (e) { msg("cap-send-msg", "err", "send failed: " + e.message); }
+    const value = $("cap-send-value").value;
+    if (!value.trim()) { msg("cap-send-msg", "err", "enter a value"); return; }
+    const peers = sendCtx.multi ? [...sendCtx.sel] : [sendCtx.peer];
+    if (!peers.length) { msg("cap-send-msg", "err", "tick at least one device"); return; }
+    const mode = $("cap-send-mode").value;
+    let ok = 0, last = null;
+    const errs = [];
+    for (const p of peers) {
+      try { last = await postJSON("/api/send/" + sendCtx.job, { peer: p, mode, value }); ok += 1; }
+      catch (e) { errs.push(`${deviceLabel(p)}: ${e.message}`); }
+    }
+    if (errs.length) msg("cap-send-msg", "err", `sent to ${ok}/${peers.length} — failed: ${errs.join("; ")}`);
+    else if (peers.length === 1) msg("cap-send-msg", "ok", `sent ${last.sent} bytes (${last.hex.slice(0, 24)}${last.hex.length > 24 ? "…" : ""})`);
+    else msg("cap-send-msg", "ok", `sent to all ${peers.length} devices`);
   });
 
   // ---- render + refresh + WebSocket ------------------------------------------

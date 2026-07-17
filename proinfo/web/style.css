@@ -528,7 +528,10 @@ pre.hex, pre.json {
 .cov-recv-preview { display: block; color: var(--accent-2); cursor: pointer;
   white-space: normal; word-break: break-all; overflow-wrap: anywhere; }
 .cov-recv-preview:hover { color: var(--accent); text-decoration: underline; }
-#cap-qcsum-actions { display: inline-flex; gap: 6px; }
+/* send modal: multi-device recipient tick-list (only when >1 device is connected) */
+.cap-send-recips { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px;
+  max-height: 140px; overflow-y: auto; }
+.cap-send-recip { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 
 /* Custom hover tooltip for a coverage row — replaces the native title= (which can't bold
    anything) so the packet-type/alert-id tokens this row actually expects can be highlighted. */

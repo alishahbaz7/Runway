@@ -126,6 +126,7 @@ class CoverageLedger:
             out.append({
                 "key": item["key"], "label": item.get("label", item["key"]),
                 "required": bool(item.get("required")),
+                "skippable": bool(item.get("skippable")),
                 "group": item.get("group", ""), "code": item.get("code", ""),
                 "alert_id": (item.get("match") or {}).get("alert_id"),
                 "seen": e is not None, "count": e["count"] if e else 0,

@@ -187,9 +187,9 @@
       { "id": 7,  "name": "LOG2", "description": "Data update rate, ignition OFF (s)",                            "set": "+S*R:SET:LOG2#600;",                    "get": "+S*R:GET:LOG2#;", "clr": "+S*R:CLR:LOG2#;" },
       { "id": 8,  "name": "EMTD", "description": "Automatic emergency cutoff rate (emergency mode timeout, s)",   "set": "+S*R:SET:EMTD#1200;",                   "get": "+S*R:GET:EMTD#;", "clr": "+S*R:CLR:EMTD#;" },
       { "id": 9,  "name": "HPTI", "description": "Data update rate of health packets (s)",                        "set": "+S*R:SET:HPTI#120;",                    "get": "+S*R:GET:HPTI#;", "clr": "+S*R:CLR:HPTI#;" },
-      { "id": 10, "name": "PIP",  "description": "Primary IP and port",                                           "set": "+S*R:SET:PIP#act.gpsbox.co.in,9004;",   "get": "+S*R:GET:PIP#;",  "clr": "+S*R:CLR:PIP#;" },
-      { "id": 11, "name": "EIP",  "description": "Emergency IP and port",                                         "set": "+S*R:SET:EIP#act.gpsbox.co.in,9002;",   "get": "+S*R:GET:EIP#;",  "clr": "+S*R:CLR:EIP#;" },
-      { "id": 12, "name": "GIP",  "description": "Government IP and port",                                        "set": "+S*R:SET:GIP#act.gpsbox.co.in,9002;",   "get": "+S*R:GET:GIP#;",  "clr": "+S*R:CLR:GIP#;" },
+      { "id": 10, "name": "PIP",  "description": "Primary IP and port",                                           "set": "+S*R:SET:PIP#182.71.127.231,4082;",     "get": "+S*R:GET:PIP#;",  "clr": "+S*R:CLR:PIP#;" },
+      { "id": 11, "name": "EIP",  "description": "Emergency IP and port",                                         "set": "+S*R:SET:EIP#182.71.127.231,4082;",     "get": "+S*R:GET:EIP#;",  "clr": "+S*R:CLR:EIP#;" },
+      { "id": 12, "name": "GIP",  "description": "Government IP and port",                                        "set": "+S*R:SET:GIP#182.71.127.231,4082;",     "get": "+S*R:GET:GIP#;",  "clr": "+S*R:CLR:GIP#;" },
       { "id": 13, "name": "APN",  "description": "Primary APN",                                                   "set": "+S*R:SET:APN#taisysnet;",               "get": "+S*R:GET:APN#;",  "clr": "+S*R:CLR:APN#;" }
     ]
   },

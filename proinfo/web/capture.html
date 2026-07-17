@@ -65,9 +65,9 @@
           <!-- QC-only: verdict + coverage pill for the SELECTED device (e.g. "IN PROGRESS · 2/13")
                — click it as a shortcut into the Summary view below -->
           <button id="cap-qc-status" class="qc-summary" title="QC status for the selected device — click to open Summary" style="display:none"></button>
-          <!-- QC-only: Raw (packet stream, multi-device) | Summary (per-device coverage & details) -->
-          <span class="tcp-seg" id="cap-qc-viewseg" style="display:none" title="Raw = packet stream · Summary = per-device coverage & details">
-            <button id="cap-qc-view-raw" class="seg on">Raw</button><button id="cap-qc-view-summary" class="seg">Summary</button>
+          <!-- QC-only: Summary (per-device coverage & details, default) | Raw (packet stream, multi-device) -->
+          <span class="tcp-seg" id="cap-qc-viewseg" style="display:none" title="Summary = per-device coverage & details · Raw = packet stream">
+            <button id="cap-qc-view-summary" class="seg on">Summary</button><button id="cap-qc-view-raw" class="seg">Raw</button>
           </span>
           <!-- Testing-only: RAW/Parsed + HEX/ASCII (QC renders per the protocol config) -->
           <span class="tcp-seg" id="cap-view-seg" title="show packets as raw bytes or decoded fields">
@@ -105,10 +105,6 @@
              IMEI in Device details — no duplicate session/port/verdict header, all of that
              already lives on the tab, session strip and status pill), and updates live. -->
         <div id="cap-qc-summary-panel" style="display:none">
-          <div class="tcp-pkt-head">
-            <span class="spacer"></span>
-            <span id="cap-qcsum-actions"></span>
-          </div>
           <div id="cap-qcsum-body"></div>
         </div>
       </section>
@@ -119,6 +115,9 @@
   <div id="cap-send-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <h3>Send to <span id="cap-send-peer" class="mono"></span></h3>
+      <!-- shown only when several devices are connected on this port: tick who receives
+           the command (the device the ✈ was clicked on is ticked by default) -->
+      <div id="cap-send-recips" class="cap-send-recips" style="display:none"></div>
       <!-- the protocol's known command catalogue (from data/protocols/<proto>.json
            ota_commands): pick the command TYPE first (SET/GET/CLR), then a command from
            the list filtered to those supporting that type — some support all three,
@@ -162,23 +161,6 @@
       <pre id="cap-pkt-ascii" class="json"></pre>
       <h4 class="tcp-pkt-h">HEX</h4>
       <pre id="cap-pkt-hex" class="json"></pre>
-    </div>
-  </div>
-
-  <!-- QC checks (verdict + pass/fail checks; the downloadable report lives in the
-       export modal below) -->
-  <div id="cap-report-modal" class="tcp-modal" style="display:none">
-    <div class="tcp-modal-card tcp-pkt-card">
-      <div class="tcp-pkt-head">
-        <h3>QC Checks <span id="cap-report-verdict" class="qc-verdict"></span></h3>
-        <span class="spacer"></span>
-        <button id="cap-report-json" class="ghost mini">⤓ JSON</button>
-        <button id="cap-report-txt" class="ghost mini">⤓ TXT</button>
-        <button id="cap-report-close" class="ghost mini danger">✕ Close</button>
-      </div>
-      <div id="cap-report-meta" class="muted"></div>
-      <h4 class="tcp-pkt-h">Checks</h4>
-      <div id="cap-report-checks" class="qc-checks"></div>
     </div>
   </div>
 

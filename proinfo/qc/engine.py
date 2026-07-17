@@ -157,6 +157,10 @@ def coverage(records: list[UnifiedRecord], catalog: list[dict]) -> list[dict]:
         out.append({
             "key": item["key"], "label": item.get("label", item["key"]),
             "required": bool(item.get("required")),
+            # only skippable items may be waived by the operator (missing -> conditional,
+            # not fail); everything else is mandatory. Carried through so the UI shows a
+            # Skip control only where it's allowed and the backend can enforce the same.
+            "skippable": bool(item.get("skippable")),
             # display metadata carried from the profile (UI sections + alert headers)
             "group": item.get("group", ""), "code": item.get("code", ""),
             "alert_id": (item.get("match") or {}).get("alert_id"),

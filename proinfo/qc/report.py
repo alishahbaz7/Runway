@@ -1,10 +1,11 @@
 """QC report file builder — Sheet 1 "Summary" + one sheet per device (IMEI).
 
 Builds the per-lot QC deliverable (modelled on the bench's reference workbook, e.g.
-"LOCATE 140B[TS]"): a summary sheet with one row per tested device and one column per
-coverage item, then a per-IMEI sheet carrying the same detail the Capture page's QC
-Summary view shows — device details plus the Packets / Emergency server / Alerts tables
-with the most recent raw packet received for each item.
+"LOCATE 140B[TS]"): a summary sheet with one readable row per tested device (identity,
+bench columns, required-coverage fraction, verdict — NO per-packet columns), then a
+per-IMEI sheet carrying the same detail the Capture page's QC Summary view shows —
+device details plus the Packets / Emergency server / Alerts tables with the most recent
+raw packet received for each item.
 
 Two output formats:
 
@@ -188,9 +189,10 @@ def _summary_grid(view: dict, devices: list, profile: Optional[dict]) -> tuple[l
 
     Column order follows the reference lot sheet (LOCATE 140B): identity → the bench
     result columns (auto-filled where the utility observes them, blank placeholders for
-    the manual/iNTouch ones — see MANUAL_COLUMNS) → the per-item coverage detail →
-    verdict/remarks. The footer is the sheet's sign-off block, mostly blank for hand
-    entry."""
+    the manual/iNTouch ones — see MANUAL_COLUMNS) → required-coverage fraction →
+    verdict/remarks. The per-packet coverage columns are deliberately NOT here — that
+    detail lives on each device's own sheet. The footer is the sheet's sign-off block,
+    mostly blank for hand entry."""
     label = (profile or {}).get("label") or view.get("identified_as") or view.get("protocol") or ""
     started = view.get("started_at")
     rows: list = []
@@ -213,21 +215,17 @@ def _summary_grid(view: dict, devices: list, profile: Optional[dict]) -> tuple[l
     rows.append(["Lot Size:", lot.get("lot_size", "")])
     rows.append([])
 
-    # item columns follow the profile catalogue order; devices without coverage still get
-    # the identity/verdict columns
-    catalog = devices[0].get("coverage") or [] if devices else []
+    # NO per-coverage-item columns here — the per-packet detail lives on each device's own
+    # sheet (bench decision: the lot Summary stays at the reference sheet's altitude, one
+    # readable row per device; "Required" still carries the coverage fraction).
     head = (["S.No", "Mobile No", "IMEI", "Serial", "Firmware", "Vendor ID", "Packets",
              "GSM Fix", "GPS Fix", "Data on Static"]
             + [label for _, label in MANUAL_COLUMNS]
-            + [_item_label(c) for c in catalog]
             + ["Required", "Verdict", "Remarks"])
     header_idx = len(rows)
     rows.append(head)
 
     for i, dev in enumerate(devices, start=1):
-        skipped = set(dev.get("skipped") or [])
-        cov = dev.get("coverage") or []
-        by_key = {c.get("key"): c for c in cov}
         manual = manual_all.get(dev.get("device_id", "")) or {}
         got_data = "OK" if dev.get("packet_count") else ""
         row = [i,
@@ -240,9 +238,6 @@ def _summary_grid(view: dict, devices: list, profile: Optional[dict]) -> tuple[l
                _gps_fix_ok(dev),                         # GPS Fix — a valid fix was seen
                got_data]                                 # Data on Static — packets landed here
         row += [manual.get(key, "") for key, _ in MANUAL_COLUMNS]
-        for c in catalog:
-            m = by_key.get(c.get("key"))
-            row.append(_item_state(m, skipped) if m else "")
         remarks = " · ".join(x for x in (_remarks(dev), manual.get("remarks", "")) if x)
         row += [_required_fraction(dev), verdict_label(dev.get("verdict", "")), remarks]
         rows.append(row)
