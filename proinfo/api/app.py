@@ -66,9 +66,36 @@ QC_PROFILES_DIR = Path(DATA_DIR) / "qc" / "profiles"   # per-protocol QC coverag
 # Defaults ship inside the package (like the web assets); data/qc/profiles overrides them.
 if getattr(sys, "frozen", False):
     QC_DEFAULTS_DIR = Path(getattr(sys, "_MEIPASS", ".")) / "proinfo" / "qc" / "profiles"
+    # Protocol-definition seed shipped in the exe (see packaging/Runway.spec). Copied into
+    # the empty data/protocols repository on first run so the send-command catalogue
+    # (ota_commands, e.g. AIS-140 SET:EIP) works from a bare exe — the QC coverage profiles
+    # are read straight from QC_DEFAULTS_DIR, but the protocol repo is user-writable so it
+    # is SEEDED rather than read-through.
+    PROTOCOLS_SEED_DIR = Path(getattr(sys, "_MEIPASS", ".")) / "_defaults" / "protocols"
 else:
     QC_DEFAULTS_DIR = Path(__file__).resolve().parent.parent / "qc" / "profiles"
+    PROTOCOLS_SEED_DIR = Path(DATA_DIR) / "protocols"   # dev: repo already is the source
 _SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
+
+
+def _seed_protocols() -> None:
+    """First-run seed: if the protocol repository has no definitions yet, copy the ones
+    bundled in the exe into it. Keeps a shared exe self-contained (the send-command
+    catalogue needs these) and survives a user deleting data/ to reset. A no-op in a dev
+    checkout (the seed dir IS the repo) and whenever the repo already has files."""
+    import shutil
+    try:
+        src = PROTOCOLS_SEED_DIR
+        if src == PROTOCOLS_DIR or not src.is_dir():
+            return
+        if any(PROTOCOLS_DIR.iterdir()):        # already populated — never overwrite
+            return
+        for f in src.iterdir():
+            if f.is_file():
+                shutil.copy2(f, PROTOCOLS_DIR / f.name)
+        log.info("seeded protocol repository from %s", src)
+    except Exception:
+        log.exception("could not seed protocol repository")
 
 # Two runtime logs (Diagnostics → Logs):
 #   runway.log         — all activity (INFO+), small + frequently rotated (churns).
@@ -189,6 +216,7 @@ def _backup_db_daily() -> None:
 async def lifespan(_: FastAPI):
     registry.load_plugins()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _seed_protocols()
     _qc_reconcile_startup()
     _backup_db_daily()
     try:

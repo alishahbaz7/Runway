@@ -58,6 +58,16 @@ session no longer starts the packet tables blank.
   Braking, Harsh Acceleration, Rash Turning** (all now `required` + `skippable`); every
   other item is mandatory. `skippable` is carried through `engine.coverage` and the ledger.
 
+### Packaging — first shareable release
+- **`Runway.exe` now seeds the protocol repository on first run.** The protocol
+  definitions (the `ota_commands` catalogue behind the send-command dialog, incl. the
+  AIS-140 IP/port setters) ship inside the exe and are copied into an empty
+  `data/protocols` on startup — so the send catalogue works from a bare exe and survives
+  a `data/` reset. Bundled via `packaging/Runway.spec`; seeded by `app.py:_seed_protocols`.
+- **Release ZIP refreshed for the QC workflow**: `packaging/build_release.py` now writes a
+  QC-first `GETTING_STARTED.txt` (Device QC session → coverage → report → send commands)
+  and ships `samples/ais140_sample.log` alongside the Teltonika/NMEA samples.
+
 ### Added
 - **Coverage ledger** (`proinfo/qc/ledger.py`): per-device QC state now *accumulates* —
   every record is folded in exactly once as it arrives, so a long session can no longer

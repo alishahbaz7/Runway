@@ -32,7 +32,10 @@ Runway {ver} — standalone build (Windows 64-bit)
 
 WHAT IT IS
   Runway parses, visualizes and relays telematics packets from IoT tracking
-  devices (Teltonika, GT06/Concox, NMEA, ...), regardless of OEM/protocol.
+  devices (AIS-140 / Locate 140B, Teltonika, GT06/Concox, NMEA, ...) regardless
+  of OEM/protocol. Its main job on the bench is DEVICE QC: watch a device's
+  live packets, check coverage against the protocol's QC profile, and export the
+  per-lot QC report.
 
 RUN IT
   1. Double-click  Runway.exe
@@ -42,23 +45,37 @@ RUN IT
   3. To stop: close the console window.
 
   A "data" folder is created next to Runway.exe on first run (database, logs,
-  and the signature/protocol repositories). Delete it to reset to a clean state.
+  QC captures, and the protocol/signature repositories). The protocol
+  definitions ship inside the exe and are copied in on first run, so the
+  send-command catalogue works out of the box. Delete "data" to reset.
+
+DEVICE QC (the main workflow)
+  1. Capture -> New session -> Device QC. Pick the protocol (or Auto-detect) and
+     a port, bind 0.0.0.0 so trackers on the LAN can reach it, and Start.
+  2. Point the device at  <this-PC-IP>:<port>. As packets arrive the Summary
+     view fills in: device details, per-item coverage (Packets / Emergency /
+     Alerts), and a live verdict.
+  3. Mandatory items must be received; only the profile's skippable alerts can be
+     waived. Stop the session and use  Report  to export the per-lot QC workbook
+     (Summary sheet + one sheet per device). Fill the bench-only fields under
+     "Lot details" first so they print on the report.
+  4. Send downlink commands with the paper-plane button. IP/port SET commands
+     (PIP/EIP/GIP) pre-fill this session's port; with several devices connected
+     you can send one command to all of them at once.
+
+  A resumed session keeps everything received earlier — packets, coverage and
+  device details are restored from its capture file, so restarting the server or
+  the session does not start the Summary blank.
 
 TRY IT (no device needed)
-  - Tools -> Packet Parser: open samples/teltonika_demo.hex, copy the hex and
-    paste it in, click Decode. You'll see decoded records, a table and a map.
+  - Tools -> Packet Parser: open samples/ais140_sample.log (or
+    samples/teltonika_demo.hex), paste it in and Decode — records, table, map.
   - Tools -> Converter: load a CanPlus *.Config.XML to view/edit CAN signals and
     export JSON / DBC.
 
-CONNECT REAL DEVICES
-  - Capture -> Live TCP: Start a listener (pick codec + port, bind 0.0.0.0 so it's
-    reachable on the LAN). Point your trackers at  <this-PC-IP>:<port>.
-  - Watch connected clients + a live packet feed; send downlink commands; every
-    packet also appears on the Dashboard.
-
 COMMAND LINE (optional)
   Runway.exe serve --port 9000 --no-browser
-  Runway.exe replay samples\\teltonika_demo.hex --codec teltonika
+  Runway.exe replay samples\\ais140_sample.log --codec ais140
   Runway.exe codecs
 
 NOTES
@@ -93,8 +110,11 @@ def main() -> int:
     shutil.copy2(exe, stage / "Runway.exe")
     (stage / "GETTING_STARTED.txt").write_text(GUIDE.format(ver=VER), encoding="utf-8")
     _copy_if(ROOT / "CHANGELOG.md", stage / "CHANGELOG.md")
-    _copy_if(ROOT / "samples" / "teltonika_demo.hex", stage / "samples" / "teltonika_demo.hex")
     _copy_if(ROOT / "samples" / "README.md", stage / "samples" / "README.md")
+    # sample inputs a teammate can try in the Parser without a device — AIS-140 first,
+    # since that's the primary QC protocol
+    _copy_if(ROOT / "tests" / "fixtures" / "ais140_sample.log", stage / "samples" / "ais140_sample.log")
+    _copy_if(ROOT / "samples" / "teltonika_demo.hex", stage / "samples" / "teltonika_demo.hex")
     _copy_if(ROOT / "tests" / "fixtures" / "nmea_sample.log", stage / "samples" / "nmea_sample.log")
 
     zpath = ROOT / "dist" / f"{name}.zip"

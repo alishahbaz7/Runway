@@ -17,6 +17,10 @@ from PyInstaller.utils.hooks import collect_submodules
 datas = [
     ("../proinfo/web", "proinfo/web"),
     ("../proinfo/qc/profiles", "proinfo/qc/profiles"),
+    # Protocol definitions (ota_commands catalogue etc.) — seeded into data/protocols on
+    # first run by app.py:_seed_protocols so the send-command catalogue works from a bare
+    # exe. Kept OUT of proinfo/ so it can't be mistaken for an importable package.
+    ("../data/protocols", "_defaults/protocols"),
 ]
 
 # uvicorn loads its protocol/loop backends by string; websockets and the proinfo plugins
