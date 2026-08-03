@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "proinfo"
-version = "1.1.22"
-description = "ProInfo - Unified telematics protocol parser, visualizer & relay utility"
+name = "runway"
+version = "1.1.24"
+description = "Runway - Unified telematics protocol parser, visualizer & relay utility"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Shahbaz Khan", email = "shahbaz.khan@mapmyindia.com" }]
@@ -26,13 +26,13 @@ mqtt = ["aiomqtt>=2.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
 [project.scripts]
-proinfo = "proinfo.cli:main"
+runway = "runway.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["proinfo*"]
+include = ["runway*"]
 
 [tool.setuptools.package-data]
-proinfo = ["web/*", "qc/profiles/*.json"]
+runway = ["web/*", "qc/profiles/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

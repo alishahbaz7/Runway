@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from proinfo import __version__ as VER  # noqa: E402
+from runway import __version__ as VER  # noqa: E402
 
 GUIDE = """\
 Runway {ver} — standalone build (Windows 64-bit)

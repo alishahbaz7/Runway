@@ -10,7 +10,7 @@ from __future__ import annotations
 import multiprocessing
 import sys
 
-from proinfo.cli import main
+from runway.cli import main
 
 SUBCOMMANDS = {"serve", "replay", "listen", "codecs"}
 

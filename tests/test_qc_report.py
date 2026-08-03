@@ -1,4 +1,4 @@
-"""QC report export (proinfo/qc/report.py): the per-lot deliverable — Sheet 1 "Summary"
+"""QC report export (runway/qc/report.py): the per-lot deliverable — Sheet 1 "Summary"
 with one row per device, plus one sheet per device titled with its IMEI carrying the
 Summary view's coverage detail (item / required / count / last raw packet).
 
@@ -12,7 +12,7 @@ import csv
 import io
 import zipfile
 
-from proinfo.qc import report
+from runway.qc import report
 
 IMEI_A = "861329080405658"
 IMEI_B = "861329080406565"
@@ -159,7 +159,7 @@ def test_infer_protocol_from_persisted_coverage():
     (rows damaged by the old self-heal path, which lost identified_as/packet_count)."""
     import json as _json
 
-    from proinfo.api.app import _infer_protocol_from_devices
+    from runway.api.app import _infer_protocol_from_devices
 
     devices = _sample_devices()                          # keys login/emr/alert_7 ⊆ ais140
     proto, packets = _infer_protocol_from_devices(_json.dumps(devices))

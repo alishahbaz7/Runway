@@ -6,7 +6,7 @@ live store, so the device then shows on the Dashboard (which reads that store).
 
 from __future__ import annotations
 
-from proinfo.core.crc import crc16_ibm, crc_itu
+from runway.core.crc import crc16_ibm, crc_itu
 
 
 def _ttk(record: bytes, codec_id: int = 0x08, count: int = 1) -> bytes:
@@ -34,7 +34,7 @@ def _rec8() -> bytes:
 async def test_signatures_crud():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     name = "pytest_sig_zz"
     content = {"905": [{"fieldName": "Charger_status", "startingBit": 16, "size": 8}]}
@@ -65,7 +65,7 @@ async def test_signatures_crud():
 async def test_protocols_crud():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     name = "pytest_proto_zz"
     content = {"profile": {"vendor": "ACME"},
@@ -104,7 +104,7 @@ async def test_protocols_crud():
 async def test_convert_canplus_to_dbc_and_json():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     xml = (
         '<CanData><Variable_Descriptors>'
@@ -140,7 +140,7 @@ async def test_tcp_listen_connect_send_stop():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -204,7 +204,7 @@ async def test_qc_start_identify_record_stop():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -287,7 +287,7 @@ async def test_qc_resume_reuses_same_session():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -358,7 +358,7 @@ async def test_qc_self_heals_status_on_bind_failure():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -411,7 +411,7 @@ async def test_qc_manual_mode_and_gt06_device_id_not_placeholder():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -464,7 +464,7 @@ async def test_qc_device_id_is_unique_identifier_across_sessions():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -556,7 +556,7 @@ async def test_qc_checks_pass_with_imei_and_valid_fix():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -612,7 +612,7 @@ async def test_qc_checks_fail_with_no_gps_fix():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket()
@@ -671,15 +671,15 @@ def _ais140_pvt(imei: bytes, alert_id: int) -> bytes:
 async def test_qc_device_summary_firmware_and_alarm_coverage():
     """QC device drill-down (click IMEI): firmware from the login packet + a checklist of
     every alarm the AIS-140 codec's alarm_catalog defines (16 total), seen vs never-seen,
-    aggregated from proinfo.storage.live's process-wide per-device history -- not scoped
+    aggregated from runway.storage.live's process-wide per-device history -- not scoped
     to this one QC session, same cross-session identity model as prior_sessions."""
     import asyncio
     import socket
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
-    from proinfo.codecs.ais140 import Ais140Codec
+    from runway.api.app import app
+    from runway.codecs.ais140 import Ais140Codec
 
     def _free_port():
         s = socket.socket()
@@ -733,7 +733,7 @@ async def test_qc_device_summary_firmware_and_alarm_coverage():
 async def test_qc_device_summary_404_for_unknown_device():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/qc/device/no-such-imei-ever")
@@ -745,7 +745,7 @@ async def test_parse_stream_emits_result():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     # good + garbage + good -> streamed result decodes both, skips the junk
     good = _ttk(_rec8())
@@ -762,7 +762,7 @@ async def test_parse_stream_emits_result():
 async def test_params_lists_avl_names():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/params")
@@ -774,8 +774,8 @@ async def test_params_lists_avl_names():
 async def test_ingest_populates_live_store():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
-    from proinfo.storage.live import store
+    from runway.api.app import app
+    from runway.storage.live import store
 
     imei = b"356307042441099"                       # distinct id for this test
     handshake = len(imei).to_bytes(2, "big") + imei
@@ -805,7 +805,7 @@ async def test_qc_reconciles_stale_sessions_from_previous_process():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import _qc_reconcile_startup, app, db
+    from runway.api.app import _qc_reconcile_startup, app, db
 
     # simulate leftovers from a previous process: a "running" row + a stopped row, both
     # pointing at job ids this process never created (or could reuse for NEW jobs)
@@ -856,7 +856,7 @@ async def test_qc_stop_and_remove_while_device_connected():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -910,7 +910,7 @@ async def test_qc_coverage_and_verdict_states():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -982,7 +982,7 @@ async def test_qc_dedups_device_across_reconnect():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -1029,7 +1029,7 @@ async def test_qc_device_serial_and_prior_status_across_sessions():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -1100,7 +1100,7 @@ async def test_qc_device_last_packet_vitals():
 
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     def _free_port():
         s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p

@@ -1,4 +1,4 @@
-"""CoverageLedger (proinfo/qc/ledger.py): per-device QC state must ACCUMULATE — the
+"""CoverageLedger (runway/qc/ledger.py): per-device QC state must ACCUMULATE — the
 in-memory record list is a bounded window, and recomputing coverage over it meant a long
 session forgot its own history (a login seen at minute 0 "unhappened" once 5000 later
 packets pushed it out, flipping a passing device back to IN PROGRESS). Also covers field
@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import proinfo.qc.session as qc_session
-from proinfo.core.models import Position, UnifiedRecord
-from proinfo.qc import engine
-from proinfo.qc.ledger import CoverageLedger
-from proinfo.qc.session import QcCaptureSink
+import runway.qc.session as qc_session
+from runway.core.models import Position, UnifiedRecord
+from runway.qc import engine
+from runway.qc.ledger import CoverageLedger
+from runway.qc.session import QcCaptureSink
 
 IMEI = "861329080405658"
 

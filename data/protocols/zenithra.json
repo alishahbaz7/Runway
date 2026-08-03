@@ -1,0 +1,144 @@
+{
+  "schema": "1",
+  "profile": {
+    "vendor": "Zenithra",
+    "model": "Ax1 sCAN",
+    "standard": "AIS-140 (base packet) + CAN",
+    "doc_version": "derived from live capture (no vendor doc yet)",
+    "transport": "tcp",
+    "description": "Zenithra Ax1 sCAN ASCII/CSV protocol. The base packet is AIS-140 (India VLT mandate); over and above it the sentence carries the vehicle CAN bus inline as one field of ';'-separated <hex id>:<hex payload> frames. Comma-delimited sentences framed by $MMI,...*CC, one sentence per message, 38 fields. Wired into the live codec runway/codecs/zenithra.py (which derives from the AIS-140 codec); data/protocols/zenithra.py is the standalone transferable parser.",
+    "downlink": "The server -> device command set is not documented yet. The device is AIS-140-derived so the AIS-140 catalogue (see ais140.json ota_commands, e.g. +S*R:SET:VRN#...;) is the likely superset, but no command has been confirmed on this model — no ota_commands are declared here on purpose, so no unverified command is offered for sending."
+  },
+  "framing": {
+    "type": "delimited",
+    "start_char": "$",
+    "field_delimiter": ",",
+    "end_char": "*",
+    "checksum": {
+      "format": "2 ascii chars after *",
+      "algorithm": "unspecified",
+      "note": "Carried through verbatim, NOT verified. The two captured sentences end in *A4 and *46, which match no standard XOR or additive checksum over the sentence body (or any substring of it common to both), so the field is informational/vendor-specific — same situation as the AIS-140 spec's own examples."
+    },
+    "line_terminator": "CRLF in the capture; the parser accepts CR/LF/none."
+  },
+  "dispatch": {
+    "rule": "strip the leading '$', split on ',' — token[0] is the header and token[1:] are its fields (1-based index in each packet type's field list below). The device opens the connection with an AIS-140 'LGN' login (confirmed) and then sends 'MMI' data sentences. Health (HLP/HEL) and emergency (EPB) have not been captured on this model; if they appear, see ais140.json for their grammar.",
+    "headers": {
+      "LGN": "login (sent once per connection, before any data)",
+      "MMI": "normal + alert packet (with optional CAN payload)"
+    },
+    "identification": "The login is a plain AIS-140 $LGN and is NOT enough on its own to tell this device from a Locate 140B — except for field 4, the protocol-version literal, which is 'SCAN' here where AIS-140 sends 'AIS140'. Any tool that picks a parser from the first packet of a connection must key on that literal, or it will lock onto AIS-140 and then fail to parse every $MMI sentence that follows."
+  },
+  "packet_types": {
+    "LGN": {
+      "name": "Login Packet",
+      "description": "First packet sent immediately after the TCP connection is established. The AIS-140 login minus its vendor_id field, so IMEI and firmware sit one slot earlier than the AIS-140 v1.9 doc's 9-field layout — locate the IMEI by content (a 14-16 digit run) rather than by fixed position if both layouts must parse.",
+      "server_response": "+##Received OK",
+      "example": "$LGN,DL1CAB1234,868221073948609,5.1.29C,SCAN,28.550474,N,77.268893,E*5B",
+      "fields": [
+        {"index": 1, "name": "vehicle_reg_no", "type": "ascii", "example": "DL1CAB1234"},
+        {"index": 2, "name": "imei", "type": "ascii", "size": 15, "example": "868221073948609"},
+        {"index": 3, "name": "firmware_version", "type": "ascii", "note": "x.y.z with an optional build letter", "example": "5.1.29C"},
+        {"index": 4, "name": "protocol_version", "type": "ascii", "note": "'SCAN' — the Ax1 sCAN mode, and the only field that identifies this device family at login time (AIS-140 sends 'AIS140' here)", "example": "SCAN"},
+        {"index": 5, "name": "latitude", "type": "decimal", "unit": "degrees", "example": "28.550474"},
+        {"index": 6, "name": "latitude_dir", "type": "enum", "values": {"N": "north", "S": "south"}, "example": "N"},
+        {"index": 7, "name": "longitude", "type": "decimal", "unit": "degrees", "example": "77.268893"},
+        {"index": 8, "name": "longitude_dir", "type": "enum", "values": {"E": "east", "W": "west"}, "example": "E"}
+      ]
+    },
+    "MMI": {
+      "name": "Normal / Alert Packet",
+      "description": "Regular tracking packet, sent at the configured interval or on an alert; the same layout carries every alert subtype via packet_type + alert_id. The CAN field (36) is empty when the bus has nothing to report, so the field count is 38 either way.",
+      "server_response": "+##Received OK (assumed from the AIS-140 base — not yet confirmed on this model)",
+      "example": "$MMI,V2.2.0,5.1.29C,NR,1,L,868221073948609,DL1CAB1234,1,03082026,132621,28.550474,N,77.268893,E,0.0,0,29,225,0.98,0.51,IND airtel,1,1,13.5,4.1,O,31,404,10,946,E281316,0000,00,0.7,0.0,,(),000123*A4",
+      "example_with_can": "$MMI,V2.2.0,5.1.29C,NR,1,L,868221073948609,DL1CAB1234,1,03082026,130441,28.550492,N,77.268890,E,0.0,0,30,223,0.91,0.49,IND airtel,1,1,13.5,4.1,O,31,404,10,946,E28130C,0000,00,0.7,0.0,000000E1:000040A0010001E2;00000120:0002FEA200000000;0000012A:0004AE38000000EA,(),000007*46",
+      "note": "Fields 1-25 are the AIS-140 v1.9 normal-packet head field for field, except field 1 (a packet-format version here, not a vendor id). From field 26 the layouts diverge: AIS-140's emergency_status (its 26) is not sent, so everything after shifts one slot earlier; the 4 neighbour-cell triples (AIS-140 33-44) and the odometer (its 50) are not sent; the CAN field is new; and frame_number moves to the very end, after the OTA field. Field 37 (ota_update_details) is a parenthesized, comma-separated triple, so it must NOT be split on ',' with the rest — fold from '(' to ')' before indexing, and note that (unlike AIS-140) it is not the last field.",
+      "fields": [
+        {"index": 1, "name": "packet_version", "type": "ascii", "note": "packet-format version. AIS-140 carries a vendor_id in this slot; the only vendor token here is the $MMI header itself.", "example": "V2.2.0"},
+        {"index": 2, "name": "firmware_version", "type": "ascii", "example": "5.1.29C"},
+        {"index": 3, "name": "packet_type", "type": "enum", "note": "see packet_type_codes", "example": "NR"},
+        {"index": 4, "name": "alert_id", "type": "uint", "note": "see message_alert_ids; 1/2 are routine location updates, 3-16 are alerts", "example": "1"},
+        {"index": 5, "name": "packet_status", "type": "enum", "values": {"L": "live", "H": "history (buffered while GPRS was unavailable)"}, "example": "L"},
+        {"index": 6, "name": "imei", "type": "ascii", "size": 15, "example": "868221073948609"},
+        {"index": 7, "name": "vehicle_reg_no", "type": "ascii", "example": "DL1CAB1234"},
+        {"index": 8, "name": "gps_fix", "type": "bool", "values": {"1": "valid fix", "0": "no fix"}, "example": "1"},
+        {"index": 9, "name": "date", "type": "ascii", "format": "ddmmyyyy", "example": "03082026"},
+        {"index": 10, "name": "time", "type": "ascii", "format": "hhmmss", "note": "UTC", "example": "132621"},
+        {"index": 11, "name": "latitude", "type": "decimal", "unit": "degrees", "example": "28.550474"},
+        {"index": 12, "name": "latitude_dir", "type": "enum", "values": {"N": "north", "S": "south"}, "example": "N"},
+        {"index": 13, "name": "longitude", "type": "decimal", "unit": "degrees", "example": "77.268893"},
+        {"index": 14, "name": "longitude_dir", "type": "enum", "values": {"E": "east", "W": "west"}, "example": "E"},
+        {"index": 15, "name": "speed_kph", "type": "decimal", "unit": "km/h", "example": "0.0"},
+        {"index": 16, "name": "heading_deg", "type": "decimal", "unit": "degrees", "example": "0"},
+        {"index": 17, "name": "satellites", "type": "uint", "example": "29"},
+        {"index": 18, "name": "altitude_m", "type": "decimal", "unit": "m", "example": "225"},
+        {"index": 19, "name": "pdop", "type": "decimal", "example": "0.98"},
+        {"index": 20, "name": "hdop", "type": "decimal", "example": "0.51"},
+        {"index": 21, "name": "network_operator", "type": "ascii", "note": "may contain a space; never a comma", "example": "IND airtel"},
+        {"index": 22, "name": "ignition", "type": "bool", "values": {"1": "on", "0": "off"}, "example": "1"},
+        {"index": 23, "name": "main_power_status", "type": "enum", "values": {"1": "vehicle battery connected", "0": "vehicle battery disconnected"}, "example": "1"},
+        {"index": 24, "name": "main_input_voltage", "type": "decimal", "unit": "V", "example": "13.5"},
+        {"index": 25, "name": "internal_battery_voltage", "type": "decimal", "unit": "V", "example": "4.1"},
+        {"index": 26, "name": "tamper_alert", "type": "enum", "values": {"C": "cover closed", "O": "cover open"}, "note": "PROVISIONAL: read as AIS-140's tamper_alert (its field 27) because the captured value is the letter 'O', which matches that field's documented C/O value set — i.e. AIS-140's emergency_status (its 26, a 0/1 flag) is taken to be the field this protocol drops. Confirm against the vendor doc; if it is in fact emergency_status, this slot and the codec's io key both need renaming.", "example": "O"},
+        {"index": 27, "name": "gsm_signal", "type": "uint", "note": "0-31; 99 = not known/not detectable", "example": "31"},
+        {"index": 28, "name": "mcc", "type": "ascii", "example": "404"},
+        {"index": 29, "name": "mnc", "type": "ascii", "example": "10"},
+        {"index": 30, "name": "lac", "type": "hex_ascii", "example": "946"},
+        {"index": 31, "name": "cell_id", "type": "hex_ascii", "example": "E281316"},
+        {"index": 32, "name": "digital_input_status", "type": "bitfield", "format": "bbbb", "bits": ["din1", "din2", "din3_ignition", "din4_panic"], "note": "bit meanings assumed from the AIS-140 base — not confirmed on this model", "example": "0000"},
+        {"index": 33, "name": "digital_output_status", "type": "bitfield", "format": "bb", "bits": ["dout1", "dout2"], "example": "00"},
+        {"index": 34, "name": "analog_input_1", "type": "decimal", "unit": "V", "example": "0.7"},
+        {"index": 35, "name": "analog_input_2", "type": "decimal", "unit": "V", "example": "0.0"},
+        {"index": 36, "name": "can_data", "type": "group", "note": "This protocol's addition to the AIS-140 base — the vehicle CAN bus, inline. Empty when there is nothing to report. See the can_data section for the grammar.", "example": "000000E1:000040A0010001E2;00000120:0002FEA200000000"},
+        {"index": 37, "name": "ota_update_details", "type": "parenthesized", "format": "(<source>,<parameter id>,<status>)", "note": "'()' when idle. May contain commas, so fold '(' .. ')' back into one field before indexing — and unlike AIS-140 this is NOT the last field.", "example": "()"},
+        {"index": 38, "name": "frame_number", "type": "uint", "note": "PROVISIONAL: 6-digit zero-padded sequence number, matching the AIS-140 frame_number format (its field 47). Read as a counter rather than an odometer because it advanced 000007 -> 000123 between two captures 22 minutes apart while the device reported 0.0 km/h throughout. Confirm against the vendor doc before treating it as distance.", "example": "000123"}
+      ]
+    }
+  },
+  "can_data": {
+    "field": 36,
+    "format": "<frame>[;<frame>...] where <frame> = <can_id_hex>:<payload_hex>",
+    "frame_separator": ";",
+    "id_payload_separator": ":",
+    "can_id": {"type": "hex_ascii", "note": "zero-padded to 8 hex digits in the capture; values seen are 11-bit ids (0x0E1 .. 0x5B9). An id above 0x7FF is a 29-bit extended id.", "example": "000000E1"},
+    "payload": {"type": "hex_ascii", "note": "big-endian byte order as received off the bus; 16 hex chars = 8 bytes (a full CAN 2.0 frame) in every captured frame.", "example": "000040A0010001E2"},
+    "empty": "the field is present but empty (two consecutive commas) when the packet carries no CAN data",
+    "note": "Signal-level meaning is per vehicle, not per protocol: pair these frames with a DBC or CanPlus signature to scale them into engineering values (runway/convert/canplus.py). The parser therefore returns frames verbatim plus the derived numeric id / dlc, and does no scaling.",
+    "example": "000000E1:000040A0010001E2;00000120:0002FEA200000000;0000012A:0004AE38000000EA;0000016C:0FFC800050043C1B;000005B9:0000000058590000"
+  },
+  "packet_type_codes": {
+    "note": "Inherited from the AIS-140 base packet; only NR has been observed on this model so far.",
+    "NR": "normal",
+    "EA": "emergency alert",
+    "TA": "tamper alert",
+    "HP": "health packet",
+    "IN": "ignition on",
+    "IF": "ignition off",
+    "BD": "battery disconnect",
+    "BR": "battery reconnect",
+    "BL": "internal battery low",
+    "OT": "OTA update alert",
+    "RT": "rash turn",
+    "HB": "harsh braking",
+    "HA": "harsh acceleration"
+  },
+  "message_alert_ids": {
+    "1": "Location Update (default)",
+    "2": "Location Update (history) — buffered while GPRS was unavailable",
+    "3": "Alert – Disconnect from main battery",
+    "4": "Alert – Low battery",
+    "5": "Alert – Low battery removed",
+    "6": "Alert – Connect back to main battery",
+    "7": "Alert – Ignition ON",
+    "8": "Alert – Ignition OFF",
+    "9": "Alert – GPS box opened (optional)",
+    "10": "Alert – Emergency state ON",
+    "11": "Alert – Emergency state OFF",
+    "12": "Alert – Over-the-air parameter change",
+    "13": "Harsh Braking",
+    "14": "Harsh Acceleration",
+    "15": "Rash Turning",
+    "16": "Device Tampered (emergency button wire disconnect/cut)"
+  },
+  "source": "Live capture from IMEI 868221073948609 (fw 5.1.29C, packet version V2.2.0) on 03-08-2026: the $LGN login plus $MMI NR sentences with and without CAN data, over a real TCP session at a 10 s reporting interval. No vendor protocol document available yet; the field mapping is derived from those samples against AIS140_Protocol_Description_v1.9, and every deviation/assumption is flagged in the field notes above."
+}

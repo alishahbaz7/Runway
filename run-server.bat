@@ -1,5 +1,5 @@
 @echo off
-REM Double-click this file (or run it) to start the ProInfo server.
+REM Double-click this file (or run it) to start the Runway server.
 REM It opens the dashboard + packet parser on http://127.0.0.1:8080
 REM
 REM The server always runs from the repo-local .venv (created on first run), never from
@@ -22,7 +22,7 @@ if errorlevel 1 (
     if errorlevel 1 goto :err
 )
 
-echo Starting ProInfo server...  (close this window or press Ctrl+C to stop)
+echo Starting Runway server...  (close this window or press Ctrl+C to stop)
 echo Dashboard: http://127.0.0.1:8080
 echo Parser:    http://127.0.0.1:8080/parser.html
 ".venv\Scripts\python.exe" main.py

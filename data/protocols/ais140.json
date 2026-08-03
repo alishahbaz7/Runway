@@ -6,7 +6,7 @@
     "standard": "AIS-140",
     "doc_version": "v1.9",
     "transport": "tcp",
-    "description": "AIS-140 (India VLT mandate) ASCII/CSV protocol as implemented on the Locate 140B tracker. Comma-delimited sentences framed by $...*CC, one sentence per message. Declarative grammar only — not wired into a live ProInfo codec; add a proinfo/codecs/ codec from this file if/when live decode is needed."
+    "description": "AIS-140 (India VLT mandate) ASCII/CSV protocol as implemented on the Locate 140B tracker. Comma-delimited sentences framed by $...*CC, one sentence per message. Declarative grammar only — not wired into a live Runway codec; add a runway/codecs/ codec from this file if/when live decode is needed."
   },
 
   "framing": {

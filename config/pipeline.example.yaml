@@ -1,12 +1,12 @@
-# ProInfo - declarative pipeline config (REFERENCE / ROADMAP M5)
+# Runway - declarative pipeline config (REFERENCE / ROADMAP M5)
 #
-# This is the planned format for `proinfo run config.yaml`, which will wire one or more
+# This is the planned format for `runway run config.yaml`, which will wire one or more
 # Source -> Codec -> Sinks pipelines without writing code. Today, pipelines are started
-# via the CLI (`proinfo replay/listen`) and the dashboard/API; this file documents the
+# via the CLI (`runway replay/listen`) and the dashboard/API; this file documents the
 # intended shape so plugin authors can design toward it.
 #
 # Each pipeline names one source, one codec (or "auto"), and any number of sinks.
-# `type:` values are the plugin `name` attributes (see `proinfo codecs`, etc.).
+# `type:` values are the plugin `name` attributes (see `runway codecs`, etc.).
 
 pipelines:
   # 1) Live GT06 fleet: listen, show on dashboard, persist, and relay raw to platform.

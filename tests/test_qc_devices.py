@@ -1,4 +1,4 @@
-"""Persistent, IMEI-keyed QC device registry (proinfo/storage/db.py's qc_devices table):
+"""Persistent, IMEI-keyed QC device registry (runway/storage/db.py's qc_devices table):
 a stable serial number per unique device (never reassigned on reconnect), and a "last
 known QC status" that only updates on a FINAL verdict — never clobbered by a still
 in-progress session — so a returning device's prior result stays visible until its new
@@ -7,7 +7,7 @@ run finalizes.
 
 from __future__ import annotations
 
-from proinfo.storage.live import db
+from runway.storage.live import db
 
 
 def test_same_imei_keeps_its_serial_new_imei_increments():

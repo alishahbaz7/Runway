@@ -1,7 +1,150 @@
 # Changelog
 
-All notable changes to **Runway** (package `proinfo`) are recorded here.
+All notable changes to **Runway** are recorded here (released as *ProInfo* through v1.1.23 —
+see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
+
+## [1.1.24] — 2026-08-03
+
+Rename release. Headline: **the project is called Runway everywhere.** No behaviour changes.
+
+### Changed
+- **`ProInfo` → `Runway` across the whole project.** The app, the exe and the UI were already
+  branded Runway while the repo, the Python package and the CLI still said `proinfo` — two names
+  for one thing, which cost time on every navigation. Now: repository/folder `Runway`, package
+  `runway/` (was `proinfo/`), imports `from runway...`, console script **`runway serve`** (was
+  `proinfo serve`), distribution name `runway`. 261 occurrences across 61 files; the names that
+  were already correct (`Runway.exe`, `RUNWAY_DATA_DIR`, `data/runway.log`, the `runway.*`
+  browser-storage keys) are untouched, so **no saved setting or page state is lost**.
+- **The database is `data/runway.db`** (was `data/proinfo.db`) and **adopts the old file on the
+  first start** — devices, captures, profiles, QC devices and settings all carry over with no
+  manual step (`db.adopt_legacy_db`). The `-wal`/`-shm` siblings move with it, so writes that had
+  not been checkpointed yet are not lost. Adoption also fires when a *row-empty* `runway.db`
+  already exists, which is what you get if the app is started once before migrating — without
+  that, a single stray start would have orphaned the history silently. A `runway.db` that holds
+  real rows is never overwritten, and a locked file is skipped rather than failing the start.
+
+### Notes
+- `ProInfo` (Pro=protocol, Info=information) survives only in this changelog. Releases up to and
+  including 1.1.23 were published under that name.
+- **After pulling this, restart the app** — a running server is still executing the old
+  `proinfo/` module tree, and the database adopts itself on the next start.
+- Reinstall if you had an editable/console-script install: `pip install -e ".[dev]"` (the old
+  `proinfo` command is gone).
+
+## [1.1.23] — 2026-08-03
+
+Protocol release. Headline: **Zenithra Ax1 sCAN is onboarded** — an AIS-140 base packet that
+carries the vehicle CAN bus inline.
+
+### Added
+- **New protocol: Zenithra Ax1 sCAN** (`zenithra`) — `$MMI` ASCII/CSV sentences, 38 fields.
+  The base packet is AIS-140, so the codec (`runway/codecs/zenithra.py`) *derives* from the
+  AIS-140 codec and reuses its framing, field helpers, packet-type/alert vocabularies and
+  login/health/emergency builders; what it adds is the `$MMI` layout, which diverges from
+  field 26 on (no `emergency_status`, no neighbour-cell triples, no odometer, and
+  `frame_number` moved to the very end after the OTA field).
+- **CAN data is decoded structurally.** The sentence's CAN field (`;`-separated
+  `<hex id>:<hex payload>` frames) is located *by content*, so a firmware that shifts the
+  tail still yields its bus data. Each frame arrives in `io["can"]` as
+  `{id, id_int, extended, data, dlc}` — raw bytes preserved, plus the numeric id and its
+  11-bit/29-bit class — with `io["can_frame_count"]` on every packet (0 when the CAN slot is
+  empty, which is a normal packet, not an error). No signal scaling is applied: that needs a
+  per-vehicle DBC/CanPlus signature, not a protocol.
+- **Protocol repository entries**: `data/protocols/zenithra.json` (declarative field grammar,
+  every field mapped against the AIS-140 base, with each assumption flagged) and
+  `data/protocols/zenithra.py` (zero-dependency standalone parser for transfer to other
+  utilities) — the same pair AIS-140 and Teltonika ship.
+- **CAN frames are visualized, not dumped.** A packet's bus frames now render as a table
+  (CAN ID · 11/29-bit · DLC · payload bytes) in the **Dashboard inspector** and in the
+  **Capture packet view**, and are folded out of the JSON blocks with a `[n frames]`
+  placeholder — a single packet carrying two dozen frames used to push every other decoded
+  field off the screen. Payloads stay raw on purpose (engineering values need a per-vehicle
+  DBC/CanPlus signature, which lives in the Converter). An opt-in **CAN frames** column in
+  the Dashboard packet table shows the per-packet frame count.
+
+### Added — bind a vehicle signature to a device
+- **A signature bound to a device decodes that device's CAN frames everywhere.** The binding is
+  applied by a new pipeline hook (`Pipeline(..., enrich=…)`) that runs once per record *before*
+  any sink sees it, so the decoded signals show up on the **Dashboard**, in the **Capture packet
+  view**, in a QC session's capture and in the Parser's breakdown — one binding, every surface,
+  no per-view wiring. Bindings live in `settings` as `{device_id -> signature}` with `"*"` as the
+  any-device default, are looked up per record (so binding takes effect on the **next packet** —
+  no restart, no relisten), and are managed on the **Signatures** page (`GET`/`PUT
+  /api/signature-bindings`).
+- **Decoded signals arrive as `io["can_signals"]`** — `{name, value, can_id, raw}` per signal,
+  plus `io["can_signal_count"]` and `io["can_signature"]`. The raw integer and source frame ride
+  along so an operator correcting a start bit can see exactly what was read. Dashboard and
+  Capture render a **CAN signals** table above the raw frames (and an opt-in *CAN signals* column
+  in the Dashboard packet table); both lists are folded out of the JSON dumps with a count.
+- **Static capture uses the same decoder**: the Parser's existing Signature control now travels
+  with the request (`signature` on `/api/parse`), so a pasted packet reads exactly like a live
+  one. Naming no signature falls back to the pasting device's own binding.
+- **The signature format's two key styles are kept apart** (`runway/convert/can_signals.py`):
+  8-hex-digit keys are CAN frame ids and bind to a device; short decimal keys are Teltonika AVL
+  parameter ids and are left to the Parser's AVL view. Without that guard an AVL id like `900`
+  would silently bind to CAN id `0x900` and invent signals. Scaling is the canonical DBC
+  convention — `physical = raw × multiplier + offset` — matching `CanSignal.decode` and the DBC
+  export, and a signature row that overruns its payload is skipped rather than losing the whole
+  frame's signals.
+
+### Added — the Parser works for every protocol, not one
+- **`Codec.explain()` — a new optional plugin hook.** A codec that can say more than a generic
+  walk (bit-level sizes, verified CRC, a parameter catalogue) returns its own breakdown;
+  `teltonika.py` does, so its field tree, CRC check and AVL grid are unchanged. Every other
+  codec gets the protocol-agnostic walk in `runway/codecs/generic_explain.py` for free. **No
+  caller branches on a protocol name any more.**
+- **The generic walk is driven by the protocol database.** Framing and values come from the
+  codec's own `decode()`; field names, units and value tables come from the declarative grammar
+  in `data/protocols/<codec>.json` — so the Parser shows the vendor's field names with per-field
+  byte offsets, and clicking a row highlights exactly those characters in the pasted text.
+  Grammars are read from the user's repository first and the shipped copy as fallback, so field
+  names survive a custom `RUNWAY_DATA_DIR`, a cleared `data/`, and a bare exe.
+  CAN payloads are expanded to one row per frame; anything the grammar hasn't caught up with is
+  still listed (positionally, or from the decoded record), so a codec with no grammar published
+  yet is inspectable the moment it is dropped in.
+- **A Protocol selector on the Parser page**, populated from `/api/codecs` — "Auto-detect" by
+  default, with any registered codec selectable to force one. The result line names the codec
+  that actually read the data, and the Dashboard sync now ingests through that same codec.
+
+### Fixed
+- **The Parser could not read any ASCII protocol at all.** Input was filtered down to its
+  hex-looking characters before anything parsed it, so a pasted `$MMI,…`/`$GPRMC,…` sentence was
+  shredded into nonsense bytes and came back "0/0 packet(s), 0 record(s)"; `/api/parse` then ran
+  the Teltonika explainer regardless of what the data was. The endpoint now decides *hex dump vs
+  device text* from the content (a paste's missing line terminator is restored for line-framed
+  protocols), and picks the codec by detection or by the operator's choice. Text that no codec
+  recognises is reported as such instead of being passed off as a decode; an unrecognised **hex**
+  dump still falls back to a generic hex view.
+- **Auto-detect no longer mis-identifies a Zenithra device as AIS-140.** The device opens the
+  connection with a plain AIS-140 `$LGN` login and only then sends `$MMI` data. Since a
+  session's codec is chosen once, from the first sample, auto-detect scored `ais140` 0.90 on
+  that login and locked the session onto it — every subsequent `$MMI` packet then decoded as
+  `message_type: "unknown"` with no fields (seen live on the bench at :4082). The Zenithra
+  codec now recognises its own login: the protocol-version field carries the literal `SCAN`
+  where AIS-140 sends `AIS140`, which scores 0.95 and wins — while a genuine Locate 140B login
+  is untouched and still goes to `ais140`. Covered by a regression test that runs the real
+  captured session (login + both `$MMI` packets) through `_pick_codec` end to end.
+- The AIS-140 login's firmware-by-content match now accepts a build letter (`5.1.29C`, not
+  just `01.3.0`), so firmware shows up in device details for this family.
+
+### Changed
+- `Ais140Codec` exposes its sentence-length resync valve as `max_sentence` (was a module
+  constant) so a derived sentence family can raise it — Zenithra allows 8 KB because a busy
+  CAN bus makes sentences far longer than 2 KB — and its placeholder device id is now derived
+  from the codec name (`zenithra-unknown` for the derived codec, `ais140-unknown` unchanged).
+
+### Notes / open items
+- Confirmed against a live session: the `$LGN` login plus `$MMI` NR captures with and without
+  CAN. Two field readings remain **provisional** and are flagged in both the codec docstring
+  and the JSON grammar — field 26 read as `tamper_alert` (assuming AIS-140's `emergency_status`
+  is the dropped field) and field 38 read as `frame_number` (not an odometer); neither blocks
+  CAN work, so they stay as-is until the vendor doc lands. Only the `NR` packet type has been
+  captured; health/emergency sentences have not been seen on this model.
+- No QC coverage profile ships for `zenithra` yet, so a QC session on this protocol falls back
+  to the generic pass/fail checks instead of a coverage checklist. The downlink command set is
+  undocumented for this model, so no `ota_commands` are declared (the sender falls back to its
+  free-text/hex mode rather than offering an unverified command).
 
 ## [1.1.22] — 2026-07-17
 
@@ -69,7 +212,7 @@ session no longer starts the packet tables blank.
   and ships `samples/ais140_sample.log` alongside the Teltonika/NMEA samples.
 
 ### Added
-- **Coverage ledger** (`proinfo/qc/ledger.py`): per-device QC state now *accumulates* —
+- **Coverage ledger** (`runway/qc/ledger.py`): per-device QC state now *accumulates* —
   every record is folded in exactly once as it arrives, so a long session can no longer
   "forget" coverage it already earned when old packets fall out of the bounded in-memory
   window. Also the enforcement point for field validation: one implausible packet marks
@@ -109,11 +252,11 @@ session no longer starts the packet tables blank.
   surface as a real device row in the QC UI before the IMEI was learned.
 - Frozen (PyInstaller) builds: `ais140` added to the plugin fallback list so the codec
   still registers when module discovery comes up empty inside the archive, and the
-  default QC coverage profiles (`proinfo/qc/profiles`) are now bundled into the exe —
+  default QC coverage profiles (`runway/qc/profiles`) are now bundled into the exe —
   previously the packaged build had no coverage catalogue unless a user copy existed
   under `data/qc/profiles`.
 
-[1.1.22]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.22
+[1.1.22]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.22
 
 ## [1.1.21] — 2026-07-17
 
@@ -149,7 +292,7 @@ from the Capture page.
   spaced hex otherwise). Deviations listed at the end; protocols without a coverage
   profile fall back to the pass/fail checks table.
 - Backend: `GET /api/qc/{id}/export?fmt=xlsx|csv&devices=<imei,...>` (empty = all
-  devices; works on live *and* stopped sessions). Builder in `proinfo/qc/report.py`
+  devices; works on live *and* stopped sessions). Builder in `runway/qc/report.py`
   (framework-free); new runtime dependency **openpyxl** (lazy-imported — CSV export
   works without it), bundled in the PyInstaller spec.
 - Download name mirrors the bench's own files: `<item label> QC-<dd-mm-yyyy>-S<id>`.
@@ -176,7 +319,7 @@ from the Capture page.
   and the report use it instead of a hardcoded protocol list — and when the identity is
   genuinely unknown, printable packets are sniffed and shown as ASCII rather than hex.
 
-[1.1.21]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.21
+[1.1.21]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.21
 
 ## [1.1.20] — 2026-07-16
 
@@ -219,7 +362,7 @@ and a dedicated **Emergency server** coverage section.
   title no longer shows an IMEI; the feed header wraps on narrow windows instead of
   overlapping; the per-row reference-example substitution was off by one token.
 
-[1.1.20]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.20
+[1.1.20]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.20
 
 ## [1.1.14] — 2026-07-16
 
@@ -268,7 +411,7 @@ serial number and automatic recall of its last QC result.
   substitution (the `$NMP` header occupies token 0); fixed and verified against the real
   sentence layout.
 
-[1.1.14]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.14
+[1.1.14]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.14
 
 ## [1.1.8] — 2026-07-15
 
@@ -306,7 +449,7 @@ page** with a per-tab Testing/QC mode.
   what was actually received. Actions live in the modal header (top-right) to keep the
   body free for coverage. A single verdict+coverage pill (e.g. `IN PROGRESS · 2/13`)
   replaces the old separate checks-chip row and duplicate verdict badge.
-- **QC coverage profile** (`proinfo/qc/profiles/<protocol>.json`, overridable under
+- **QC coverage profile** (`runway/qc/profiles/<protocol>.json`, overridable under
   `data/qc/profiles/`): declares the expected packet types + alert ids for a protocol,
   which are required vs optional, and display grouping — editable without code changes.
 - New endpoints: `POST /api/qc/{id}/skip`, `POST /api/qc/{id}/finalize` (both per-device);
@@ -327,7 +470,7 @@ page** with a per-tab Testing/QC mode.
   reconciled on startup and self-heal on view; closing a tab no longer resurrects via a
   late poll/WebSocket update.
 
-[1.1.8]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.8
+[1.1.8]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.8
 
 ## [1.1.0] — 2026-06-30
 
@@ -417,9 +560,9 @@ relays telematics packets from any IoT tracking device, regardless of OEM/protoc
   A fresh server/browser session starts clean; the parser retains within a session.
 
 ### Notes
-- Internal connectivity verified: `proinfo/convert` is isolated (lazily imported by its
+- Internal connectivity verified: `runway/convert` is isolated (lazily imported by its
   endpoints; not a registered plugin), so the pipeline, dashboard and live store/hub are
   unaffected.
 
-[1.1.0]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.1.0
-[1.0.0]: https://github.com/alishahbaz7/ProInfo/releases/tag/v1.0.0
+[1.1.0]: https://github.com/alishahbaz7/Runway/releases/tag/v1.1.0
+[1.0.0]: https://github.com/alishahbaz7/Runway/releases/tag/v1.0.0

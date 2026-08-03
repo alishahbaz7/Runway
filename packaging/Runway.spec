@@ -11,23 +11,23 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 # Paths in a .spec are relative to the spec's folder (packaging/), so reach up with ../.
-# Bundle the static web UI at proinfo/web (app.py looks for it under _MEIPASS/proinfo/web)
-# and the default QC coverage profiles (app.py: _MEIPASS/proinfo/qc/profiles — without
+# Bundle the static web UI at runway/web (app.py looks for it under _MEIPASS/runway/web)
+# and the default QC coverage profiles (app.py: _MEIPASS/runway/qc/profiles — without
 # them the packaged exe has no coverage catalogue until a user copy lands in data/).
 datas = [
-    ("../proinfo/web", "proinfo/web"),
-    ("../proinfo/qc/profiles", "proinfo/qc/profiles"),
+    ("../runway/web", "runway/web"),
+    ("../runway/qc/profiles", "runway/qc/profiles"),
     # Protocol definitions (ota_commands catalogue etc.) — seeded into data/protocols on
     # first run by app.py:_seed_protocols so the send-command catalogue works from a bare
-    # exe. Kept OUT of proinfo/ so it can't be mistaken for an importable package.
+    # exe. Kept OUT of runway/ so it can't be mistaken for an importable package.
     ("../data/protocols", "_defaults/protocols"),
 ]
 
-# uvicorn loads its protocol/loop backends by string; websockets and the proinfo plugins
+# uvicorn loads its protocol/loop backends by string; websockets and the runway plugins
 # are imported dynamically — collect them all so nothing is missing at runtime.
 hiddenimports = (
     collect_submodules("uvicorn")
-    + collect_submodules("proinfo")
+    + collect_submodules("runway")
     + collect_submodules("websockets")
     # openpyxl is imported lazily by qc/report.py (XLS QC report export)
     + collect_submodules("openpyxl")

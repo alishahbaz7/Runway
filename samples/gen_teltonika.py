@@ -7,7 +7,7 @@ per line), which the file-replay source auto-detects.
 
 Usage:
     python samples/gen_teltonika.py            # writes samples/teltonika_demo.hex (2 devices)
-    proinfo replay samples/teltonika_demo.hex --codec teltonika
+    runway replay samples/teltonika_demo.hex --codec teltonika
     # or upload it in the dashboard (Codec = teltonika, Format = auto)
 """
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from proinfo.core.crc import crc16_ibm
+from runway.core.crc import crc16_ibm
 
 # Two devices, each starting at a point near Delhi and drifting east.
 DEVICES = [

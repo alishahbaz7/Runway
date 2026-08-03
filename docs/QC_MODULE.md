@@ -61,11 +61,11 @@ contract.
 
 ## Backend components (new modules)
 
-- `proinfo/qc/engine.py` — evaluate a session's records against a **check list** → results.
-- `proinfo/qc/report.py` — render a report (HTML → printable/PDF; JSON/CSV export).
-- `proinfo/qc/session.py` — QcSession lifecycle over a listener + capture.
-- `proinfo/integrations/intouch.py` — iNTouch client (`onboard(device)`, `status(device)`).
-- `proinfo/sources/serial_port.py` — RS232 `Source` (pyserial): read + `send()` config commands.
+- `runway/qc/engine.py` — evaluate a session's records against a **check list** → results.
+- `runway/qc/report.py` — render a report (HTML → printable/PDF; JSON/CSV export).
+- `runway/qc/session.py` — QcSession lifecycle over a listener + capture.
+- `runway/integrations/intouch.py` — iNTouch client (`onboard(device)`, `status(device)`).
+- `runway/sources/serial_port.py` — RS232 `Source` (pyserial): read + `send()` config commands.
 - API: `POST /api/qc/start` (port, protocol|auto), `POST /api/qc/{id}/stop`,
   `GET /api/qc/{id}` (live status + checks), `GET /api/qc/{id}/report(.pdf|.csv)`,
   `POST /api/qc/{id}/onboard` (iNTouch), `POST /api/qc/{id}/configure` (RS232).
@@ -123,14 +123,14 @@ Essentially a guided wrapper over the Live TCP listener + packet logging, with d
 Matches the planned breakdown; implemented as new files + small additions to existing ones
 (no changes needed to the codecs, Live TCP, or the pipeline's public behavior).
 
-- **`proinfo/storage/db.py`**: new `qc_sessions` table (append DDL) +
+- **`runway/storage/db.py`**: new `qc_sessions` table (append DDL) +
   `Storage.qc_sessions()/qc_session()/qc_update()`.
-- **`proinfo/qc/session.py`** (new): `QcCaptureSink(Sink)` — plugged into the QC job's
+- **`runway/qc/session.py`** (new): `QcCaptureSink(Sink)` — plugged into the QC job's
   `Pipeline` alongside the normal sinks. Learns `identified_as`/`device_id` from each
   decoded `UnifiedRecord` (works under `protocol_mode=auto` since identity isn't known
   until the first packets arrive) and appends every record to a per-session capture file
   (flush + throttled `fsync`, same durability approach as `PacketLog`).
-- **`proinfo/api/app.py`**: `QcStartBody`; `_qc_sinks` (qc_id → sink, live counters while
+- **`runway/api/app.py`**: `QcStartBody`; `_qc_sinks` (qc_id → sink, live counters while
   running); `POST /api/qc/start` (starts a `TcpServerSource` + `Pipeline` — reusing
   `_default_sinks()` so QC traffic still reaches the Dashboard — plus the `QcCaptureSink`;
   creates the DB row); `POST /api/qc/{id}/stop` (instant status flip, same pattern as
@@ -138,7 +138,7 @@ Matches the planned breakdown; implemented as new files + small additions to exi
   with live sink counters + the job's `connected` state); `GET /api/qc/{id}/capture`
   (download the capture file). *(Also fixed an unrelated pre-existing wart: two stray
   unused fields (`signature`, `status`) had been left on `LogStartBody`.)*
-- **`proinfo/web/qc.html` + `qc.js`** (new), rail item **Capture → Device QC**: Start form
+- **`runway/web/qc.html` + `qc.js`** (new), rail item **Capture → Device QC**: Start form
   (Port, IP auto-filled from the detected LAN IP, Protocol Auto-detect/Manual, Operator) →
   session cards (status, uptime, packet count, identified protocol once known, device id,
   Stop, Download capture once stopped) → click a card to focus it and see its live packet
@@ -218,7 +218,7 @@ while the session runs, finalized (and persisted) on Stop. The exportable report
 and RS232 (Target 4) are unchanged.
 
 **Default check set** (grounded in fields `UnifiedRecord` already has — see
-`proinfo/core/models.py` — not fabricated per-protocol fields):
+`runway/core/models.py` — not fabricated per-protocol fields):
 
 | key | pass condition | na when |
 |---|---|---|
@@ -235,7 +235,7 @@ verdict yet.
 `qc_sessions`.
 
 **Backend**:
-- `proinfo/qc/engine.py` (new, framework-free like `session.py`): `DEFAULT_CHECKS` +
+- `runway/qc/engine.py` (new, framework-free like `session.py`): `DEFAULT_CHECKS` +
   `evaluate(records, meta, config) -> (checks, verdict)`.
 - `QcCaptureSink` keeps the session's decoded records in memory too (bounded, e.g. last
   5000 — bench sessions are short), and recomputes checks on each `handle()`, same

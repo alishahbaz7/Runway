@@ -1,4 +1,4 @@
-"""Same-session QC retention (QcCaptureSink.rehydrate, proinfo/qc/session.py):
+"""Same-session QC retention (QcCaptureSink.rehydrate, runway/qc/session.py):
 a resumed/restarted QC session re-decodes its own append-only capture file, so the
 Summary (packet counts, coverage samples, device identity, timestamps) carries on where
 it left off instead of starting blank after a Stop, a crash or a server restart.
@@ -12,10 +12,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from proinfo.core import registry
-from proinfo.core.models import Session
-from proinfo.qc import engine
-from proinfo.qc.session import QcCaptureSink
+from runway.core import registry
+from runway.core.models import Session
+from runway.qc import engine
+from runway.qc.session import QcCaptureSink
 
 IMEI = "868329087318766"
 
@@ -33,7 +33,7 @@ HEL = b"$HEL,LOCT14A,2.2.5,868329087318766,68,30,0,10,600,0010,00*\r\n"
 STREAM = LGN + PVT_LIVE + PVT_HISTORY + HEL
 
 CATALOG = json.loads(
-    (Path(__file__).resolve().parents[1] / "proinfo" / "qc" / "profiles" / "ais140.json")
+    (Path(__file__).resolve().parents[1] / "runway" / "qc" / "profiles" / "ais140.json")
     .read_text(encoding="utf-8")
 )["coverage"]
 

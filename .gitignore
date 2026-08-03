@@ -21,7 +21,7 @@ htmlcov/
 .vscode/
 *.swp
 
-# ProInfo runtime data
+# Runway runtime data
 *.db
 *.sqlite
 *.sqlite3

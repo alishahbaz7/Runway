@@ -1,7 +1,7 @@
 # Runway — Session Notes
 
 Running handoff log. Newest session on top. Product name: **Runway** ("where telematics
-data lands & takes off"); internal Python package stays `proinfo`.
+data lands & takes off"); internal Python package stays `runway`.
 
 ---
 
@@ -86,7 +86,7 @@ without a manual restart.
 ### Also shipped (added after the main session)
 - **Converter** (Tools → Converter): upload a **CanPlus `*.Config.XML`** vehicle signature →
   view/edit the signals in a table → export **JSON** and **DBC**. Parser/exporters in
-  `proinfo/convert/canplus.py` (+ root `canplus_signature.py` CLI shim); endpoints
+  `runway/convert/canplus.py` (+ root `canplus_signature.py` CLI shim); endpoints
   `POST /api/convert/parse` and `/api/convert/export`. Descriptor decode is verified
   against the file's own mult/div; CAN-id low byte = descriptor byte 1 (SOC `0xAC` ↔ PID
   `0x3AC`). **Open:** field **start-bit/length** isn't in the XML — user edits it in the

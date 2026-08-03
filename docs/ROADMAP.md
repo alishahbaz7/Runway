@@ -1,4 +1,4 @@
-# ProInfo — Roadmap
+# Runway — Roadmap
 
 Mapped to the four pillars from the original brief. ✅ done · 🔨 in progress · ⬜ planned.
 
@@ -34,7 +34,7 @@ Mapped to the four pillars from the original brief. ✅ done · 🔨 in progress
 - ⬜ Store-and-forward with retry/queue when the platform is down
 
 ## M5 — Config-driven runner
-- ⬜ Declarative `config/pipeline.yaml` runner (`proinfo run config.yaml`) to wire
+- ⬜ Declarative `config/pipeline.yaml` runner (`runway run config.yaml`) to wire
       multiple Source→Codec→Sinks pipelines without code (format drafted in
       `config/pipeline.example.yaml`)
 - ⬜ Hot-reload pipelines

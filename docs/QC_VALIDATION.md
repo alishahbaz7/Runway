@@ -65,7 +65,7 @@ data/qc/profiles/ais140.json        (auto-seeded with defaults from the protocol
 
 ## New / changed pieces
 
-### Backend (all framework-free under `proinfo/qc/`, per the core-purity convention)
+### Backend (all framework-free under `runway/qc/`, per the core-purity convention)
 
 | Piece | What it does |
 |---|---|

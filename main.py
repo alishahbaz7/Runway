@@ -1,11 +1,11 @@
-"""ProInfo launcher — the simple way to start the app.
+"""Runway launcher — the simple way to start the app.
 
     python main.py                 # starts the web server (dashboard + parser) on :8080
     python main.py --port 9000     # ...on a different port
     python main.py replay samples/teltonika_demo.hex --codec teltonika
     python main.py codecs          # list available codecs
 
-This forwards to the real CLI in ``proinfo/cli.py``. With no sub-command it defaults to
+This forwards to the real CLI in ``runway/cli.py``. With no sub-command it defaults to
 ``serve``, so just running (or double-clicking) this file brings the server up.
 """
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from proinfo import __version__
-from proinfo.cli import main
+from runway import __version__
+from runway.cli import main
 
 SUBCOMMANDS = {"serve", "replay", "listen", "codecs"}
 

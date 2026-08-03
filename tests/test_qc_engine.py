@@ -1,4 +1,4 @@
-"""QC pass/fail checks (proinfo/qc/engine.py) — pure logic, no sockets/DB needed.
+"""QC pass/fail checks (runway/qc/engine.py) — pure logic, no sockets/DB needed.
 
 Each check's pass/fail/na branch gets a direct test; the docstring on each mirrors the
 check's meaning from docs/QC_MODULE.md so a failing assertion is self-explanatory.
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from proinfo.core.models import Position, UnifiedRecord
-from proinfo.qc import engine
+from runway.core.models import Position, UnifiedRecord
+from runway.qc import engine
 
 
 def _rec(**kw) -> UnifiedRecord:

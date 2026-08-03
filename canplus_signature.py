@@ -1,6 +1,6 @@
 """Standalone CLI shim — the CanPlus signature parser now lives in the package.
 
-Implementation: ``proinfo/convert/canplus.py`` (imported by the Converter UI too).
+Implementation: ``runway/convert/canplus.py`` (imported by the Converter UI too).
 This shim keeps ``python canplus_signature.py <file.xml>`` working from the repo root.
 
     python canplus_signature.py "MG_ZS EV_2020.Config.XML"            # table
@@ -8,7 +8,7 @@ This shim keeps ``python canplus_signature.py <file.xml>`` working from the repo
     python canplus_signature.py "MG_ZS EV_2020.Config.XML" --json     # export JSON
 """
 
-from proinfo.convert.canplus import (  # noqa: F401  (re-export for convenience)
+from runway.convert.canplus import (  # noqa: F401  (re-export for convenience)
     CanSignal, CanSignature, extract_bits, load, model_to_dbc, parse, to_model, _main,
 )
 
