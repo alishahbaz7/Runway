@@ -32,10 +32,10 @@ Runway {ver} — standalone build (Windows 64-bit)
 
 WHAT IT IS
   Runway parses, visualizes and relays telematics packets from IoT tracking
-  devices (AIS-140 / Locate 140B, Teltonika, GT06/Concox, NMEA, ...) regardless
-  of OEM/protocol. Its main job on the bench is DEVICE QC: watch a device's
-  live packets, check coverage against the protocol's QC profile, and export the
-  per-lot QC report.
+  devices (AIS-140 / Locate 140B, Zenithra Ax1 sCAN, Teltonika, GT06/Concox,
+  NMEA, ...) regardless of OEM/protocol. Its main job on the bench is DEVICE
+  QC: watch a device's live packets, check coverage against the protocol's QC
+  profile, and export the per-lot QC report.
 
 RUN IT
   1. Double-click  Runway.exe
@@ -114,6 +114,7 @@ def main() -> int:
     # sample inputs a teammate can try in the Parser without a device — AIS-140 first,
     # since that's the primary QC protocol
     _copy_if(ROOT / "tests" / "fixtures" / "ais140_sample.log", stage / "samples" / "ais140_sample.log")
+    _copy_if(ROOT / "tests" / "fixtures" / "zenithra_sample.log", stage / "samples" / "zenithra_sample.log")
     _copy_if(ROOT / "samples" / "teltonika_demo.hex", stage / "samples" / "teltonika_demo.hex")
     _copy_if(ROOT / "tests" / "fixtures" / "nmea_sample.log", stage / "samples" / "nmea_sample.log")
 
