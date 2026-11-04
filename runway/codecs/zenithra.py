@@ -33,6 +33,12 @@ another field-count branch inside ``ais140.py``: from field 26 onwards the two d
   38            47                  frame_number (AIS-140's odometer, 50, is not sent)
   ============  ==================  ================================================
 
+A second, **50-field** ``$MMI`` layout is confirmed from a live custom IMU packet (firmware
+5.1.30I): the full AIS-140 Locate 140 VB layout — ``emergency_status`` and the neighbour cells
+are back, no CAN field, and the parenthesized payload is last. Layouts are picked by shape from
+:data:`MMI_LAYOUTS`, and custom packets (``IMU``/200, ...) by packet type + alert id from
+``ais140_custom.py`` — the same machinery the base codec uses, so neither needs a branch here.
+
 The CAN field is ``;``-separated ``<hex id>:<hex payload>`` frames, e.g.
 ``000000E1:000040A0010001E2`` — an 8-hex-digit CAN id and an 8-byte payload. It is located
 **by content** rather than by index, so a firmware that shifts the tail still gets its bus
@@ -55,8 +61,10 @@ reference parser in ``data/protocols/zenithra.py``) for transfer between tools.
      AIS-140 frame-number format, and it advanced 7 -> 123 between two samples 22 minutes
      apart while the device sat stationary at 0.0 km/h, which an odometer would not do.
      No ``odometer_m`` is therefore reported for this protocol.
-   * Only the ``NR`` packet type has been captured. Alert subtypes are assumed to reuse the
-     same layout via packet_type + alert_id (as AIS-140 does).
+   * Only ``NR`` (38 fields) and the custom ``IMU`` packet (50 fields) have been captured.
+     Alert subtypes are assumed to reuse the 38-field layout via packet_type + alert_id (as
+     AIS-140 does). The IMU capture backs the first bullet: it sends ``emergency_status``
+     (``0``) *and* ``tamper_alert`` (``O``), so ``O`` is the tamper value.
 
    The **login** is confirmed from live traffic: a plain AIS-140 ``$LGN`` (see ``_LOGIN_MARK``
    below), so it — like ``$HLP``/``$HEL`` health and ``$EPB`` emergency, both still unconfirmed
@@ -73,9 +81,9 @@ from __future__ import annotations
 
 import re
 
-from ..core.models import Position, Session, UnifiedRecord
+from ..core.models import Session, UnifiedRecord
 from ..core.registry import register_codec
-from .ais140 import _ACK_OK, _ALERT_NAMES, _NMP_TYPES, Ais140Codec
+from .ais140 import _ACK_OK, AIS140_VB, Ais140Codec, NmpLayout
 
 _HEADER = b"$MMI,"
 
@@ -96,10 +104,25 @@ _LOGIN_MARK = b"SCAN"
 # above the base codec's 2 KB (see Ais140Codec.max_sentence for what it protects against).
 _MAX_SENTENCE = 8192
 
-# Field count of the confirmed $MMI layout. Only this exact count is field-mapped; any other
-# count keeps its tail verbatim in io["tail_raw"] rather than risk mislabeling fields (the
-# same rule ais140.py applies to its unconfirmed NRM variant).
-_MMI_FIELDS = 38
+# The confirmed 38-field NR layout (table in the module docstring): AIS-140's emergency_status
+# is not sent, so 26-31 sit one slot earlier; no neighbour cells; CAN data at 36 (located by
+# content, not listed here); the OTA field at 37 is NOT last — frame_number follows it.
+MMI_NR = NmpLayout("zenithra_mmi_nr",
+                   text={"tamper_alert": 26, "mcc": 28, "mnc": 29, "lac": 30, "cell_id": 31,
+                         "digital_input_status": 32, "digital_output_status": 33,
+                         "frame_number": 38},
+                   numbers={"analog_input_1": 34, "analog_input_2": 35},
+                   gsm_signal=27, payload=37)
+# Keyed like ais140.NMP_LAYOUTS: (field count, last field parenthesized). Any other shape keeps
+# its tail verbatim in io["tail_raw"] rather than risk mislabeling fields (the same rule
+# ais140.py applies to its unconfirmed NRM variant).
+MMI_LAYOUTS: dict[tuple[int, bool], NmpLayout] = {
+    (38, False): MMI_NR,
+    (50, True): AIS140_VB,      # e.g. the IMU packet, 5.1.30I
+}
+MMI_UNMAPPED = NmpLayout("unmapped",
+                         text={"tamper_alert": 26, "mcc": 28, "mnc": 29, "lac": 30, "cell_id": 31},
+                         gsm_signal=27, tail_from=32)
 
 # One CAN frame as sent: 1-8 hex id digits, ':', then the payload as hex (8 bytes = 16 chars
 # in every sample so far; the bound is loose so an oversized/CAN-FD-ish payload still parses).
@@ -192,63 +215,14 @@ class ZenithraCodec(Ais140Codec):
 
     # -- MMI: normal + every alert subtype, with the CAN payload ---------------- #
     def _mmi(self, f: list[str], checksum, session: Session, raw_hex: str) -> UnifiedRecord:
-        imei = self._get(f, 6) or session.device_id or f"{self.name}-unknown"
-        session.device_id = imei
-        ptype = self._get(f, 3) or ""
-        alert_id = self._int(self._get(f, 4))
-
-        io = {
-            # vendor_id is the sentence header (the only vendor token on the wire) so the QC
-            # ledger/report show something meaningful; field 1 is a packet-format version.
-            "vendor_id": "MMI", "packet_version": self._get(f, 1),
-            "firmware_version": self._get(f, 2),
-            "packet_type": ptype, "alert_id": alert_id,
-            "packet_status": self._get(f, 5), "vehicle_reg_no": self._get(f, 7),
-            "pdop": self._float(self._get(f, 19)), "hdop": self._float(self._get(f, 20)),
-            "network_operator": self._get(f, 21), "main_power_status": self._get(f, 23),
-            # no emergency_status: this layout drops it (see the module docstring's note)
-            "tamper_alert": self._get(f, 26),
-            "mcc": self._get(f, 28), "mnc": self._get(f, 29), "lac": self._get(f, 30),
-            "cell_id": self._get(f, 31), "checksum": checksum,
-        }
-        if len(f) == _MMI_FIELDS:
-            io.update({
-                "digital_input_status": self._get(f, 32),
-                "digital_output_status": self._get(f, 33),
-                "analog_input_1": self._float(self._get(f, 34)),
-                "analog_input_2": self._float(self._get(f, 35)),
-                "ota_update_details": self._get(f, 37),
-                "frame_number": self._get(f, 38),
-            })
-        elif len(f) > 31:
-            io["tail_raw"] = ",".join(f[31:])
-
+        # vendor_id is the sentence header (the only vendor token on the wire) so the QC
+        # ledger/report show something meaningful; field 1 is a packet-format version.
+        rec = self._nmp_record(f, self._layout(f, MMI_LAYOUTS, MMI_UNMAPPED), checksum,
+                               session, raw_hex, vendor_id="MMI", packet_version=self._get(f, 1))
         # By content, not by index — so an unconfirmed variant still yields its bus data.
         can_at = next((i for i, tok in enumerate(f) if _is_can_field(tok)), None)
         frames = _can_frames(f[can_at]) if can_at is not None else []
-        io["can_frame_count"] = len(frames)
+        rec.io["can_frame_count"] = len(frames)
         if frames:
-            io["can"] = frames
-
-        rec = UnifiedRecord(
-            device_id=imei, protocol=self.name,
-            message_type=_NMP_TYPES.get(ptype, ptype or "normal"),
-            event_time=self._datetime(self._get(f, 9), self._get(f, 10)),
-            gps_valid=self._get(f, 8) == "1",
-            position=Position(latitude=self._signed(f, 11, 12, "S"),
-                              longitude=self._signed(f, 13, 14, "W"),
-                              altitude_m=self._float(self._get(f, 18))),
-            speed_kph=self._float(self._get(f, 15)),
-            heading_deg=self._float(self._get(f, 16)),
-            altitude_m=self._float(self._get(f, 18)),
-            satellites=self._int(self._get(f, 17)),
-            ignition=self._get(f, 22) == "1",
-            battery_v=self._float(self._get(f, 25)),
-            external_v=self._float(self._get(f, 24)),
-            gsm_signal=self._int(self._get(f, 27)),
-            io=io,
-            raw_hex=raw_hex,
-        )
-        if alert_id and alert_id >= 3:
-            rec.alarms.append(_ALERT_NAMES.get(alert_id, f"alert_{alert_id}"))
+            rec.io["can"] = frames
         return rec

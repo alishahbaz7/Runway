@@ -46,7 +46,8 @@ _FROZEN_FALLBACK = {
     "runway.codecs": ["teltonika", "gt06", "ais140", "zenithra", "nmea", "generic_hex",
                        "custom_template"],
     "runway.sources": ["file_replay", "tcp_server"],
-    "runway.sinks": ["console", "memory_store", "ws_broadcast", "webhook", "tcp_relay"],
+    "runway.sinks": ["console", "memory_store", "ws_broadcast", "webhook", "tcp_relay",
+                     "telemetry_store", "archive_store"],
 }
 
 

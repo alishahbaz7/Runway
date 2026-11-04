@@ -92,7 +92,66 @@
         {"index": 36, "name": "can_data", "type": "group", "note": "This protocol's addition to the AIS-140 base — the vehicle CAN bus, inline. Empty when there is nothing to report. See the can_data section for the grammar.", "example": "000000E1:000040A0010001E2;00000120:0002FEA200000000"},
         {"index": 37, "name": "ota_update_details", "type": "parenthesized", "format": "(<source>,<parameter id>,<status>)", "note": "'()' when idle. May contain commas, so fold '(' .. ')' back into one field before indexing — and unlike AIS-140 this is NOT the last field.", "example": "()"},
         {"index": 38, "name": "frame_number", "type": "uint", "note": "PROVISIONAL: 6-digit zero-padded sequence number, matching the AIS-140 frame_number format (its field 47). Read as a counter rather than an odometer because it advanced 000007 -> 000123 between two captures 22 minutes apart while the device reported 0.0 km/h throughout. Confirm against the vendor doc before treating it as distance.", "example": "000123"}
-      ]
+      ],
+      "variants": {
+        "50": {
+          "name": "Normal / Alert / Custom Packet — full AIS-140 (Locate 140 VB) layout",
+          "note": "50 fields, confirmed from a live IMU packet (firmware 5.1.30I). Unlike the 38-field layout: emergency_status (26) and the 4 neighbour-cell triples (33-44) are sent, there is no CAN field, frame_number is field 47, and the parenthesized payload is the last field (50). Fields 26-49 are AIS-140 v1.9 NMP's, field for field. The codec picks the layout by shape (field count + parenthesized last field) and the payload's meaning by packet_type + alert_id.",
+          "example": "$MMI,V2.2.0,5.1.30I,IMU,200,L,865577071515754,DL1CAB1234,1,04112026,065624,28.550465,N,77.268908,E,0.0,0,33,218,0.81,0.45,IND airtel,1,1,13.5,4.1,0,O,27,404,10,946,E28130C,31,946,E281316,25,946,E28130B,17,946,9DA4C34,16,946,DFEF436,1000,00,001831,0.5,0.0,(1:0.06|0.11|9.82|-0.49|0.37|0.69;2:0.04|0.11|9.81|-0.47|0.34|0.79;3:0.06|0.10|9.81|-0.50|0.32|0.73;4:0.04|0.10|9.82|-0.55|0.38|0.72;5:0.04|0.10|9.81|-0.53|0.32|0.72;6:0.03|0.11|9.81|-0.55|0.35|0.73;7:0.05|0.10|9.80|-0.53|0.37|0.73;8:0.05|0.10|9.81|-0.50|0.35|0.72;9:0.05|0.10|9.83|-0.50|0.32|0.67;10:0.05|0.11|9.81|-0.52|0.32|0.73;11:0.06|0.10|9.82|-0.58|0.37|0.69;12:0.05|0.10|9.81|-0.53|0.34|0.75;13:0.06|0.10|9.82|-0.46|0.27|0.76;14:0.06|0.10|9.84|-0.49|0.37|0.72;15:0.06|0.11|9.82|-0.55|0.32|0.66;16:0.06|0.11|9.84|-0.50|0.29|0.66;17:0.06|0.11|9.82|-0.52|0.35|0.75;18:0.05|0.11|9.83|-0.47|0.34|0.75;19:0.06|0.10|9.81|-0.52|0.41|0.76;20:0.05|0.10|9.82|-0.53|0.38|0.69)*61",
+          "fields": [
+            {"index": 1, "name": "packet_version", "type": "ascii", "note": "packet-format version. AIS-140 carries a vendor_id in this slot; the only vendor token here is the $MMI header itself.", "example": "V2.2.0"},
+            {"index": 2, "name": "firmware_version", "type": "ascii", "example": "5.1.29C"},
+            {"index": 3, "name": "packet_type", "type": "enum", "note": "see packet_type_codes", "example": "NR"},
+            {"index": 4, "name": "alert_id", "type": "uint", "note": "see message_alert_ids; 1/2 are routine location updates, 3-16 are alerts", "example": "1"},
+            {"index": 5, "name": "packet_status", "type": "enum", "values": {"L": "live", "H": "history (buffered while GPRS was unavailable)"}, "example": "L"},
+            {"index": 6, "name": "imei", "type": "ascii", "size": 15, "example": "868221073948609"},
+            {"index": 7, "name": "vehicle_reg_no", "type": "ascii", "example": "DL1CAB1234"},
+            {"index": 8, "name": "gps_fix", "type": "bool", "values": {"1": "valid fix", "0": "no fix"}, "example": "1"},
+            {"index": 9, "name": "date", "type": "ascii", "format": "ddmmyyyy", "example": "03082026"},
+            {"index": 10, "name": "time", "type": "ascii", "format": "hhmmss", "note": "UTC", "example": "132621"},
+            {"index": 11, "name": "latitude", "type": "decimal", "unit": "degrees", "example": "28.550474"},
+            {"index": 12, "name": "latitude_dir", "type": "enum", "values": {"N": "north", "S": "south"}, "example": "N"},
+            {"index": 13, "name": "longitude", "type": "decimal", "unit": "degrees", "example": "77.268893"},
+            {"index": 14, "name": "longitude_dir", "type": "enum", "values": {"E": "east", "W": "west"}, "example": "E"},
+            {"index": 15, "name": "speed_kph", "type": "decimal", "unit": "km/h", "example": "0.0"},
+            {"index": 16, "name": "heading_deg", "type": "decimal", "unit": "degrees", "example": "0"},
+            {"index": 17, "name": "satellites", "type": "uint", "example": "29"},
+            {"index": 18, "name": "altitude_m", "type": "decimal", "unit": "m", "example": "225"},
+            {"index": 19, "name": "pdop", "type": "decimal", "example": "0.98"},
+            {"index": 20, "name": "hdop", "type": "decimal", "example": "0.51"},
+            {"index": 21, "name": "network_operator", "type": "ascii", "note": "may contain a space; never a comma", "example": "IND airtel"},
+            {"index": 22, "name": "ignition", "type": "bool", "values": {"1": "on", "0": "off"}, "example": "1"},
+            {"index": 23, "name": "main_power_status", "type": "enum", "values": {"1": "vehicle battery connected", "0": "vehicle battery disconnected"}, "example": "1"},
+            {"index": 24, "name": "main_input_voltage", "type": "decimal", "unit": "V", "example": "13.5"},
+            {"index": 25, "name": "internal_battery_voltage", "type": "decimal", "unit": "V", "example": "4.1"},
+            {"index": 26, "name": "emergency_status", "type": "bool", "values": {"1": "on", "0": "off"}, "example": "0"},
+            {"index": 27, "name": "tamper_alert", "type": "enum", "values": {"C": "cover closed", "O": "cover open"}, "example": "C"},
+            {"index": 28, "name": "gsm_signal", "type": "uint", "note": "0-31; 99 = not known/not detectable", "example": "25"},
+            {"index": 29, "name": "mcc", "type": "ascii", "note": "'x' when no network data", "example": "404"},
+            {"index": 30, "name": "mnc", "type": "ascii", "note": "'x' when no network data", "example": "10"},
+            {"index": 31, "name": "lac", "type": "hex_ascii", "note": "'x' when no network data", "example": "00D6"},
+            {"index": 32, "name": "cell_id", "type": "hex_ascii", "note": "'x' when no network data", "example": "CFBD"},
+            {"index": 33, "name": "nmr1_signal_strength", "type": "uint", "note": "neighbour cell 1 of 4 — triples are (signal strength, LAC, cell id)", "example": "31"},
+            {"index": 34, "name": "nmr1_lac", "type": "ascii", "note": "neighbour cell 1 of 4 — triples are (signal strength, LAC, cell id)", "example": "946"},
+            {"index": 35, "name": "nmr1_cell_id", "type": "ascii", "note": "neighbour cell 1 of 4 — triples are (signal strength, LAC, cell id)", "example": "E281316"},
+            {"index": 36, "name": "nmr2_signal_strength", "type": "uint", "note": "neighbour cell 2 of 4 — triples are (signal strength, LAC, cell id)", "example": "25"},
+            {"index": 37, "name": "nmr2_lac", "type": "ascii", "note": "neighbour cell 2 of 4 — triples are (signal strength, LAC, cell id)", "example": "946"},
+            {"index": 38, "name": "nmr2_cell_id", "type": "ascii", "note": "neighbour cell 2 of 4 — triples are (signal strength, LAC, cell id)", "example": "E28130B"},
+            {"index": 39, "name": "nmr3_signal_strength", "type": "uint", "note": "neighbour cell 3 of 4 — triples are (signal strength, LAC, cell id)", "example": "17"},
+            {"index": 40, "name": "nmr3_lac", "type": "ascii", "note": "neighbour cell 3 of 4 — triples are (signal strength, LAC, cell id)", "example": "946"},
+            {"index": 41, "name": "nmr3_cell_id", "type": "ascii", "note": "neighbour cell 3 of 4 — triples are (signal strength, LAC, cell id)", "example": "9DA4C34"},
+            {"index": 42, "name": "nmr4_signal_strength", "type": "uint", "note": "neighbour cell 4 of 4 — triples are (signal strength, LAC, cell id)", "example": "16"},
+            {"index": 43, "name": "nmr4_lac", "type": "ascii", "note": "neighbour cell 4 of 4 — triples are (signal strength, LAC, cell id)", "example": "946"},
+            {"index": 44, "name": "nmr4_cell_id", "type": "ascii", "note": "neighbour cell 4 of 4 — triples are (signal strength, LAC, cell id)", "example": "DFEF436"},
+            {"index": 45, "name": "digital_input_status", "type": "bitfield", "format": "bbbb", "bits": ["din1", "din2", "din3_ignition", "din4_panic"], "example": "0001"},
+            {"index": 46, "name": "digital_output_status", "type": "bitfield", "format": "bb", "bits": ["dout1", "dout2"], "example": "01"},
+            {"index": 47, "name": "frame_number", "type": "uint", "note": "sequence number, 000001-999999", "example": "000005"},
+            {"index": 48, "name": "analog_input_1", "type": "decimal", "format": "dd.d", "unit": "V", "example": "03.1"},
+            {"index": 49, "name": "analog_input_2", "type": "decimal", "format": "dd.d", "unit": "V", "example": "10.2"},
+            {"index": 50, "name": "payload", "type": "parenthesized", "note": "The OTA response on a normal packet ('()' when idle); a custom packet's own data otherwise, chosen by packet_type + alert_id (runway/codecs/ais140_custom.py). IMU / 200: '(n:x|y|z|p|r|y;...)' — n samples (20 today, not fixed); x/y/z = acceleration in m/s² (±8 g, ~9.81 on z at rest, gravity included), p/r/y = gyro pitch/roll/yaw rates in °/s (±250 dps); ICM-42670 snapshots, spread evenly over the packet interval — SET IMUPKT:1,<ignOnSec>,<ignOffSec>, default 1,10,2: 500 ms apart with ignition ON, 100 ms OFF. Last field here, unlike the 38-field layout's OTA field.", "example": "(1:0.06|0.11|9.82|-0.49|0.37|0.69;2:0.04|0.11|9.81|-0.47|0.34|0.79)"}
+          ]
+        }
+      }
     }
   },
   "can_data": {
@@ -107,7 +166,7 @@
     "example": "000000E1:000040A0010001E2;00000120:0002FEA200000000;0000012A:0004AE38000000EA;0000016C:0FFC800050043C1B;000005B9:0000000058590000"
   },
   "packet_type_codes": {
-    "note": "Inherited from the AIS-140 base packet; only NR has been observed on this model so far.",
+    "note": "Inherited from the AIS-140 base packet; NR and the custom IMU packet have been observed on this model so far.",
     "NR": "normal",
     "EA": "emergency alert",
     "TA": "tamper alert",
@@ -120,7 +179,8 @@
     "OT": "OTA update alert",
     "RT": "rash turn",
     "HB": "harsh braking",
-    "HA": "harsh acceleration"
+    "HA": "harsh acceleration",
+    "IMU": "IMU samples — custom packet (alert id 200): 6-axis sensor data in the payload field"
   },
   "message_alert_ids": {
     "1": "Location Update (default)",
@@ -138,7 +198,8 @@
     "13": "Harsh Braking",
     "14": "Harsh Acceleration",
     "15": "Rash Turning",
-    "16": "Device Tampered (emergency button wire disconnect/cut)"
+    "16": "Device Tampered (emergency button wire disconnect/cut)",
+    "200": "IMU samples — custom packet (packet type IMU)"
   },
   "source": "Live capture from IMEI 868221073948609 (fw 5.1.29C, packet version V2.2.0) on 03-08-2026: the $LGN login plus $MMI NR sentences with and without CAN data, over a real TCP session at a 10 s reporting interval. No vendor protocol document available yet; the field mapping is derived from those samples against AIS140_Protocol_Description_v1.9, and every deviation/assumption is flagged in the field notes above."
 }

@@ -38,6 +38,14 @@
           <label class="tcp-fld" id="cap-test-proto">Protocol
             <select id="cap-codec"></select>
           </label>
+          <!-- Testing: fork the stream — raw bytes on to the next server, and/or keep it here.
+               Either one makes the session restart by itself with the server. -->
+          <label class="tcp-fld" id="cap-relay-fld" title="Next server (host:port). Each device gets its own connection to it; its bytes go up exactly as received, and the server's ACKs and commands come back down. Runway sends no ACK of its own while relaying.">Relay to
+            <input id="cap-relay" type="text" placeholder="host:port" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="tcp-fld cap-check-fld" id="cap-store-fld" title="Keep every packet and IMU sample in data/telemetry.db — the IMU page reads it.">Store
+            <input id="cap-store" type="checkbox" />
+          </label>
           <!-- QC: auto-detect or manual protocol, plus operator -->
           <label class="tcp-fld" id="cap-qc-mode-fld" style="display:none">Protocol
             <select id="cap-qc-mode">

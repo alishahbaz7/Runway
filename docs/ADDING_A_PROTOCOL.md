@@ -88,3 +88,41 @@ pytest
 ```
 
 That's it — your protocol now works in the CLI, the REST API and the dashboard.
+
+---
+
+# Adding a custom packet to the AIS-140 family (no new codec)
+
+Our own firmware packets (e.g. **IMU**, packet type `IMU`, alert id `200`) are *not* new
+protocols: they travel on the same connection as the device's normal AIS-140 sentences
+(`$PVT`/`$NMP`, Zenithra's `$MMI`), and a session's codec is picked once — so a separate codec
+would never see them. They reuse a standard layout field for field and carry their own data in
+the one parenthesized field (where a normal packet has its OTA response, `()`).
+
+Two questions, answered in two places:
+
+| Question | Answered by | Where |
+|---|---|---|
+| Where does each field sit? | the sentence's **shape** — field count + parenthesized last field | `NMP_LAYOUTS` in `runway/codecs/ais140.py`, `MMI_LAYOUTS` in `runway/codecs/zenithra.py` |
+| What does the payload field mean? | the packet's **identity** — packet type + alert id | `CUSTOM_PACKETS` in `runway/codecs/ais140_custom.py` |
+
+**A new custom packet is one function** in `ais140_custom.py`:
+
+```python
+@custom_packet("TRP", 201, message_type="trip_summary")    # alarm="..." if it is an alarm
+def trip_summary(field: str) -> dict:
+    """'(<distance>|<duration>|...)' -> the io keys to add."""
+    ...
+    return {"trip_distance_m": ..., "trip_duration_s": ...}
+```
+
+It then decodes under every AIS-140-family header, sets `message_type`, and (if `alarm` is
+given) appends to `alarms` — no codec, layout or dispatch change. A list of records in `io`
+(like `io["imu"]`) is shown one row per item in the Parser automatically.
+
+**A new layout** (a firmware that moves fields) is one `NmpLayout` row in the codec's table,
+keyed by `(field count, last field parenthesized)`. Name its fields for the Parser with a
+`"variants": {"<field count>": {"fields": [...]}}` entry under that header in
+`data/protocols/<codec>.json`.
+
+Test with a real capture under `tests/fixtures/` (see the IMU tests in `tests/test_codecs.py`).

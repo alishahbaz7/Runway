@@ -29,12 +29,16 @@ single new file in `runway/codecs/` — nothing downstream changes.
    **Zenithra Ax1 sCAN** (AIS-140 + inline CAN), **NMEA-0183**, a **generic hex** fallback,
    and a **template** to add your own OEM protocol.
 2. **Visualize** — a web dashboard with a live map, per-device trails, a streaming
-   packet table, and a hex + decoded-tree inspector. Single device or many at once.
+   packet table, and a hex + decoded-tree inspector. Single device or many at once. The
+   **IMU** page charts a device's stored 6-axis samples over time (seconds to 30 days).
 3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have devices
    stream live to the built-in **Live TCP** server (start/stop listeners, see connected
    clients, filter/log per client).
-4. **Relay** — forward decoded (or raw) traffic onward to your platform via **TCP**,
-   **webhook/HTTP**, or persist to **SQLite** (Postgres/Timescale on the roadmap).
+4. **Relay** — devices can point at Runway instead of the platform: each device's raw stream
+   goes on to its server (one rule for all devices, or per device) through an on-disk outbox,
+   so a platform outage loses nothing, while Runway decodes and keeps a copy. Every packet is
+   archived as received, one file per device per day, and a day can be **replayed** to a
+   platform. Also **webhook/HTTP** and **SQLite** sinks (Postgres/Timescale on the roadmap).
 
 Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
 for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build
@@ -72,8 +76,16 @@ capture to TXT/CSV), and send downlink commands.
 
 ### Relay onward
 
+In the dashboard: **Capture → New session**, set *Relay to* `host:port` and tick *Store*; change
+the rules on a running session with **⇄ Relay & store** (all devices, none, or a server per
+device). Such a listener restarts with the server. Data lands in `data/`: `telemetry.db`
+(decoded packets and IMU samples, kept 7 days by default), `archive/` (every packet as received,
+kept until a limit is set) and `relay_outbox.db` (what the platform has not received yet).
+Sizes and retention are on **Capture → Archive → Storage**.
+
+From the command line (no outbox; for a bench):
+
 ```bash
-# Parse a live GT06 stream, persist it, and forward raw bytes to your platform:
 runway listen --codec gt06 --port 5050 --db runway.db --relay platform.example.com:6000
 ```
 
@@ -86,10 +98,10 @@ runway/
   core/        models · plugin interfaces · registry · pipeline engine · crc
   sources/     file_replay · tcp_server            (how bytes get IN)
   codecs/      gt06 · teltonika · ais140 · zenithra · nmea · generic_hex · custom_template
-  sinks/       console · memory_store · ws_broadcast · webhook · tcp_relay (out)
-  storage/     live (in-mem store + WS hub) · sqlite_store
+  sinks/       console · memory_store · ws_broadcast · webhook · tcp_relay · telemetry_store · archive_store
+  storage/     live (in-mem store + WS hub) · sqlite_store · telemetry · archive · outbox
   api/         app.py  (FastAPI: REST + WebSocket + upload + dashboard host)
-  web/         index.html · app.js · style.css     (the dashboard)
+  web/         one HTML + JS per page (dashboard, parser, capture, imu, archive, …) · shell.js · style.css
   cli.py       runway serve | replay | listen | codecs
 docs/          ARCHITECTURE · ADDING_A_PROTOCOL · ROADMAP
 config/        pipeline.example.yaml

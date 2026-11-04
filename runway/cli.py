@@ -58,6 +58,40 @@ async def _listen(args) -> None:
     await pipe.run()
 
 
+PAGE_GRACE_S = 5.0          # an open Runway tab checks in every 4 s
+
+
+def _open_unless_open(url: str) -> None:
+    """Open the dashboard in a browser — but not when a Runway tab is already open. Every
+    restart used to add one more tab; an open page checks in with the server within seconds
+    (``page_seen_s`` on /api/health), so wait for the server, give pages that long, then decide.
+    ``?probe=1`` keeps this check from counting as a page itself."""
+    import json
+    import time
+    import urllib.request
+    import webbrowser
+
+    probe = f"{url}/api/health?probe=1"
+    for _ in range(120):                   # wait until the server accepts connections
+        try:
+            urllib.request.urlopen(probe, timeout=2).read()
+            break
+        except Exception:
+            time.sleep(0.5)
+    time.sleep(PAGE_GRACE_S)
+    try:
+        seen = json.load(urllib.request.urlopen(probe, timeout=2)).get("page_seen_s")
+    except Exception:
+        seen = None
+    if seen is not None:
+        print(f"A Runway tab is already open — not opening another ({url})")
+        return
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass  # no browser available (headless) - the URL is printed anyway
+
+
 def _serve(args) -> None:
     import uvicorn
 
@@ -67,17 +101,11 @@ def _serve(args) -> None:
 
     if not getattr(args, "no_browser", False):
         import threading
-        import webbrowser
 
-        def _open() -> None:
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass  # no browser available (headless) - the URL is printed anyway
-
-        # Fire shortly after uvicorn.run() so the server is accepting connections.
-        threading.Timer(1.5, _open).start()
-        print(f"Opening {url} in your browser... (use --no-browser to disable)")
+        # Daemon thread: it must never keep Ctrl+C waiting.
+        threading.Thread(target=_open_unless_open, args=(url,), daemon=True).start()
+        print(f"Opening {url} in your browser unless a Runway tab is already open "
+              "(use --no-browser to disable)")
 
     uvicorn.run("runway.api.app:app", host=args.host, port=args.port,
                 reload=args.reload, log_level="info")
@@ -116,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("replay", help="parse a log / .loc / dump file")
     r.add_argument("file")
     r.add_argument("--codec", default="auto")
-    r.add_argument("--fmt", default="auto", choices=["auto", "raw", "hex", "hexlines"])
+    r.add_argument("--fmt", default="auto", choices=["auto", "raw", "hex", "hexlines", "log_export"])
     r.add_argument("--delay", type=float, default=0.0, help="seconds between chunks")
     _add_relay_opts(r)
     r.set_defaults(func=_replay, is_async=True)

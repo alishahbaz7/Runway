@@ -16,6 +16,11 @@
   --danger: #f2686b;
   --on-accent: #04121d;
   --accent-ring: rgba(90, 176, 240, .35);
+  /* IMU lanes: categorical slots 1-2 (blue, orange), validated on --panel/--bg (dark) */
+  --imu-acc: #3987e5;
+  --imu-ori: #d95926;
+  /* Combined view: categorical slots 1-4 in fixed order (validated, adjacent pairs, on --panel) */
+  --imu-s1: #3987e5; --imu-s2: #d95926; --imu-s3: #199e70; --imu-s4: #c98500;
 
   /* surfaces / states (previously scattered one-off hexes, now tokens) */
   --sel: #223047;
@@ -63,6 +68,10 @@
   --danger: #d23b3f;
   --on-accent: #ffffff;
   --accent-ring: rgba(31, 127, 214, .28);
+  --imu-acc: #2a78d6;                 /* same two slots, stepped for the light surface */
+  --imu-ori: #eb6834;
+  /* slots 3-4 sit under 3:1 on white: the charts' in-plot legends and the CSV are the relief */
+  --imu-s1: #2a78d6; --imu-s2: #eb6834; --imu-s3: #1baf7a; --imu-s4: #eda100;
 
   --sel: #dbe9fb;
   --badge-bg: #e6edf6;
@@ -669,6 +678,30 @@ button.ghost.mini.cap-send-btn svg { display: block; }
 .tcp-dot.dead { background: var(--dot-dead); }
 .tcp-card-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0; }
 .tcp-card-meta .err { color: var(--danger); }
+.tcp-card-meta .cap-fork { color: var(--accent-2); }
+/* a device's link to the next server: green up, amber connecting, red down */
+.cap-relay { font-size: 11px; border: 1px solid currentColor; border-radius: 6px; padding: 1px 7px; color: var(--muted); }
+.cap-relay.up { color: var(--accent-2); }
+.cap-relay.connecting { color: var(--warn); }
+.cap-relay.down { color: var(--danger); }
+.cap-relay.up.queued { color: var(--warn); }          /* up, still catching up on a backlog */
+/* Relay & store dialog: one row per rule — device, choice, target */
+.modal.relay-modal { width: 620px; }
+.relay-body { display: flex; flex-direction: column; gap: 10px; padding: 14px; overflow: auto; }
+.relay-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+.relay-check input { width: auto; margin: 0; }
+.relay-h { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+  border-top: 1px solid var(--border); padding-top: 10px; }
+.relay-list { display: flex; flex-direction: column; gap: 6px; }
+.relay-row { display: grid; grid-template-columns: 170px 170px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; }
+.relay-row select, .relay-row input { width: 100%; padding: 5px 8px; }
+.relay-row input:disabled { opacity: .45; }
+.relay-dev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.relay-addrow { display: flex; gap: 8px; align-items: center; }
+.relay-addrow input { width: 170px; padding: 5px 8px; }
+.relay-err { min-height: 16px; font-size: 12px; color: var(--danger); }
+.cap-check-fld { align-items: center; }
+.cap-check-fld input { width: auto; margin: 6px 0 0; }
 .tcp-peers { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--border); padding-top: 8px; }
 .tcp-peers-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
 .tcp-collapse { width: auto; margin: 0; padding: 0 4px; font-size: 11px; line-height: 1;
@@ -692,6 +725,16 @@ button.ghost.mini.cap-send-btn svg { display: block; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px;
   min-width: 20px; text-align: center; }
 .tcp-client-idle { font-size: 11px; min-width: 34px; }
+/* Testing: one row per device; a device that re-dials shows it once, its connections folded */
+.cap-device { display: flex; flex-direction: column; gap: 2px; }
+.cap-reconn { align-self: flex-start; width: auto; margin: 0 0 2px 34px; padding: 1px 4px; font-size: 11.5px;
+  background: transparent; border: none; color: var(--warn); cursor: pointer; }
+.cap-reconn:hover { text-decoration: underline; }
+.cap-conns { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px 38px; padding-left: 10px;
+  border-left: 1px solid var(--border); }
+.cap-conn { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center;
+  gap: 8px; font-size: 11.5px; }
+.cap-conn .mono { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.ghost.mini { width: auto; margin: 0; padding: 3px 9px; font-size: 11px; }
 
 /* ---- Device QC page (QC-only bits; layout/tabs/devices reuse the tcp-* rules above) --- */
@@ -896,8 +939,14 @@ body.rail-collapsed .rail-foot { display: none; }   /* version hidden in icon-on
 .fields { overflow: auto; background: var(--bg); }
 .fields table { width: 100%; border-collapse: collapse; font-family: var(--mono); }
 .fields td.num { text-align: right; color: var(--muted); }
-.fields td.val { white-space: normal; word-break: break-word; }
+.fields td.name { white-space: nowrap; }
 .fields td.hex { color: var(--accent); }
+/* one line per value: a long one (an IMU payload and its hex) ends in an ellipsis, full on hover */
+.fields .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fields table.breakdown td.val .clip { max-width: 40ch; }
+.fields table.breakdown td.hex .clip { max-width: 36ch; }
+.fields table.breakdown td.val.wide .clip { max-width: 80ch; }
+.fields table.grid td.val .clip { max-width: 34ch; }
 .fields td.bit { color: var(--muted); font-size: 11px; }
 .fields tr.group td { background: var(--panel); color: var(--accent-2); font-weight: 700;
   text-transform: none; letter-spacing: .3px; position: sticky; }
@@ -975,3 +1024,95 @@ body.rail-collapsed .rail-foot { display: none; }   /* version hidden in icon-on
   padding: 5px 10px; background: var(--panel); font-size: 12px; color: var(--muted); }
 .map-head button { width: auto; }
 .parser-map { flex: 1; min-height: 160px; background: var(--map-bg); }
+
+/* ---- IMU page: filters row, tiles, stacked-lane chart ---------------------------------- */
+#imu-bar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--panel); }
+.imu-fld { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
+.imu-fld select, .imu-fld input { padding: 5px 8px; min-width: 170px; }
+.imu-range-fld select { min-width: 110px; }
+.imu-follow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); padding-bottom: 6px; }
+.imu-follow input { width: auto; margin: 0; }
+#imu-range-text { font-size: 12px; padding-bottom: 7px; font-variant-numeric: tabular-nums; }
+#imu-unzoom[hidden] { display: none; }
+.imu-timing-wrap { position: relative; }
+.imu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column;
+  gap: 10px; padding: 12px; min-width: 220px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow-lg); }
+.imu-pop[hidden] { display: none; }
+.imu-notice { display: flex; flex-direction: column; gap: 6px; margin: 12px 16px 0; padding: 8px 12px;
+  background: var(--warn-bg); border: 1px solid var(--warn); border-radius: 8px; font-size: 12.5px; color: var(--text); }
+.imu-notice[hidden] { display: none; }
+.imu-notice-row { display: flex; align-items: center; gap: 12px; }
+.imu-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 12px 16px 4px; }
+.imu-tiles .stat-sub { font-size: 12px; font-weight: 400; color: var(--muted); font-family: inherit; }
+.imu-legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 16px 4px; font-size: 12px; color: var(--muted); }
+.imu-leg { display: inline-flex; align-items: center; gap: 6px; }
+.imu-key { display: inline-block; width: 14px; height: 2px; border-radius: 2px; flex: none; }
+.imu-tick { display: inline-block; width: 2px; height: 11px; }
+.imu-gapkey { display: inline-block; width: 12px; height: 8px; border-radius: 2px; opacity: .8; }
+#imu-chart-wrap { position: relative; margin: 4px 16px 16px; padding: 8px 0; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 10px; }
+#imu-chart-wrap.loading canvas { opacity: .55; }
+#imu-chart { display: block; touch-action: none; cursor: crosshair; }
+/* the timeline scrollbar: wider than the page's thin bars, with a visible track — it's a control */
+.imu-scroll { overflow-x: scroll; overflow-y: hidden; height: 18px; margin-top: 2px;
+  scrollbar-width: auto; scrollbar-color: var(--scrollbar-hover) var(--panel-2); }
+.imu-scroll[hidden] { display: none; }
+#imu-scroll-inner { height: 1px; }
+.imu-timing-now { white-space: pre-line; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.imu-timing-now:empty { display: none; }
+.imu-pop-h { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.imu-pop-pair { display: flex; gap: 8px; }
+.imu-pop-pair .imu-fld input { min-width: 0; width: 110px; }
+.imu-pop { min-width: 300px; }
+#imu-empty { padding: 40px 16px; }
+#imu-empty[hidden] { display: none; }
+.imu-tip { position: absolute; z-index: 10; pointer-events: none; min-width: 200px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; font-size: 12px;
+  box-shadow: var(--shadow-lg); }
+.imu-tip[hidden] { display: none; }
+.imu-tip-h { color: var(--muted); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.imu-tip-r { display: flex; align-items: center; gap: 6px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.imu-tip-r b { color: var(--text); min-width: 46px; text-align: right; }
+.imu-tip-l { margin-left: auto; padding-left: 12px; color: var(--muted); }
+.imu-tip-e { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-subtle); color: var(--muted); }
+.imu-tip-e.warn { color: var(--warn); }
+@media (max-width: 1100px) { .imu-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ---- Archive page: device-days, replays ------------------------------------------------ */
+#arch-bar { display: flex; align-items: flex-end; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  background: var(--panel); }
+.arch-card { margin: 14px 16px 0; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.arch-card[hidden] { display: none; }
+.arch-h { margin: 0; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border); }
+.arch-h .muted { font-weight: 400; margin-left: 6px; }
+.arch-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.arch-table th { text-align: left; padding: 7px 14px; background: var(--panel-2); color: var(--text); font-weight: 600;
+  font-size: 12px; box-shadow: inset 0 -2px 0 var(--border); }
+.arch-table td { padding: 6px 14px; border-bottom: 1px solid var(--border-subtle); }
+.arch-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--panel-2) 45%, var(--panel)); }
+.arch-table tbody tr:hover td { background: var(--panel-2); }
+.arch-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.arch-table .fit { width: 1%; white-space: nowrap; }
+.arch-table .mono { font-family: var(--mono); }
+.arch-act { white-space: nowrap; text-align: right; }
+.arch-act > * + * { margin-left: 6px; }
+a.btn-link { display: inline-block; text-decoration: none; color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; line-height: 1.4; }
+.arch-prog { display: flex; align-items: center; gap: 10px; }
+.arch-bar { flex: 1; min-width: 120px; height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.arch-fill { height: 100%; background: var(--accent); transition: width .9s ease-out; }
+.arch-fill.done { background: var(--accent-2); }
+.arch-fill.error { background: var(--danger); }
+.arch-fill.stopped { background: var(--muted); }
+.arch-pill { font-size: 11.5px; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; }
+.arch-pill.running { color: var(--accent); }
+.arch-pill.done { color: var(--accent-2); }
+.arch-pill.error { color: var(--danger); }
+.arch-pill.stopped { color: var(--muted); }
+.arch-what { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.arch-note { font-size: 12px; color: var(--muted); }
+.arch-keep { padding: 3px 6px; min-width: 110px; }
+#arch-empty { padding: 30px 14px; }
+#arch-empty[hidden] { display: none; }

@@ -26,6 +26,18 @@ Two header vocabularies are handled, both mapped onto the same builders:
       tail (neighbour cells / digital IO / odometer / checksum) hasn't been reverse-engineered
       yet — kept verbatim in ``io["tail_raw"]`` rather than guessed at.
 
+  * The **Locate 140 VB** ``$PVT`` (vendor ``GTRP``), per its AIS-140 compliance sheet: the
+    doc's NMP layout without the odometer, so the parenthesized OTA response is field 50.
+
+The normal/alert sentence therefore comes in several layouts that share fields 1-25 and
+diverge after. Each is a row in :data:`NMP_LAYOUTS` (an :class:`NmpLayout`), picked by the
+sentence's shape — field count, and whether the last field is the parenthesized one — so a new
+firmware layout is a new table entry, not a new branch in the builder.
+
+Our own **custom packets** (e.g. ``IMU``, alert id 200 — 6-axis sensor samples) ride those
+same layouts and carry their data in the parenthesized field. They are recognised by packet
+type + alert id, and their payload parsers live in ``ais140_custom.py``; see that module.
+
   $LGN,VENDOR,DL01PC9821,862631032208018,1.6.5,AIS140,28.7589630,N,77.6277844,E*54    (doc)
   $PVT,LOCT14A,2.2.5,NR,2,H,868329087318766,0000000000,1,03072026,152735,...*        (real)
   $HLM,,01.3.0,860103062389003,100,33,8,20,1,0000,11*                                (real)
@@ -47,22 +59,25 @@ real-wire deviations above are specific to this codec until the JSON grammar is 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 
 from ..core.interfaces import Codec
 from ..core.models import DecodeOutput, Position, Session, UnifiedRecord
 from ..core.registry import register_codec
+from .ais140_custom import CUSTOM_PACKETS
 
 _ACK_OK = b"+##Received OK"
 
-# Safety valve: a real sentence is at most a few hundred bytes. If no '*' terminator has
-# turned up within this many bytes of a '$', the stream isn't what we think it is (wrong
-# codec picked by auto-detect, a firmware that doesn't send '*', or corrupted traffic) --
-# without this, decode() would return consumed=0 forever: buffer grows unbounded, zero
-# records ever produced, connection looks "stuck" even though bytes are still arriving.
-# Exposed as Codec.max_sentence so a derived sentence family with bigger packets can raise
-# it (zenithra.py: AIS-140 head + an inline CAN dump).
-_MAX_SENTENCE = 2048
+# Safety valve: a plain sentence is a few hundred bytes. If no '*' terminator has turned up
+# within this many bytes of a '$', the stream isn't what we think it is (wrong codec picked by
+# auto-detect, a firmware that doesn't send '*', or corrupted traffic) -- without this,
+# decode() would return consumed=0 forever: buffer grows unbounded, zero records ever
+# produced, connection looks "stuck" even though bytes are still arriving.
+# Sized for custom packets: an IMU packet is ~240 bytes of head plus ~35 per sample (930 bytes
+# at today's 20 samples), so 4 KB leaves room for ~100. Exposed as Codec.max_sentence so a
+# derived family with bigger packets raises it further (zenithra.py: an inline CAN dump).
+_MAX_SENTENCE = 4096
 
 # $HEL is the health header real Locate 140B firmware (2.2.5) sends on the wire — the v1.9
 # doc only names $HLP/$HLM, so both are accepted (see _parse/_ack dispatch).
@@ -98,6 +113,58 @@ _ALARM_CATALOG = {
     "harsh_acceleration": "Harsh acceleration", "rash_turning": "Rash turning",
     "device_tampered": "Device tampered (emergency button wire cut)",
     "emergency": "Emergency (panic button)", "emergency_stop": "Emergency stop message",
+}
+
+
+@dataclass(frozen=True)
+class NmpLayout:
+    """Where one layout of the normal/alert sentence puts its fields (1-based, after the header).
+
+    Fields 1-25 (vendor slot ... battery voltage) are the same in every layout and are read by
+    the builder directly; everything from field 26 on is declared here.
+    """
+    name: str
+    text: dict[str, int]                                    # io key -> index, kept as sent
+    numbers: dict[str, int] = field(default_factory=dict)   # io key -> index, read as float
+    gsm_signal: int | None = None
+    nmr_at: int | None = None                               # first of the 4 neighbour-cell triples
+    nmr_order: tuple[str, str, str] = ("signal_strength", "lac", "cell_id")
+    odometer: int | None = None
+    payload: int | None = None   # the parenthesized field: OTA response, or a custom packet's data
+    tail_from: int | None = None  # unmapped layout: fields from here on, verbatim, in tail_raw
+
+
+_SERVING = {"emergency_status": 26, "tamper_alert": 27, "mcc": 29, "mnc": 30, "lac": 31,
+            "cell_id": 32}
+_DIO = {"digital_input_status": 45, "digital_output_status": 46}
+_ANALOG = {"analog_input_1": 48, "analog_input_2": 49}
+
+# The documented AIS-140 v1.9 schema: neighbour triples as (ss, lac, cellid), digital in/out,
+# frame number, both analog inputs, odometer, then the OTA field.
+DOC_V19 = NmpLayout("ais140_v1.9", text={**_SERVING, **_DIO, "frame_number": 47},
+                    numbers=_ANALOG, gsm_signal=28, nmr_at=33, odometer=50, payload=51)
+# Locate 140 VB — the AIS-140 compliance sheet: the doc layout without the odometer, so the OTA
+# response (or a custom packet's payload) is field 50. Zenithra's 50-field $MMI is this too.
+AIS140_VB = NmpLayout("ais140_vb", text={**_SERVING, **_DIO, "frame_number": 47},
+                      numbers=_ANALOG, gsm_signal=28, nmr_at=33, payload=50)
+# Real Locate 140B (LOCT14A) PVT, confirmed against a live capture: no frame number / analog
+# inputs / OTA field, neighbour triples as (cellid, lac, ss) — reversed from the doc — and this
+# firmware's own checksum inline as the last field (nothing follows '*' on the wire).
+LOCT14A_PVT = NmpLayout("locate140b_pvt", text={**_SERVING, **_DIO, "trailer_checksum": 48},
+                        gsm_signal=28, nmr_at=33,
+                        nmr_order=("cell_id", "lac", "signal_strength"), odometer=47)
+# Any other shape — e.g. "NRM" (56 fields, different firmware on the same fleet). Fields 26-32
+# still match, but one live sample isn't enough to name the tail: keep it verbatim rather than
+# guess (and risk mislabeling) until it is reverse-engineered like PVT was.
+NMP_UNMAPPED = NmpLayout("unmapped", text=_SERVING, gsm_signal=28, tail_from=33)
+
+# Keyed by (field count, last field parenthesized). The second half is what separates a doc
+# sentence sent without its OTA field from a VB sentence — both 50 fields.
+NMP_LAYOUTS: dict[tuple[int, bool], NmpLayout] = {
+    (51, True): DOC_V19,
+    (50, False): replace(DOC_V19, name="ais140_v1.9_no_ota", payload=None),
+    (50, True): AIS140_VB,
+    (48, False): LOCT14A_PVT,
 }
 
 
@@ -219,70 +286,61 @@ class Ais140Codec(Codec):
 
     # -- NMP/PVT: normal + every alert subtype ------------------------------------ #
     def _nmp(self, f: list[str], checksum, session: Session, raw_hex: str) -> UnifiedRecord:
-        # A parenthesized OTA remainder (doc schema only) may itself contain commas — find it
-        # by content wherever it starts and fold it back into one field before indexing.
+        # The parenthesized field (OTA response, or a custom packet's payload) may itself
+        # contain commas — find it by content and fold it back into one field before indexing.
+        # In every AIS-140 layout it is the last field.
         paren_at = next((i for i, tok in enumerate(f) if "(" in tok), None)
         if paren_at is not None:
             f = f[:paren_at] + [",".join(f[paren_at:])]
+        return self._nmp_record(f, self._layout(f, NMP_LAYOUTS, NMP_UNMAPPED),
+                                checksum, session, raw_hex)
 
+    @staticmethod
+    def _layout(f: list[str], layouts: dict[tuple[int, bool], NmpLayout],
+                fallback: NmpLayout) -> NmpLayout:
+        """Pick a layout by the sentence's shape: field count + parenthesized last field."""
+        return layouts.get((len(f), bool(f) and f[-1].startswith("(")), fallback)
+
+    def _nmp_record(self, f: list[str], layout: NmpLayout, checksum, session: Session,
+                    raw_hex: str, **head) -> UnifiedRecord:
+        """One normal/alert sentence -> UnifiedRecord, for any layout and any header.
+
+        ``head`` overrides the vendor-slot io keys (Zenithra: the slot is a packet-format
+        version, and the vendor is the $MMI header itself).
+        """
         imei = self._get(f, 6) or session.device_id or f"{self.name}-unknown"
         session.device_id = imei
         ptype = self._get(f, 3) or ""
         alert_id = self._int(self._get(f, 4))
+        custom = CUSTOM_PACKETS.get((ptype, alert_id))
 
         io = {
-            # vendor_id (LOCT14A) + firmware from every PVT/NMP, plus the raw packet-type code
+            # vendor_id (LOCT14A) + firmware from every sentence, plus the raw packet-type code
             # and numeric alert id — the QC coverage layer keys on these + device-info reads them.
-            "vendor_id": self._get(f, 1), "firmware_version": self._get(f, 2),
+            "vendor_id": self._get(f, 1), **head, "firmware_version": self._get(f, 2),
             "packet_type": ptype, "alert_id": alert_id,
             "packet_status": self._get(f, 5), "vehicle_reg_no": self._get(f, 7),
             "pdop": self._float(self._get(f, 19)), "hdop": self._float(self._get(f, 20)),
             "network_operator": self._get(f, 21), "main_power_status": self._get(f, 23),
-            "emergency_status": self._get(f, 26), "tamper_alert": self._get(f, 27),
-            "mcc": self._get(f, 29), "mnc": self._get(f, 30), "lac": self._get(f, 31),
-            "cell_id": self._get(f, 32), "checksum": checksum,
+            "layout": layout.name,
         }
-        odometer = None
-        if 50 <= len(f) <= 51:
-            # Documented AIS-140 v1.9 schema: 4 neighbour-cell triples as (ss, lac, cellid),
-            # then digital in/out, frame number, both analog inputs, odometer, OTA field.
-            io["nmr"] = [
-                {"signal_strength": self._get(f, 33 + 3 * i), "lac": self._get(f, 34 + 3 * i),
-                 "cell_id": self._get(f, 35 + 3 * i)}
-                for i in range(4)
-            ]
-            io.update({
-                "digital_input_status": self._get(f, 45), "digital_output_status": self._get(f, 46),
-                "frame_number": self._get(f, 47),
-                "analog_input_1": self._float(self._get(f, 48)), "analog_input_2": self._float(self._get(f, 49)),
-                "ota_update_details": self._get(f, 51),
-            })
-            odometer = self._float(self._get(f, 50))
-        elif len(f) == 48:
-            # Real Locate 140B (PVT) wire schema, confirmed against a live capture: no frame
-            # number / analog inputs / OTA field, neighbour triples as (cellid, lac, ss) —
-            # reversed from the doc — and the checksum sits inline as the last field (nothing
-            # follows '*' on the wire for this firmware).
-            io["nmr"] = [
-                {"cell_id": self._get(f, 33 + 3 * i), "lac": self._get(f, 34 + 3 * i),
-                 "signal_strength": self._get(f, 35 + 3 * i)}
-                for i in range(4)
-            ]
-            io.update({
-                "digital_input_status": self._get(f, 45), "digital_output_status": self._get(f, 46),
-                "trailer_checksum": self._get(f, 48),
-            })
-            odometer = self._float(self._get(f, 47))
-        elif len(f) > 32:
-            # Seen on a 3rd header ("NRM", 56 fields) from different firmware on the same
-            # fleet — neither the doc's nor the confirmed real-PVT tail layout matches, and
-            # one live sample isn't enough to safely assign field names. Keep every trailing
-            # field verbatim rather than guess (and risk mislabeling); revisit once this
-            # variant has been captured and reverse-engineered like PVT/HLM were.
-            io["tail_raw"] = ",".join(f[32:])
+        io.update({key: self._get(f, i) for key, i in layout.text.items()})
+        io.update({key: self._float(self._get(f, i)) for key, i in layout.numbers.items()})
+        if layout.nmr_at:
+            io["nmr"] = [{key: self._get(f, layout.nmr_at + 3 * i + j)
+                          for j, key in enumerate(layout.nmr_order)} for i in range(4)]
+        if layout.tail_from and len(f) >= layout.tail_from:
+            io["tail_raw"] = ",".join(f[layout.tail_from - 1:])
+        payload = self._get(f, layout.payload) if layout.payload else None
+        if custom:
+            io.update(custom.parse(payload or ""))
+        elif payload is not None:
+            io["ota_update_details"] = payload
+        io["checksum"] = checksum
 
         rec = UnifiedRecord(
-            device_id=imei, protocol=self.name, message_type=_NMP_TYPES.get(ptype, ptype or "normal"),
+            device_id=imei, protocol=self.name,
+            message_type=custom.message_type if custom else _NMP_TYPES.get(ptype, ptype or "normal"),
             event_time=self._datetime(self._get(f, 9), self._get(f, 10)),
             gps_valid=self._get(f, 8) == "1",
             position=Position(latitude=self._signed(f, 11, 12, "S"), longitude=self._signed(f, 13, 14, "W"),
@@ -294,12 +352,15 @@ class Ais140Codec(Codec):
             ignition=self._get(f, 22) == "1",
             battery_v=self._float(self._get(f, 25)),
             external_v=self._float(self._get(f, 24)),
-            gsm_signal=self._int(self._get(f, 28)),
-            odometer_m=odometer,
+            gsm_signal=self._int(self._get(f, layout.gsm_signal)) if layout.gsm_signal else None,
+            odometer_m=self._float(self._get(f, layout.odometer)) if layout.odometer else None,
             io=io,
             raw_hex=raw_hex,
         )
-        if alert_id and alert_id >= 3:
+        if custom:
+            if custom.alarm:
+                rec.alarms.append(custom.alarm)
+        elif alert_id and alert_id >= 3:
             rec.alarms.append(_ALERT_NAMES.get(alert_id, f"alert_{alert_id}"))
         return rec
 
