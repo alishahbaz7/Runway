@@ -4,6 +4,194 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.25] — 2026-11-04
+
+Headline: **devices can land directly on Runway** — each device's raw stream is relayed on to
+the next server and, alongside, decoded and kept here — and **the IMU packet is decoded and
+charted**: 6-axis samples from Zenithra sCAN (`$MMI`) and Locate 140 VB (`$PVT`) firmware.
+
+### Added — device data lands on Runway, forked two ways
+- **Relay to the next server** (Capture → New session → *Relay to* `host:port`). Each device
+  connection gets its **own** connection to the next server — a platform identifies a device by
+  its connection and login, so devices are never multiplexed onto one socket. Every byte goes up
+  exactly as received, before any decoding (checked byte-for-byte on the real 15-minute export);
+  the server's replies (ACKs, commands) come back down. **While relaying, Runway sends no ACK of
+  its own**: the next server confirms delivery. A relay that points back at its own listener is
+  refused. Runway's own command sender still works.
+- **Lossless relay — an outbox in front of every link** (`data/relay_outbox.db`). Every byte is
+  queued on disk before it is sent and removed only once delivered, so a platform that is down,
+  slow or drops the link loses nothing: the device stays connected, its packets queue, and the
+  link delivers the backlog in order when the server is back — after the device has gone, and
+  after a Runway restart too. The user's platform sends no ACKs, so the device never resends what
+  a relay dropped; the earlier build dropped bytes while the server was unreachable. A row is
+  deleted 2 s after it went out on a link that stayed up — at-least-once: the last ~2 s before a
+  drop arrive twice rather than not at all. A new link sends the device's login first. Capped at
+  2 GB (about 2 days of 20 devices), oldest first, counted. Each device row shows its link
+  (up / connecting / down) and what is waiting (`12 KB queued`). Checked end to end against the
+  real server: a platform taken down mid-stream for 40 packets received all of them when back,
+  and the outbox drained to 0.
+- **Store** (same form): every packet — raw bytes included — and every IMU sample is kept in
+  `data/telemetry.db`, one row per sample with its packet's time and place in the packet. Its own
+  file, because it grows by ~36,000 rows an hour per device and `runway.db` is backed up whole
+  every day.
+- **A relaying or storing listener restarts by itself with the server** — it is a service in
+  front of the platform, not a bench session. Stopping or removing it by hand forgets it.
+- **Relay & store change on a running session** (⇄ *Relay & store* on the session strip): one
+  rule for all devices plus per-device overrides — same as all, no relay, or its own server
+  (`host:port`), including IMEIs that have not connected yet — and *Store* on or off. Saved rules
+  apply at once and survive a restart. A connected device moved to another server gets a new
+  link there with **its login replayed first**, so that server sees a normal session start;
+  a device taken off relay is ACKed by Runway again. New connections are held until the device
+  is identified (its login, normally milliseconds; at most 3 s) so its own rule applies from the
+  first byte; one that never identifies follows the all-devices rule. Runway ACKs exactly the
+  devices it does not relay.
+- **One row per device on a Testing session**, not one per connection: a device that re-dials
+  arrives on a new source port each time and used to look like several devices. The row shows
+  the device's current connection and total records, and `↻ 4 connections · ~45s each` when it
+  re-dials — unfold it for every connection with its time span and record count. Hiding a device
+  in the feed now holds across its reconnects.
+
+### Added — packet archive and replay to a platform (Capture → Archive)
+- **Every stored packet is archived exactly as received, one file per device per day** —
+  `data/archive/<IMEI>/<IMEI>_<YYYY-MM-DD>.log`, one line per packet: received time, message type,
+  the packet (ASCII as it is, anything else as `0x<hex>`, so the bytes come back exactly). A
+  device that reconnects the same day keeps appending; a finished day is gzipped (hourly
+  housekeeping). The packet is the record: time, position, speed, satellites, voltages, ignition
+  and the IMU samples are all extracted from it by the codec when needed, so nothing decoded is
+  stored twice. Measured on the live export: **7.7x smaller gzipped — 20 devices x 30 days in
+  1.1-3.4 GB**, where decoded rows in SQLite would take 19-96 GB. Written with the listener's
+  *Store* switch.
+- **Replay a day to a platform** (Archive page → *Replay*): one connection, the device's last
+  login first (from an earlier day when the day starts mid-session), every packet in its original
+  order and byte for byte, at a chosen pace (max / 200 / 50 / 10 packets/s, held to schedule rather
+  than per-packet sleeps, which Windows timers make ~15 ms coarse). Progress, status and *Stop*
+  on the page; the platform's replies are counted. Each day can also be downloaded as it is.
+
+### Added — safe to run 24x7 (20 devices, weeks)
+- **Retention** (Archive → *Storage*): IMU samples and decoded packets are kept 7 days, their
+  per-minute summaries 365 days, the archived packets forever — each changeable, applied hourly
+  and at once when shortened. The card shows each store's size on disk and the free space. At
+  ~3.6 KB per stored IMU packet, 20 devices fill 0.6-3 GB a day; without a limit the database
+  grew until the disk was full.
+- **Per-minute IMU summaries**, kept as packets arrive: ranges of 24 h and longer draw from them
+  — 0.02 s for 24 h and 0.3 s for 30 days, where reading the samples took 2.7 s per device-day —
+  and a day whose samples have expired still shows at one-minute resolution.
+- **The device list reads a running summary** instead of scanning every stored packet (~22 s
+  at 20 devices x 30 days; the IMU page asks for it every 2 s while following live).
+- **A listener frees each connection when it ends.** Devices re-dial from a new source port each
+  time; every connection's session, codec and statistics used to stay in memory for the life of
+  the listener. Statistics of the last 500 ended connections are kept for the Capture page.
+
+### Added — IMU page (Analysis → IMU)
+- A device's stored samples over time: **seven stacked lanes** — ax, ay, az, |a| (m/s²) and the
+  gyro's pitch, roll, yaw rates (°/s) — each on its own scale, because az carries gravity (~9.8)
+  while ax/ay move around 0 and would flatten on a shared axis. One time axis, one crosshair with
+  every lane's value, drag to zoom, double-click to step back; a packet lane marks NR packets,
+  history packets and missing frames (shaded across every lane). A *Range* list from 30 s to 24 h and All,
+  *Follow live* (redraws every 2 s), tiles (samples, IMU packets, peak |a|, peak rotation and its
+  axis, missing frames, history packets), and **⤓ CSV** of what is on screen.
+- **Lanes | Combined** toggle (remembered): *Combined* puts ax, ay, az and |a| on one chart and
+  pitch, roll, yaw on another — one shared axis per chart (one unit each), every line in its own
+  categorical colour (slots 1-4, fixed order, validated on Runway's surfaces) with the chart's
+  own legend inside it; *Lanes* keeps one chart per value on its own scale.
+- **A timeline scrollbar** under the plot spans the device's whole stored history with the view
+  as its thumb — drag it, swipe sideways on a trackpad, or Shift + wheel over the chart; the
+  window being scrolled to loads as it arrives (stale responses are dropped).
+- The server thins a long range to about one point per pixel — min / max / mean per bucket, drawn
+  as a band and a line — and returns every sample once zoomed in far enough (a 24-hour day is
+  ~860,000 samples per device).
+- **Sample times follow the device's own rule** (sCAN firmware, `SET IMUPKT:1,<ignOnSec>,
+  <ignOffSec>`, default `1,10,2`): a packet's 20 samples are spread evenly over the packet
+  interval (gap = interval / 20, 100 ms at the fastest) and the interval depends on ignition —
+  10 s ON (2 Hz, 500 ms apart), 2 s OFF (10 Hz). Packets therefore join back to back. Each
+  ignition state's interval is **measured** from the spacing of the IMU packets in view (median,
+  so the device clock's 1 s resolution washes out) and falls back to the `IMUPKT` values on the
+  page's *Sample timing* — so a config change on the device (this morning's export ran ignition
+  ON at 2 s) needs no setting. The popover says what is in use: "Ignition ON: every 500 ms
+  (packets every 10 s, measured)". Nothing is stored derived: changing a setting re-times every
+  sample. An early build assumed a fixed 10 Hz and drew a 10 s packet as a 2 s burst plus an
+  8 s hole.
+- **A hole in the samples breaks the line instead of being bridged.** Every point carries its
+  samples' own spacing (`g`: its packet's interval / its sample count), and the line breaks where
+  the next sample is more than 2.5 of those away. Seen live: toggling ignition made the next IMU
+  packet arrive 3 s later (not 2) and one packet carried 18 samples; the page judged holes by the
+  slowest ignition state anywhere in view (500 ms ON) and drew a straight segment over a 1.1 s
+  hole in 100 ms OFF data.
+- **When a running session receives but does not store**, the IMU page says so — "Port 4082 is
+  receiving but not storing" — with a *Turn on Store* button that applies to the running session.
+
+### Added
+- **IMU packet** (packet type `IMU`, alert id `200`): the AIS-140 Locate 140 VB layout field for
+  field (50 fields), with the samples in the parenthesized last field where a normal packet has
+  its OTA response — `(1:x|y|z|p|r|y;2:…;n:…)`. Decoded as `message_type: "imu"` with
+  `io["imu"]` = one `{n, ax, ay, az, pitch, roll, yaw}` per sample and `io["imu_sample_count"]`.
+  The count is read, not assumed (20 today). A malformed sample is kept verbatim in
+  `io["imu_bad_samples"]` instead of failing the packet. Per the firmware: ICM-42670 snapshots —
+  x/y/z acceleration in m/s² (±8 g, gravity included), p/r/y gyro rates in °/s (±250 dps). It is
+  **data, not an alarm** — no `alert_200` in `alarms`.
+- **Custom packets are a registry, not a branch** (`runway/codecs/ais140_custom.py`). They are
+  told apart by *identity* (packet type + alert id) while field positions come from the
+  sentence's *shape*, so the next custom packet is one `@custom_packet(...)` function — no
+  codec, layout or dispatch change — and decodes under every AIS-140-family header. They stay
+  inside the session's codec on purpose: they share the connection with normal packets and a
+  session's codec is picked once, so a codec of their own would never see them.
+- **Layouts are tables** (`NmpLayout` rows in `NMP_LAYOUTS` / `MMI_LAYOUTS`, keyed by field
+  count + parenthesized last field) served by one builder, replacing per-codec `if len(f) ==`
+  branches. Each record names the layout it was read with in `io["layout"]`.
+- **Parser:** a grammar entry can list `"variants"` by field count, and `zenithra.json` names
+  the 50-field `$MMI` layout, neighbour cells included. Any list the codec decodes
+  (`io["imu"]`, the neighbour cells) is shown one row per item. A real IMU capture ships in the
+  release `samples/`.
+- **Platform message-log exports are read directly** — in the Parser (paste or **Upload**), in
+  Dashboard file replay and in `runway replay` (`--fmt log_export`, or auto-detected). The
+  export (`<server time> | <imei> | ,"MMI,...*37 | null"`, one row per message) drops each
+  sentence's `$` and line terminator, which is exactly what a codec frames on, so it used to
+  decode to nothing. `runway/convert/log_export.py` rebuilds the stream the server received:
+  `$` restored, hex messages turned back into bytes, and rows sorted into arrival order (the
+  export lists newest first, and history packets arrive late). Each export layout is one regex
+  in a table.
+
+### Confirmed on live traffic (sCAN 865577071515754, firmware 5.1.30I, 15-minute export)
+- 538 messages, all decoded, none skipped: 448 `IMU` (50 fields, all `ais140_vb`) and 90 `NR`
+  (38 fields). Every IMU packet carries exactly 20 samples numbered 1-20, none malformed.
+- IMU is sent **every 2 s** (448 packets over 895 s of device time) and NR every 10 s, on one
+  shared frame counter that ran 534 → 1071 with no gap. 20 samples per 2 s points to a 10 Hz
+  sample rate — still to be confirmed by the firmware team before per-sample timestamps are
+  derived. 12 IMU packets arrived as history (`H`), out of order — decode by device time.
+- Device time is UTC (server − device = 5 h 30 m + 2-6 s of latency).
+
+### Fixed
+- **Every server start opened one more browser tab.** `serve` (and so `run-server.bat`,
+  `main.py` and the exe) opened the dashboard unconditionally 1.5 s after starting, so each
+  restart left another tab behind. It now opens one only when no Runway page is open: open pages
+  check in with `/api/health` every 4 s, so the launcher waits for the server, gives pages 5 s,
+  and reads `page_seen_s` (its own `?probe=1` check does not count as a page). A first start
+  still opens the dashboard; a restart reuses the tab you have.
+- **A 50-field `$MMI` sentence was read with the 38-field layout** — every field from 26 on
+  landed one slot off (tamper `0`, signal strength empty, MCC `27`, MNC `404`) and the IMU
+  samples went into `tail_raw` unparsed. The same misreading hit the Parser's field names.
+- **Locate 140 VB `$PVT` lost its OTA response.** Its 50-field layout has no odometer, but the
+  codec treated 50 fields as the v1.9 doc layout, read field 50 (`()` — or IMU samples) as an
+  odometer, failed to parse a number and dropped it.
+- The AIS-140 resync cap is 4 KB (was 2 KB), so an IMU packet with up to ~100 samples is read
+  whole instead of being discarded as garbage.
+- **Packet Parser views for sentence protocols (AIS-140, Zenithra, NMEA).** *Grid* only knew
+  Teltonika's AVL records and silently fell back to the field list; it now shows one row per
+  packet and one column per field (item rows such as IMU samples stay in *By record*, which the
+  server marks with `"list"`). *By record* / *Flat* name each packet's type and time in its
+  header and stop at 200 packets — a 538-packet export rendered ~50,000 rows. Values stay on
+  one line with the full text on hover: the IMU payload's ~2,800-character hex took the whole
+  table and wrapped every other value letter by letter. Rows with no bytes (IO elements, IMU
+  samples) use the hex column too, so a sample reads whole. The summary shows Teltonika's
+  handshake / GPRS / CRC / priority figures only for Teltonika, and *By type* otherwise.
+
+### Notes
+- **Upgrading an exe install:** the Parser reads `data/protocols/zenithra.json` from the data
+  folder first. A copy seeded by an older version lacks the 50-field variant — delete it (the
+  shipped one is used) or replace it from this release.
+- The standalone reference parser `data/protocols/zenithra.py` still knows only the 38-field
+  layout; it follows once the IMU layout is confirmed on live traffic.
+
 ## [1.1.24] — 2026-11-04
 
 Rename release. Headline: **the project is called Runway everywhere.** No behaviour changes.

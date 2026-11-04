@@ -5,6 +5,8 @@ Supported on-disk formats (auto-detected, or force with ``fmt``):
 * ``raw``      - the file *is* the raw bytes (binary capture, or NMEA text).
 * ``hex``      - one big hex blob (whitespace/newlines ignored), e.g. "787811010..."
 * ``hexlines`` - one hex-encoded packet per line.
+* ``log_export`` - a platform message-log export (``<time> | <imei> | ,"MMI,...*37 | null"``
+  rows), unwrapped back into the stream the server received — see ``convert/log_export.py``.
 
 The file is streamed in chunks so binary codecs exercise their real framing logic,
 and an optional ``delay`` lets you replay at a realistic pace for the live dashboard.
@@ -16,6 +18,7 @@ import asyncio
 from pathlib import Path
 from typing import AsyncIterator
 
+from ..convert import log_export
 from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..core.registry import register_source
@@ -38,6 +41,13 @@ class FileReplaySource(Source):
     # -- format handling --------------------------------------------------- #
     @staticmethod
     def _sniff(data: bytes) -> str:
+        # An export row runs to ~1 KB (an IMU sentence), so look at more than the first 512
+        # bytes; a cut last line in the sample is tolerated by unwrap().
+        try:
+            if log_export.unwrap(data[:65536].decode("utf-8")) is not None:
+                return "log_export"
+        except UnicodeDecodeError:
+            pass
         sample = data[:512]
         try:
             text = sample.decode("ascii")
@@ -76,6 +86,11 @@ class FileReplaySource(Source):
                 except ValueError:
                     continue  # skip non-hex lines (comments, timestamps)
             return bytes(out)
+        if fmt == "log_export":
+            out = log_export.unwrap(text)
+            if out is None:
+                raise ValueError(f"{self.path.name} is not a message-log export")
+            return out
         raise ValueError(f"Unknown file format '{fmt}'")
 
     # -- Source contract --------------------------------------------------- #

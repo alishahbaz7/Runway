@@ -41,6 +41,7 @@ class RawFrame:
     peer: Optional[str] = None          # remote address, topic, or file name
     source: Optional[str] = None        # name of the Source that produced it
     received_at: datetime = field(default_factory=utcnow)
+    closed: bool = False                # the connection ended: the pipeline releases its session
 
 
 @dataclass

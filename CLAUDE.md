@@ -62,6 +62,52 @@ reads is handled. A codec instance is created **once per session and cached**, s
 state (e.g. the IMEI learned from a GT06 login that later location packets omit) must live in
 `session.state` / `session.device_id`, **never on `self` or in module globals**.
 
+**AIS-140 family: layouts by shape, custom packets by identity** (`ais140.py`, `zenithra.py`,
+`ais140_custom.py`): the normal/alert sentence comes in several layouts sharing fields 1-25.
+Each is an `NmpLayout` row in `NMP_LAYOUTS` / `MMI_LAYOUTS`, keyed by `(field count, last
+field parenthesized)`; one builder (`Ais140Codec._nmp_record`) serves them all. Our own
+packets (IMU = type `IMU`, alert id `200`) ride those layouts and put their data in the
+parenthesized field; `CUSTOM_PACKETS` maps `(packet_type, alert_id)` → payload parser. They
+must stay inside the session's codec, never a codec of their own — they share the connection
+with normal packets and a session's codec is chosen once. Add a layout or a custom packet as a
+table row / one decorated function, not a branch (guide: [docs/ADDING_A_PROTOCOL.md](docs/ADDING_A_PROTOCOL.md)).
+
+**Relay + store: device data lands on Runway, forked two ways** (`sources/tcp_server.py`,
+`storage/outbox.py`, `storage/telemetry.py`, `sinks/telemetry_store.py`): a listener with relay
+rules (`routes={"all": "host:port", "devices": {imei: "host:port" | "off"}}`) gives every device
+its own upstream link (`_Link`, one per device + target, shared across that device's
+reconnects) to the server its rule names, and passes the server's replies down. Every byte is
+appended to the **outbox** (`data/relay_outbox.db`, one SQLite queue per device + target, all
+access on its single-thread `EXECUTOR`) in the read loop *before* the pipeline sees it, and the
+link sends from the queue — so a platform outage loses nothing, decoding/storage never slows the
+platform feed, and a backlog survives a restart (`_resume_backlog`). Rows are deleted only
+`GRACE` (2 s) after they were written with the link still up — at-least-once: the last ~2 s
+before a drop arrive twice. A link outlives its device's connection until its queue is empty; a
+new link sends the device's stored login (`hello`) first unless the queue already starts with
+it. The queue is capped (2 GB, oldest dropped and counted). Rules change while running
+(`set_routes`, `PUT /api/listen/{id}/routes`); the pipeline tells the source each connection's
+device via `Source.identified()` *before* that record's ACK, because the route decides who ACKs:
+Runway ACKs only devices it does not relay — never ACK on a relayed device's server's behalf.
+The pipeline frees a connection's session/codec on `RawFrame.closed` (a listener runs for weeks
+and devices re-dial from a new source port every time). `store` adds the `STORE_SINKS` —
+`telemetry_store` (`data/telemetry.db`, separate from `runway.db`; what the IMU page reads) and
+`archive_store` (`storage/archive.py`: the packets exactly as received, one gzipped file per
+device per day — the long-term record and the source for *Replay to platform*; decode from it
+rather than storing decoded copies) — also switchable live (`PUT /api/listen/{id}/store` swaps
+`pipeline.sinks` as a new list). Rules or store make the listener an autostart service
+(`AUTOSTART_KEY` in settings, spawned in `lifespan`). IMU sample times are computed at read time
+(`sample_time_sql`) from the `imu_timing` setting — never store derived sample times.
+
+**Running 24x7** (20 devices for weeks): `telemetry.db` keeps running summaries written with each
+packet — `device_summary` (the device list; a scan of `packets` took ~22 s at that scale) and
+`imu_minute` (per device-minute count + min/max/sum per axis). `imu_series` reads `imu_minute`
+when a point covers a minute or more (24 h and up: 0.02 s instead of 2.7 s) or when the range's
+samples are past retention. Hourly housekeeping (`_housekeep_once` in `api/app.py`) gzips
+finished archive days and purges by the `storage_retention` setting (samples + packets 7 days,
+minutes 365, archive forever by default). Purges go device by device through the
+`(device_id, time)` indexes, in batches — a bare time filter scans every row each hour. Any new
+per-packet table needs a retention rule here and an index that serves its purge.
+
 **Pipeline ↔ API bridge** (`runway/storage/live.py`): two process-wide singletons connect the
 parse loop to the web layer — `store` (ring buffer + per-device summaries; the `memory_store` sink
 writes it, REST reads it) and `hub` (fan-out bus; the `ws_broadcast` sink publishes, each dashboard

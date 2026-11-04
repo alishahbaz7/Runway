@@ -182,6 +182,7 @@ def main() -> int:
     # since that's the primary QC protocol
     _copy_if(ROOT / "tests" / "fixtures" / "ais140_sample.log", stage / "samples" / "ais140_sample.log")
     _copy_if(ROOT / "tests" / "fixtures" / "zenithra_sample.log", stage / "samples" / "zenithra_sample.log")
+    _copy_if(ROOT / "tests" / "fixtures" / "zenithra_imu_sample.log", stage / "samples" / "zenithra_imu_sample.log")
     _copy_if(ROOT / "samples" / "teltonika_demo.hex", stage / "samples" / "teltonika_demo.hex")
     _copy_if(ROOT / "tests" / "fixtures" / "nmea_sample.log", stage / "samples" / "nmea_sample.log")
 

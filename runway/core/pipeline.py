@@ -16,12 +16,18 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 
 from . import registry
 from .interfaces import Codec, Sink, Source
 from .models import RawFrame, Session
 
 log = logging.getLogger("runway.pipeline")
+
+
+def _known_id(device_id: str | None) -> bool:
+    """A real device id — not empty, and not a codec's ``<name>-unknown`` placeholder."""
+    return bool(device_id) and device_id != "unknown" and not device_id.endswith("-unknown")
 
 
 class Pipeline:
@@ -36,9 +42,11 @@ class Pipeline:
         self.enrich = enrich
         self._sessions: dict[str, Session] = {}
         self._codecs: dict[str, Codec] = {}
+        self._identified: set[str] = set()     # sessions whose device the source has been told
+        self._closed: deque[str] = deque()     # ended connections, oldest first (stats pruning)
         self.records_emitted = 0
         self.bytes_in = 0
-        self.per_peer: dict[str, dict] = {}   # peer -> {records, bytes, last} (server lifetime)
+        self.per_peer: dict[str, dict] = {}   # peer -> {records, bytes, first, last} (server lifetime)
 
     # -- session / codec selection ----------------------------------------- #
     def _session_for(self, frame: RawFrame) -> Session:
@@ -72,10 +80,13 @@ class Pipeline:
             await sink.start()
         try:
             async for frame in self.source.frames():
+                if frame.closed:
+                    self._release(frame)
+                    continue
                 self.bytes_in += len(frame.data)
                 pp = self.per_peer.get(frame.peer or frame.source or "?")
-                if pp is None:
-                    pp = {"records": 0, "bytes": 0, "last": 0.0}
+                if pp is None:                # first bytes on this connection = when it began
+                    pp = {"records": 0, "bytes": 0, "first": time.time(), "last": 0.0}
                     self.per_peer[frame.peer or frame.source or "?"] = pp
                 pp["bytes"] += len(frame.data)
                 sess = self._session_for(frame)
@@ -96,6 +107,23 @@ class Pipeline:
                  self.bytes_in, self.records_emitted)
         return self.records_emitted
 
+    # A listener runs for weeks and devices re-dial every minute or so, each time from a new
+    # source port: without this every connection's session, codec and stats lived forever.
+    MAX_CLOSED_PEERS = 500
+
+    def _release(self, frame: RawFrame) -> None:
+        """The connection ended: free its session and codec; keep its stats (the Capture page
+        lists a device's recent connections) for the last MAX_CLOSED_PEERS ended ones only."""
+        key = f"{frame.transport}:{frame.peer or frame.source or 'default'}"
+        self._sessions.pop(key, None)
+        self._codecs.pop(key, None)
+        self._identified.discard(key)
+        peer = frame.peer or frame.source or "?"
+        if peer in self.per_peer:
+            self._closed.append(peer)
+        while len(self._closed) > self.MAX_CLOSED_PEERS:
+            self.per_peer.pop(self._closed.popleft(), None)
+
     async def _drain(self, codec: Codec, sess: Session, frame: RawFrame) -> None:
         while sess.buffer:
             try:
@@ -108,6 +136,19 @@ class Pipeline:
             if out.consumed <= 0:
                 break  # needs more data
             del sess.buffer[: out.consumed]
+
+            # Tell the source who is on this connection BEFORE the ACK goes out: a source that
+            # relays per device decides from it where the bytes go — and so who ACKs them.
+            if sess.id not in self._identified:
+                first = next((r for r in out.records if _known_id(r.device_id)), None)
+                if first is not None:
+                    self._identified.add(sess.id)
+                    hello = (bytes.fromhex(first.raw_hex)
+                             if first.message_type == "login" and first.raw_hex else b"")
+                    try:
+                        await self.source.identified(frame.peer or "", first.device_id, hello)
+                    except Exception:
+                        log.exception("source failed to take the device id for %s", frame.peer)
 
             if out.ack:
                 try:

@@ -37,6 +37,13 @@ class Source(ABC):
         """
         return None
 
+    async def identified(self, peer: str, device_id: str, hello: bytes) -> None:
+        """The pipeline learned which device is on ``peer`` (once per session, before that
+        record's ACK is sent). ``hello`` is the device's login as received, or ``b""`` when the
+        first identified record was not a login. A source that routes per device uses it;
+        everything else ignores it."""
+        return None
+
     async def close(self) -> None:
         return None
 

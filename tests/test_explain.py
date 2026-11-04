@@ -270,3 +270,28 @@ async def test_ingest_accepts_text_and_auto_detects():
     r = await _post("/api/ingest", {"hex": ZENITHRA_CAN, "peer": "test-parser"})
     assert r.status_code == 200
     assert r.json()["records"] == 1
+
+
+async def test_parse_picks_the_grammar_variant_by_field_count():
+    """$MMI comes in two layouts. The 50-field one (the custom IMU packet) must be named from
+    its own grammar variant — read with the 38-field list, every field from 26 on was off by
+    one (gsm_signal 'O', mcc '27') — and its samples listed one row each, not as one blob."""
+    from pathlib import Path
+
+    imu = (Path(__file__).parent / "fixtures" / "zenithra_imu_sample.log").read_text(encoding="ascii")
+    d = (await _post("/api/parse", {"hex": imu})).json()
+    assert d["protocol"] == "zenithra" and len(d["packets"]) == 1
+    pkt = d["packets"][0]
+    named = {f["name"]: f["value"] for f in pkt["fields"]}
+    assert (named["emergency_status"], named["tamper_alert"]) == ("0", "O")
+    assert (named["gsm_signal"], named["mcc"], named["frame_number"]) == ("27", "404", "001831")
+    assert named["payload"].startswith("(1:0.06|0.11|9.82|")
+    rows = [f for f in pkt["fields"] if f["group"] == "imu (20)"]
+    assert len(rows) == 20 and rows[0]["value"].startswith("n=1  ax=0.06  ay=0.11  az=9.82")
+    assert {f.get("list") for f in rows} == {"imu"}         # item rows are marked for the grid
+    assert named["payload"] and "list" not in next(f for f in pkt["fields"] if f["name"] == "payload")
+    assert not any(g.startswith("CAN frames") for g in _groups(pkt))
+
+    # the 38-field layout keeps its default field list
+    nr = {f["name"]: f["value"] for f in (await _post("/api/parse", {"hex": ZENITHRA_CAN})).json()["packets"][0]["fields"]}
+    assert (nr["tamper_alert"], nr["gsm_signal"]) == ("O", "31")

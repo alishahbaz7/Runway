@@ -546,9 +546,152 @@ def test_zenithra_base_ais140_headers_still_parse():
 def test_zenithra_long_can_dump_exceeds_ais140_sentence_cap():
     """A busy bus can push the sentence past the AIS-140 resync cap, so this codec raises
     max_sentence: a long sentence that has only partly arrived must keep waiting for the
-    rest instead of being dropped as garbage the way the 2 KB base limit would."""
+    rest instead of being dropped as garbage the way the 4 KB base limit would."""
     c = codec("zenithra")
     assert c.max_sentence > codec("ais140").max_sentence
-    partial = b"$MMI,V2.2.0,5.1.29C,NR,1,L,868221073948609,DL1CAB1234," + b"0" * 3000
+    partial = b"$MMI,V2.2.0,5.1.29C,NR,1,L,868221073948609,DL1CAB1234," + b"0" * 5000
     assert c.decode(partial, Session(id="t")).consumed == 0            # need full sentence
     assert codec("ais140").decode(partial, Session(id="t")).consumed > 0   # base would resync
+
+
+# --------------------------------------------------------------------------- #
+# Custom packets — IMU (packet type IMU, alert id 200): 6-axis samples in the payload field
+# of the 50-field AIS-140 VB layout. The $MMI capture in the fixture is real (IMEI
+# 865577071515754, firmware 5.1.30I); the $PVT/GTRP sentences are built from it and from the
+# Locate 140 VB AIS-140 compliance sheet.
+# --------------------------------------------------------------------------- #
+IMU_MMI = (FIX / "zenithra_imu_sample.log").read_bytes()
+IMU_PVT = IMU_MMI.replace(b"$MMI,V2.2.0,5.1.30I,", b"$PVT,GTRP,7.5.1A,")
+VB_NR = (b"$PVT,GTRP,V7.6.0,NR,1,L,869742088949655,DL1CAB1234,1,29072026,35636,28.550455,N,"
+         b"77.268884,E,0,300,26,221,1.05,0.57,IND airtel,1,1,12.8,4.1,0,O,25,404,10,946,E281316,"
+         b"29,946,E281315,15,946,E6E2C2A,17,946,DFEF434,15,946,9DA4C34,1100,1,138,1.1,0.9,()*85\r\n")
+
+
+def _vb_head_checks(rec):
+    """The fields every 50-field VB sentence must map — emergency_status is back at 26."""
+    io = rec.io
+    assert io["layout"] == "ais140_vb"
+    assert (io["emergency_status"], io["tamper_alert"]) == ("0", "O")
+    assert rec.gsm_signal == 27
+    assert (io["mcc"], io["mnc"], io["lac"], io["cell_id"]) == ("404", "10", "946", "E28130C")
+    assert io["nmr"][0] == {"signal_strength": "31", "lac": "946", "cell_id": "E281316"}
+    assert io["nmr"][3] == {"signal_strength": "16", "lac": "946", "cell_id": "DFEF436"}
+    assert (io["digital_input_status"], io["digital_output_status"]) == ("1000", "00")
+    assert io["frame_number"] == "001831"
+    assert (io["analog_input_1"], io["analog_input_2"]) == (0.5, 0.0)
+    assert rec.odometer_m is None                       # the VB layout carries none
+
+
+def test_imu_payload_parser():
+    from runway.codecs.ais140_custom import CUSTOM_PACKETS
+
+    parse = CUSTOM_PACKETS[("IMU", 200)].parse
+    out = parse("(1:0.06|0.11|9.82|-0.49|0.37|0.69;2:0.04|0.11|9.81|-0.47|0.34|0.79)")
+    assert out["imu_sample_count"] == 2
+    assert out["imu"][0] == {"n": 1, "ax": 0.06, "ay": 0.11, "az": 9.82,
+                             "pitch": -0.49, "roll": 0.37, "yaw": 0.69}
+    # an idle/empty payload is a valid packet with no samples, not an error
+    assert parse("()") == {"imu_sample_count": 0}
+    # a malformed sample is kept verbatim, the good ones still parse
+    out = parse("(1:0.1|0.2|9.8|0|0|0;2:0.1|0.2;x:1|2|3|4|5|6;3:0.1|0.2|9.8|0|0|0)")
+    assert [s["n"] for s in out["imu"]] == [1, 3]
+    assert out["imu_bad_samples"] == ["2:0.1|0.2", "x:1|2|3|4|5|6"]
+
+
+def test_zenithra_imu_packet_real_capture():
+    """Before v1.1.25 this 50-field $MMI was forced into the 38-field NR mapping: every field
+    from 26 on landed one slot off (tamper '0', mcc '27', ...) and the samples were lost in
+    tail_raw."""
+    out = codec("zenithra").decode(IMU_MMI, Session(id="t"))
+    assert out.consumed == len(IMU_MMI)
+    assert out.ack == b"+##Received OK"
+    rec = out.records[0]
+    assert rec.protocol == "zenithra"
+    assert rec.device_id == "865577071515754"
+    assert rec.message_type == "imu"
+    assert rec.alarms == []                             # data, not an alarm (no "alert_200")
+    assert rec.event_time.isoformat() == "2026-11-04T06:56:24+00:00"
+    assert (rec.io["vendor_id"], rec.io["packet_version"]) == ("MMI", "V2.2.0")
+    assert (rec.io["packet_type"], rec.io["alert_id"]) == ("IMU", 200)
+    _vb_head_checks(rec)
+    assert rec.io["imu_sample_count"] == 20
+    assert [s["n"] for s in rec.io["imu"]] == list(range(1, 21))
+    assert rec.io["imu"][-1] == {"n": 20, "ax": 0.05, "ay": 0.10, "az": 9.82,
+                                 "pitch": -0.53, "roll": 0.38, "yaw": 0.69}
+    assert "ota_update_details" not in rec.io         # the payload slot holds IMU data here
+    assert rec.io["can_frame_count"] == 0              # the IMU block is not mistaken for CAN
+    assert rec.io["checksum"] == "61"
+
+
+def test_ais140_pvt_imu_and_vb_normal_packet():
+    """The same IMU packet under the Locate 140 VB header, and that layout's plain NR packet —
+    whose OTA response was read as an odometer (and dropped) before v1.1.25."""
+    c = codec("ais140")
+    rec = c.decode(IMU_PVT, Session(id="t")).records[0]
+    assert rec.message_type == "imu"
+    assert rec.io["vendor_id"] == "GTRP"
+    _vb_head_checks(rec)
+    assert rec.io["imu_sample_count"] == 20
+
+    out = c.decode(VB_NR, Session(id="t"))
+    rec = out.records[0]
+    assert out.ack == b"+##Received OK"
+    assert rec.message_type == "normal" and rec.alarms == []
+    assert rec.io["layout"] == "ais140_vb"
+    assert rec.io["ota_update_details"] == "()"
+    assert rec.odometer_m is None
+    assert rec.io["frame_number"] == "138"
+    assert (rec.io["digital_input_status"], rec.io["digital_output_status"]) == ("1100", "1")
+    assert (rec.io["analog_input_1"], rec.io["analog_input_2"]) == (1.1, 0.9)
+    assert rec.io["nmr"][0] == {"signal_strength": "29", "lac": "946", "cell_id": "E281315"}
+
+
+def test_imu_interleaved_with_normal_packets_on_one_connection():
+    """A device sends IMU between its normal packets on the same connection, and a session's
+    codec is picked once — so IMU must decode inside the session's codec, not a codec of its
+    own. Login -> NR (38-field layout) -> IMU (50-field layout) -> NR, one codec."""
+    from runway.core.pipeline import Pipeline
+
+    data = (FIX / "zenithra_sample.log").read_bytes() + IMU_MMI
+    picked = Pipeline(source=None, codec="auto", sinks=[])._pick_codec(data)
+    assert picked.name == "zenithra"
+    sess, seen = Session(id="t"), []
+    while data:
+        out = picked.decode(data, sess)
+        assert out.consumed > 0
+        seen += [(r.message_type, r.io.get("layout")) for r in out.records]
+        data = data[out.consumed:]
+    assert seen == [("login", None), ("normal", "zenithra_mmi_nr"),
+                    ("normal", "zenithra_mmi_nr"), ("imu", "ais140_vb")]
+
+
+def test_custom_packet_needs_only_a_registered_parser():
+    """The scalability contract: a new custom packet is one decorated function — no codec,
+    layout or dispatch change — and it decodes under every AIS-140-family header."""
+    from runway.codecs.ais140_custom import CUSTOM_PACKETS, custom_packet
+
+    @custom_packet("TST", 201, message_type="test_payload", alarm="test_event")
+    def _test(field):
+        return {"test_body": field.strip("()")}
+
+    try:
+        for name, sentence in (("zenithra", IMU_MMI), ("ais140", IMU_PVT)):
+            s = sentence.replace(b",IMU,200,", b",TST,201,").split(b",(")[0] + b",(hello)*00\r\n"
+            rec = codec(name).decode(s, Session(id="t")).records[0]
+            assert rec.message_type == "test_payload"
+            assert rec.alarms == ["test_event"]
+            assert rec.io["test_body"] == "hello"
+            assert rec.io["layout"] == "ais140_vb"
+    finally:
+        CUSTOM_PACKETS.pop(("TST", 201), None)
+
+
+def test_imu_packet_with_more_samples_fits_the_base_sentence_cap():
+    """The sample count may grow with firmware tuning: 100 samples (~3.8 KB) must still be
+    read as one sentence by the base codec, not dropped by its resync valve."""
+    many = ";".join(f"{i}:0.05|0.10|9.82|-0.53|0.38|0.69" for i in range(1, 101))
+    s = IMU_PVT.split(b",(")[0] + b",(" + many.encode() + b")*61\r\n"
+    assert len(s) < codec("ais140").max_sentence
+    out = codec("ais140").decode(s, Session(id="t"))
+    assert out.consumed == len(s)
+    assert out.records[0].io["imu_sample_count"] == 100

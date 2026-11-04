@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · IMU</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="imu">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>IMU</h1>
+      <span class="tag">6-axis samples kept by listeners with Store on</span>
+    </header>
+
+    <!-- one row of filters above everything it scopes: device, range, follow -->
+    <div id="imu-bar">
+      <label class="imu-fld">Device
+        <select id="imu-device"></select>
+      </label>
+      <label class="imu-fld imu-range-fld">Range
+        <select id="imu-range">
+          <option value="30">30 s</option>
+          <option value="60">1 min</option>
+          <option value="180">3 min</option>
+          <option value="300">5 min</option>
+          <option value="900" selected>15 min</option>
+          <option value="3600">1 h</option>
+          <option value="21600">6 h</option>
+          <option value="86400">24 h</option>
+          <option value="0">All</option>
+        </select>
+      </label>
+      <span class="tcp-seg" id="imu-layout" title="Lanes: one chart per value, each on its own scale · Combined: ax, ay, az and |a| on one chart, pitch, roll and yaw on another">
+        <button class="seg on" data-layout="lanes">Lanes</button><button class="seg" data-layout="combined">Combined</button>
+      </span>
+      <label class="imu-follow" title="Keep the right edge at the newest sample and redraw every 2 s">
+        <input type="checkbox" id="imu-live" /> Follow live
+      </label>
+      <button id="imu-unzoom" class="ghost mini" hidden>⟲ Reset zoom</button>
+      <span class="spacer"></span>
+      <span id="imu-range-text" class="muted mono"></span>
+      <span class="imu-timing-wrap">
+        <button id="imu-timing-btn" class="ghost mini" title="How each sample's time is worked out from its packet">Sample timing ▾</button>
+        <div id="imu-timing" class="imu-pop" hidden>
+          <div id="imu-timing-now" class="imu-timing-now"></div>
+          <span class="imu-pop-h" title="The device's SET IMUPKT:1,&lt;ignOnSec&gt;,&lt;ignOffSec&gt; — default 1,10,2. A packet's 20 samples are spread over its interval.">IMU packet every</span>
+          <div class="imu-pop-pair">
+            <label class="imu-fld">Ignition ON (s)
+              <input id="imu-on" type="number" min="2" max="3600" step="1" />
+            </label>
+            <label class="imu-fld">Ignition OFF (s)
+              <input id="imu-off" type="number" min="2" max="3600" step="1" />
+            </label>
+          </div>
+          <label class="imu-follow" title="Use the spacing of the packets themselves when there are enough in range; the values above fill in otherwise">
+            <input id="imu-measure" type="checkbox" /> Measure from the packets
+          </label>
+          <label class="imu-fld">Packet time marks
+            <select id="imu-anchor">
+              <option value="last">the last sample</option>
+              <option value="first">the first sample</option>
+            </select>
+          </label>
+          <div id="imu-timing-err" class="relay-err"></div>
+          <button id="imu-timing-save">Save</button>
+        </div>
+      </span>
+      <button id="imu-csv" class="ghost mini" title="Download what is on screen as CSV">⤓ CSV</button>
+    </div>
+
+    <div id="imu-notice" class="imu-notice" hidden></div>
+    <div id="imu-tiles" class="imu-tiles"></div>
+
+    <div id="imu-legend" class="imu-legend"></div>
+    <div id="imu-chart-wrap">
+      <canvas id="imu-chart"></canvas>
+      <div id="imu-scroll" class="imu-scroll" hidden title="Scroll through time (or Shift + wheel over the chart)"><div id="imu-scroll-inner"></div></div>
+      <div id="imu-tip" class="imu-tip" hidden></div>
+      <p id="imu-empty" class="empty" hidden></p>
+    </div>
+  </div>
+
+  <script src="shell.js"></script>
+  <script src="imu.js"></script>
+</body>
+</html>

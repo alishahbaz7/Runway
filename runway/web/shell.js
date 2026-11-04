@@ -33,6 +33,8 @@
   const ICONS = {
     dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
     parser: svg('<path d="M8 6 3 12l5 6"/><path d="M16 6l5 6-5 6"/>'),
+    imu: svg('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'),
+    archive: svg('<path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/>'),
     converter: svg('<path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="M17 12l4 4-4 4"/><path d="M21 16H8"/>'),
     tcp: svg('<path d="M4.9 16.1a9 9 0 0 1 0-8.2"/><path d="M7.8 13.3a5 5 0 0 1 0-2.6"/><path d="M16.2 10.7a5 5 0 0 1 0 2.6"/><path d="M19.1 7.9a9 9 0 0 1 0 8.2"/><circle cx="12" cy="12" r="1.6"/>'),
     qc: svg('<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5 11 15l4.5-5"/>'),
@@ -60,8 +62,12 @@
       { id: "parser", label: "Packet Parser", icon: "parser", href: "parser.html" },
       { id: "converter", label: "Converter", icon: "converter", href: "converter.html" },
     ] },
+    { title: "Analysis", items: [
+      { id: "imu", label: "IMU", icon: "imu", href: "imu.html" },
+    ] },
     { title: "Capture", items: [
       { id: "capture", label: "Capture", icon: "tcp", href: "capture.html" },   // Testing + QC (per-tab)
+      { id: "archive", label: "Archive", icon: "archive", href: "archive.html" },  // stored packets, replay
       { id: "captures", label: "Captures", icon: "captures" },        // no page yet → "soon"
     ] },
     { title: "Library", items: [

@@ -144,6 +144,12 @@
     peerInfo.set(r.peer, info);
   }
   const deviceLabel = (peer) => (peerInfo.get(peer) || {}).device_id || peer || "";
+  // Testing hides by DEVICE (its IMEI), not by connection: a device re-dials with a new source
+  // port each time, and a device the operator hid must stay hidden on its next connection.
+  // A peer whose device is not known yet is hidden by its own address.
+  const deviceKey = (peer) => (peerInfo.get(peer) || {}).device_id || peer;
+  const isHiddenTesting = (r) => hiddenPeers.has(r.peer) || hiddenPeers.has(deviceKey(r.peer))
+    || (!!r.device_id && hiddenPeers.has(r.device_id));
   const protoLabel = (s) => s.identified_as || (s.protocol_mode === "manual" ? s.protocol
     : (s.status === "running" ? "identifying…" : "unidentified"));
   // Human label for a QC verdict/state (used on the tab, summary pill, feed badge).
@@ -188,6 +194,8 @@
     $("cap-mode-qc").classList.toggle("on", m === "qc");
     $("cap-mode-test").classList.toggle("on", m === "test");
     $("cap-test-proto").style.display = m === "test" ? "" : "none";
+    $("cap-relay-fld").style.display = m === "test" ? "" : "none";
+    $("cap-store-fld").style.display = m === "test" ? "" : "none";
     $("cap-qc-mode-fld").style.display = m === "qc" ? "" : "none";
     $("cap-qc-operator-fld").style.display = m === "qc" ? "" : "none";
     $("cap-qc-proto-fld").style.display = (m === "qc" && $("cap-qc-mode").value === "manual") ? "" : "none";
@@ -236,6 +244,8 @@
       LOCAL_IP = d.local_ip || "";
       $("cap-port").value = d.port;
       $("cap-host").value = d.local_ip || d.host || "0.0.0.0";
+      $("cap-relay").value = d.relay || "";
+      $("cap-store").checked = !!d.store;
       $("cap-localip").textContent = LOCAL_IP
         ? `This machine: ${LOCAL_IP}${d.hostname ? " (" + d.hostname + ")" : ""} — devices dial in here`
         : "";
@@ -254,7 +264,10 @@
     const host = $("cap-host").value.trim() || "0.0.0.0";
     try {
       if (draftMode === "test") {
-        const r = await postJSON("/api/listen", { codec: $("cap-codec").value, host, port });
+        const r = await postJSON("/api/listen", {
+          codec: $("cap-codec").value, host, port,
+          relay: $("cap-relay").value.trim(), store: $("cap-store").checked,
+        });
         jobs.set(r.job.id, r.job); mapJobPeers(r.job);
         draftOpen = false;
         msg(null, "ok", `listening on ${host}:${port}`);
@@ -427,10 +440,131 @@
     } else {
       meta.append(el("span", "", `${t.job.records || 0} records`));
       meta.append(el("span", "", fmtBytes(t.job.bytes)));
+      const routes = routesOf(t.job), nRules = Object.keys(routes.devices).length;
+      if (routes.all || nRules) {
+        const r = el("span", "cap-fork", "↗ " + [routes.all ? `all → ${routes.all}` : "",
+          nRules ? `${nRules} device rule${nRules === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · "));
+        r.title = "raw bytes are forwarded per these rules; each server's replies come back down";
+        meta.append(r);
+      }
+      if (t.job.store) {
+        const s = el("span", "cap-fork", "◉ stored");
+        s.title = "packets and IMU samples are kept in data/telemetry.db (IMU page)";
+        meta.append(s);
+      }
+      const edit = el("button", "ghost mini", "⇄ Relay & store");
+      edit.title = "change where each device's data is relayed, and whether it is stored — while the session runs";
+      edit.onclick = () => openRelayDialog(t);
+      meta.append(edit);
     }
     const err = isQc ? t.sess.error : t.job.error;
     if (err) meta.append(el("span", "err", err));
     host.append(meta);
+  }
+
+  // ---- Relay & store, changed on a running session ------------------------------
+  // One rule for every device ("All devices → host:port") plus per-device overrides: follow the
+  // all-devices rule, no relay, or its own server. Saved rules apply at once — a connected
+  // device moved to another server gets a new link there, its login replayed first.
+  const routesOf = (job) => job.routes || { all: job.relay || "", devices: {} };
+  function openRelayDialog(t) {
+    const job = jobs.get(tabJobId(t)) || t.job;
+    const routes = routesOf(job);
+    const known = deviceGroups((job && job.clients) || []).filter((g) => g.known).map((g) => g.key);
+    const ids = [...new Set([...known, ...Object.keys(routes.devices)])];
+
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal relay-modal");
+    const head = el("div", "modal-head");
+    head.append(el("span", "", `Relay & store — :${job.port}`),
+      Object.assign(el("button", "modal-x", "✕"), { onclick: () => overlay.remove() }));
+    const body = el("div", "relay-body");
+
+    const storeLbl = el("label", "relay-check");
+    const storeCb = el("input"); storeCb.type = "checkbox"; storeCb.checked = !!job.store;
+    storeLbl.append(storeCb, document.createTextNode(" Store packets and IMU samples"));
+    storeLbl.title = "kept in data/telemetry.db — the IMU page reads it";
+
+    const allIn = el("input", "relay-target"); allIn.value = routes.all || ""; allIn.placeholder = "host:port";
+    allIn.spellcheck = false;
+    const allRow = el("div", "relay-row");
+    allRow.append(el("span", "relay-dev", "All devices"), el("span"), allIn);
+
+    const list = el("div", "relay-list");
+    const rows = [];
+    const addRow = (id) => {
+      const cur = routes.devices[id];
+      const row = el("div", "relay-row");
+      const sel = el("select");
+      [["follow", "Same as all devices"], ["off", "No relay"], ["own", "Its own server"]]
+        .forEach(([v, label]) => sel.appendChild(new Option(label, v)));
+      sel.value = !cur ? "follow" : cur === "off" ? "off" : "own";
+      const target = el("input", "relay-target"); target.placeholder = "host:port"; target.spellcheck = false;
+      target.value = cur && cur !== "off" ? cur : "";
+      const sync = () => { target.disabled = sel.value !== "own"; if (target.disabled) target.value = ""; };
+      sel.onchange = () => { sync(); if (sel.value === "own") target.focus(); };
+      sync();
+      row.append(el("span", "relay-dev mono", id), sel, target);
+      list.append(row);
+      rows.push({ id, sel, target });
+    };
+    ids.forEach(addRow);
+    if (!ids.length) list.append(el("p", "empty", "No devices identified yet."));
+
+    const addIn = el("input", "relay-add"); addIn.placeholder = "IMEI"; addIn.spellcheck = false;
+    const addBtn = el("button", "ghost mini", "+ Add device");
+    addBtn.onclick = () => {
+      const id = addIn.value.trim();
+      if (!id || rows.some((r) => r.id === id)) return;
+      const empty = list.querySelector(".empty"); if (empty) empty.remove();
+      addRow(id); addIn.value = "";
+    };
+    const addRowEl = el("div", "relay-addrow"); addRowEl.append(addIn, addBtn);
+
+    const err = el("div", "relay-err");
+    body.append(storeLbl, el("div", "relay-h", "Relay"), allRow, list, addRowEl, err);
+
+    const foot = el("div", "modal-foot");
+    const cancel = el("button", "ghost", "Cancel"); cancel.onclick = () => overlay.remove();
+    const save = el("button", "", "Save");
+    save.onclick = async () => {
+      const devices = {};
+      for (const r of rows) {
+        if (r.sel.value === "off") devices[r.id] = "off";
+        else if (r.sel.value === "own") {
+          if (!r.target.value.trim()) { err.textContent = `${r.id}: enter host:port`; r.target.focus(); return; }
+          devices[r.id] = r.target.value.trim();
+        }
+      }
+      try {
+        const put = (path, b) => api(path, { method: "PUT", headers: { "content-type": "application/json" },
+                                             body: JSON.stringify(b) });
+        let res = await put(`/api/listen/${job.id}/routes`, { all: allIn.value.trim(), devices });
+        if (storeCb.checked !== !!job.store) res = await put(`/api/listen/${job.id}/store`, { store: storeCb.checked });
+        jobs.set(res.job.id, { ...(jobs.get(res.job.id) || {}), ...res.job });
+        overlay.remove();
+        msg(null, "ok", "relay & store saved — applied to connected devices");
+        renderAll();
+      } catch (e) { err.textContent = e.message; }
+    };
+    foot.append(cancel, save);
+    modal.append(head, body, foot);
+    overlay.append(modal);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.append(overlay);
+  }
+
+  // This device's own link to the next server: state, and bytes each way on hover.
+  function relayTag(r) {
+    const label = { up: "↗ relay", connecting: "↗ connecting", down: "↗ relay down" }[r.state] || "↗ relay";
+    const waiting = r.queued > 0 ? ` · ${r.queued.toLocaleString()} queued` : "";
+    const tag = el("span", "cap-relay " + (r.state || "") + (r.queued > 0 ? " queued" : ""), label + waiting);
+    const age = r.oldest ? Math.max(0, Math.round(Date.now() / 1000 - r.oldest)) : 0;
+    tag.title = `${r.target} · ${r.state}` + (r.error ? ` (${r.error})` : "")
+      + ` · up ${fmtBytes(r.bytes_up)} · down ${fmtBytes(r.bytes_down)}`
+      + (r.queued > 0 ? ` · waiting: ${fmtBytes(r.queued_bytes)}, oldest ${fmtDur(age)} ago` : "")
+      + (r.dropped ? ` · ${fmtBytes(r.dropped)} dropped past the outbox limit` : "");
+    return tag;
   }
 
   function renderDevices() {
@@ -442,7 +576,8 @@
     const running = tabRunning(t);
     const j = jobs.get(tabJobId(t));
     const clients = (j && j.clients) || [];
-    const count = isQc ? (qcDevices(t.sess).length || clients.length) : clients.length;
+    const groups = isQc ? [] : deviceGroups(clients);
+    const count = isQc ? (qcDevices(t.sess).length || clients.length) : groups.length;
 
     const headEl = el("div", "tcp-peers-head");
     const caret = el("button", "tcp-collapse", devicesCollapsed ? "▸" : "▾");
@@ -454,7 +589,8 @@
     };
     caret.onclick = toggle;
     headEl.append(caret);
-    const title = el("span", "tcp-peers-title", `Devices on this port (${count})`);
+    const title = el("span", "tcp-peers-title", `Devices on this port (${count})`
+      + (!isQc && clients.length > count ? ` · ${clients.length} connections` : ""));
     title.style.cursor = "pointer"; title.title = caret.title; title.onclick = toggle;
     headEl.append(title);
     headEl.append(el("span", "spacer"));
@@ -463,14 +599,14 @@
       all.title = "tick every device (shown in Raw + included in the QC report)";
       all.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set()); }
-        else { clients.forEach((c) => hiddenPeers.delete(c.peer)); saveHidden(); }
+        else { groups.forEach((g) => [g.key, ...g.conns.map((c) => c.peer)].forEach((k) => hiddenPeers.delete(k))); saveHidden(); }
         renderDevices(); renderFeed();
       };
       const none = el("button", "ghost mini", "None");
       none.title = "untick every device (hidden from Raw + left out of the QC report)";
       none.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set(qcDevices(t.sess).map((d) => d.device_id))); }
-        else { clients.forEach((c) => hiddenPeers.add(c.peer)); saveHidden(); }
+        else { groups.forEach((g) => hiddenPeers.add(g.key)); saveHidden(); }
         renderDevices(); renderFeed();
       };
       headEl.append(all, none);
@@ -480,35 +616,91 @@
 
     if (isQc) { renderQcDeviceRows(t, host, clients, running); return; }
 
-    if (!clients.length) {
+    if (!groups.length) {
       host.append(el("p", "empty", running ? "Waiting for devices to dial in…" : "No devices connected."));
       return;
     }
+    groups.forEach((g) => host.append(testingDeviceRow(t, g, running)));
+  }
+
+  // Testing: one row per DEVICE, its connections folded under it. A device that re-dials gets
+  // a new source port each time; listing each connection as its own row made one device look
+  // like several. How often it re-dials (and how long each connection lasts) is the fact worth
+  // seeing, so the row says it and the fold lists every connection.
+  const openDevices = new Set();
+  function deviceGroups(clients) {
+    const groups = new Map();
     clients.forEach((c) => {
-      const p = c.peer;
-      const info = peerInfo.get(p) || {};
-      const row = el("div", "tcp-peer tcp-client-row");
-      row.dataset.peer = p; row.dataset.last = c.last || 0;
-      const cb = el("input"); cb.type = "checkbox"; cb.checked = !hiddenPeers.has(p);
-      cb.title = "show this device's packets in the feed";
-      cb.onchange = () => { cb.checked ? hiddenPeers.delete(p) : hiddenPeers.add(p); saveHidden(); renderFeed(); };
-      row.append(cb);
-      row.append(el("span", "tcp-dot " + (c.connected ? "live" : "dead")));
-      const name = el("div", "tcp-device-id");
-      name.append(el("span", "mono tcp-client-addr" + (c.connected ? "" : " muted"), info.device_id || p));
-      if (info.device_id) name.append(el("span", "muted tcp-device-peer", p));
-      row.append(name);
-      const meta = el("div", "tcp-peer-meta");
-      if (info.protocol) meta.append(el("span", "tcp-codec-tag", info.protocol));
-      meta.append(el("span", "tcp-client-count", String(c.records || 0)));
-      meta.append(el("span", "tcp-client-idle muted", fmtIdle(c.last || 0)));
-      const jid = tabJobId(t);
-      if (running && c.connected && jid) {
-        meta.append(sendButton(() => openSend(jid, p, info.protocol || "", t.job && t.job.port)));
-      }
-      row.append(meta);
-      host.append(row);
+      const key = deviceKey(c.peer);
+      if (!groups.has(key)) groups.set(key, { key, known: key !== c.peer, conns: [] });
+      groups.get(key).conns.push(c);
     });
+    const begun = (c) => c.first || c.last || 0;
+    return [...groups.values()].map((g) => {
+      g.conns.sort((a, b) => begun(b) - begun(a));                    // newest first
+      g.live = g.conns.find((c) => c.connected) || null;
+      g.records = g.conns.reduce((s, c) => s + (c.records || 0), 0);
+      g.last = Math.max(0, ...g.conns.map((c) => c.last || 0));
+      return g;
+    });
+  }
+  const clockOf = (s) => new Date(s * 1000).toTimeString().slice(0, 8);
+  function testingDeviceRow(t, g, running) {
+    const wrap = el("div", "cap-device");
+    const head = g.live || g.conns[0];
+    const info = peerInfo.get(head.peer) || {};
+    const row = el("div", "tcp-peer tcp-client-row");
+    row.dataset.peer = head.peer; row.dataset.last = g.last || 0;
+    const keys = [g.key, ...g.conns.map((c) => c.peer)];
+    const cb = el("input"); cb.type = "checkbox";
+    cb.checked = !keys.some((k) => hiddenPeers.has(k));
+    cb.title = "show this device's packets in the feed";
+    cb.onchange = () => {
+      keys.forEach((k) => (cb.checked ? hiddenPeers.delete(k) : hiddenPeers.add(k)));
+      saveHidden(); renderFeed();
+    };
+    row.append(cb, el("span", "tcp-dot " + (g.live ? "live" : "dead")));
+    const name = el("div", "tcp-device-id");
+    name.append(el("span", "mono tcp-client-addr" + (g.live ? "" : " muted"), g.known ? g.key : head.peer));
+    if (g.known) name.append(el("span", "muted tcp-device-peer", g.live ? g.live.peer : `last ${head.peer}`));
+    row.append(name);
+    const meta = el("div", "tcp-peer-meta");
+    if (info.protocol) meta.append(el("span", "tcp-codec-tag", info.protocol));
+    if (g.live && g.live.relay) meta.append(relayTag(g.live.relay));
+    meta.append(el("span", "tcp-client-count", String(g.records)));
+    meta.append(el("span", "tcp-client-idle muted", fmtIdle(g.last || 0)));
+    const jid = tabJobId(t);
+    if (running && g.live && jid) {
+      meta.append(sendButton(() => openSend(jid, g.live.peer, info.protocol || "", t.job && t.job.port)));
+    }
+    row.append(meta);
+    wrap.append(row);
+
+    if (g.conns.length > 1) {
+      const ended = g.conns.filter((c) => !c.connected && c.first && c.last > c.first);
+      const avg = ended.length ? ended.reduce((s, c) => s + (c.last - c.first), 0) / ended.length : null;
+      const open = openDevices.has(g.key);
+      const btn = el("button", "cap-reconn", `${open ? "▾" : "▸"} ↻ ${g.conns.length} connections`
+        + (avg != null ? ` · ~${fmtDur(avg)} each` : ""));
+      btn.title = "the device dialled in again on a new connection — list each one";
+      btn.onclick = () => { if (open) openDevices.delete(g.key); else openDevices.add(g.key); renderDevices(); };
+      wrap.append(btn);
+      if (open) {
+        const list = el("div", "cap-conns");
+        g.conns.forEach((c) => {
+          const until = c.connected ? Date.now() / 1000 : (c.last || c.first);
+          const r = el("div", "cap-conn");
+          r.append(el("span", "tcp-dot " + (c.connected ? "live" : "dead")),
+                   el("span", "mono", c.peer),
+                   el("span", "muted", c.first ? `${clockOf(c.first)} → ${c.connected ? "now" : clockOf(until)}` : "—"),
+                   el("span", "muted", c.first ? fmtDur(Math.max(0, until - c.first)) : ""),
+                   el("span", "tcp-client-count", String(c.records || 0)));
+          list.append(r);
+        });
+        wrap.append(list);
+      }
+    }
+    return wrap;
   }
 
   // QC: one row PER DEVICE (by IMEI) — reconnects merge. Row click selects it (drives the
@@ -880,7 +1072,7 @@
       }
       return rows;
     }
-    return rows.filter((r) => !hiddenPeers.has(r.peer));   // Testing: per-peer show/hide
+    return rows.filter((r) => !isHiddenTesting(r));           // Testing: per-device show/hide
   }
   function renderFeed() {
     const host = $("cap-feed");
@@ -1309,7 +1501,7 @@
   function openLog() {
     const jid = focusJobId();
     const total = logBuffer.length;
-    const sel = logBuffer.filter((r) => r.peer && peerJob.get(r.peer) === jid && !hiddenPeers.has(r.peer)).length;
+    const sel = logBuffer.filter((r) => r.peer && peerJob.get(r.peer) === jid && !isHiddenTesting(r)).length;
     $("cap-log-msg").textContent = `${total} records buffered · ${sel} from selected devices on this session`;
     $("cap-log-modal").style.display = "flex";
   }
@@ -1318,7 +1510,7 @@
     const jid = focusJobId();
     const fmt = $("cap-log-format").value, scope = $("cap-log-scope").value, rawAs = $("cap-log-raw").value;
     const rows = logBuffer.filter((r) => scope === "all"
-      || (r.peer && peerJob.get(r.peer) === jid && !hiddenPeers.has(r.peer)));
+      || (r.peer && peerJob.get(r.peer) === jid && !isHiddenTesting(r)));
     const oneLineAscii = (h) => hexToAscii(h).replace(/\n/g, " ");
     const rawOf = (r) => (rawAs === "hex" ? hexSpaced(r.raw_hex || "") : oneLineAscii(r.raw_hex || ""));
     const tsOf = (r) => fmtLogTs(r.event_time || r.received_at);

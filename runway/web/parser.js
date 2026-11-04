@@ -1,4 +1,4 @@
-/* Runway - Teltonika packet parser: multiple independent device sessions in tabs.
+/* Runway - packet parser (any registered protocol): independent device sessions in tabs.
  *
  * Each tab is an isolated parser instance (own input, grid, records table and map), built
  * by createParser() from the #tab-tpl template. A small tab manager handles add/close/
@@ -28,6 +28,15 @@
   };
   const spaced = (h) => (h && h.match(/.{1,2}/g) || []).join(" ");
   const valText = (f) => (f.unit ? `${f.value} ${f.unit}` : f.value);
+  // A cell that stays on one line: long values (an IMU payload, its hex) end in an ellipsis,
+  // with the whole of it on hover, instead of wrapping into a column of single characters.
+  const clipCell = (cls, text) => {
+    const td = el("td", cls);
+    const s = text == null ? "" : String(text);
+    td.appendChild(el("div", "clip", s));
+    if (s.length > 40) td.title = s;
+    return td;
+  };
   // Decode one sub-field from a parameter's value bytes per a signature entry.
   // (Big-endian / MSB-first bit numbering for reverse=0; LSB-first for reverse=1.)
   function sigValue(hex, sub) {
@@ -171,31 +180,45 @@
     function renderFields(packets) {
       if (!packets || !packets.length) { fieldsMessage("Nothing decoded"); return; }
       const view = viewMode();
-      // Grid pivots on "AVL Record N" field groups, which is a Teltonika shape. Any other
-      // protocol gets the breakdown instead of an empty grid.
-      const griddable = packets.some((p) =>
-        (p.fields || []).some((f) => (f.group || "").startsWith("AVL Record")));
-      if (view === "grid" && griddable) renderGrid(packets);
+      if (view === "grid") renderGrid(packets);
       else renderBreakdown(packets, view === "flat");
+    }
+    // A sentence protocol's packet is one record: say what it is and when in its header row.
+    function packetHead(pkt, pi) {
+      const bits = [`Packet ${pi + 1}`, pkt.codec_name];
+      const rec = (pkt.records || [])[0];
+      if (pkt.codec_id == null && rec) {
+        if (pkt.kind) bits.push(pkt.kind);
+        if (rec.timestamp) bits.push(fmtTs(rec.timestamp));
+      }
+      if (pkt.crc_ok === false) bits.push("CRC MISMATCH");
+      else if (pkt.crc_ok === true) bits.push("CRC OK");
+      return bits.join(" · ");
     }
     function renderBreakdown(packets, flat) {
       clearFields();
-      const table = el("table");
+      const table = el("table", "breakdown");
       const htr = el("tr");
       ["Name", "Size", "Value", "Hex Value", "Bit Value"].forEach((h) => htr.appendChild(el("th", "", h)));
       const thead = el("thead"); thead.appendChild(htr); table.appendChild(thead);
       const tbody = el("tbody");
-      packets.forEach((pkt, pi) => {
-        const head = `Packet ${pi + 1} · ${pkt.codec_name}` +
-          (pkt.crc_ok === false ? " · CRC MISMATCH" : pkt.crc_ok === true ? " · CRC OK" : "");
-        addGroupRow(tbody, head, pkt.crc_ok === false, false);
+      const MAX_PACKETS = 200;                  // ~100 rows each — cap the DOM like the grid does
+      packets.slice(0, MAX_PACKETS).forEach((pkt, pi) => {
+        addGroupRow(tbody, packetHead(pkt, pi), pkt.crc_ok === false, false);
         let lastGroup = null;
         pkt.fields.forEach((f) => {
           if (!flat && f.group && f.group !== lastGroup) { addGroupRow(tbody, f.group, false, true); lastGroup = f.group; }
           const tr = el("tr");
-          tr.append(el("td", "", f.name), el("td", "num", f.size),
-                    Object.assign(el("td", "val"), { textContent: valText(f) }),
-                    el("td", "hex", spaced(f.hex)), el("td", "bit", f.bit || "—"));
+          tr.append(el("td", "name", f.name), el("td", "num", f.size));
+          if (f.hex) tr.append(clipCell("val", valText(f)), clipCell("hex", spaced(f.hex)));
+          else {
+            // decoded-only rows (IO elements, IMU samples) have no bytes: the value takes the
+            // hex column too, so a sample row is read whole rather than clipped
+            const td = clipCell("val wide", valText(f));
+            td.colSpan = 2;
+            tr.append(td);
+          }
+          tr.append(el("td", "bit", f.bit || "—"));
           tr.style.cursor = "pointer";
           // the field's note / value table, straight from the protocol database
           if (f.hint) tr.title = f.hint;
@@ -203,6 +226,9 @@
           tbody.appendChild(tr);
         });
       });
+      if (packets.length > MAX_PACKETS) {
+        tbody.appendChild(emptyRow(`Showing ${MAX_PACKETS} of ${packets.length} packets`));
+      }
       table.appendChild(tbody);
       q(".fields").appendChild(table);
     }
@@ -212,8 +238,15 @@
       td.colSpan = 5; td.style.paddingLeft = sub ? "20px" : "9px";
       tr.appendChild(td); tbody.appendChild(tr);
     }
+    // One grid row per record: each "AVL Record N" group of a Teltonika packet, or — for every
+    // other protocol, where a packet IS one record — the packet itself. Item rows (f.list: IMU
+    // samples, neighbour cells) stay in By record; a column per sample would bury the fields.
     function buildGrid(packets) {
       const instances = [];
+      const latLon = (la, lo) => {
+        const lat = parseFloat(la), lon = parseFloat(lo);
+        return (isNaN(lat) || isNaN(lon) || (lat === 0 && lon === 0)) ? null : [lat, lon];
+      };
       packets.forEach((pkt, pi) => {
         const groups = new Map();
         pkt.fields.forEach((f) => {
@@ -224,9 +257,18 @@
           const byName = new Map();
           let ts = "";
           fields.forEach((f) => { byName.set(f.name, f); if (f.name === "Timestamp") ts = f.value; });
+          const la = byName.get("Latitude"), lo = byName.get("Longitude");
           instances.push({ packet: pi + 1, codec: pkt.codec_name, timestamp: ts, byName,
-                           byteOffset: pkt.byte_offset || 0 });
+                           byteOffset: pkt.byte_offset || 0,
+                           ll: la && lo ? latLon(la.value, lo.value) : null });
         });
+        if (groups.size || !(pkt.records || []).length) return;   // e.g. Teltonika's IMEI handshake
+        const rec = pkt.records[0];
+        const byName = new Map();
+        pkt.fields.forEach((f) => { if (!f.list && !byName.has(f.name)) byName.set(f.name, f); });
+        instances.push({ packet: pi + 1, codec: pkt.codec_name, timestamp: rec.timestamp || "",
+                         byName, byteOffset: pkt.byte_offset || 0,
+                         ll: latLon(rec.latitude, rec.longitude) });
       });
       const cols = ordered(instances, (inst) => inst.timestamp).map((o) => o.item);
 
@@ -254,7 +296,7 @@
     // Transposed: one row per time instance (record), one column per signal (AVL params).
     function renderGrid(packets) {
       const { cols, rows } = buildGrid(packets);   // cols = records/time, rows = signal defs
-      if (!cols.length) { fieldsMessage("Grid view shows AVL records — this input has none. Switch to “By record”."); return; }
+      if (!cols.length) { fieldsMessage("No records to show"); return; }
       clearFields();
       const table = el("table", "grid");
 
@@ -281,11 +323,7 @@
         tcell.onclick = () => {
           tbody.querySelectorAll("tr.sel").forEach((x) => x.classList.remove("sel"));
           tr.classList.add("sel");
-          const la = inst.byName.get("Latitude"), lo = inst.byName.get("Longitude");
-          if (la && lo) {
-            const lat = parseFloat(la.value), lon = parseFloat(lo.value);
-            if (!isNaN(lat) && !isNaN(lon) && !(lat === 0 && lon === 0)) focusLatLon([lat, lon]);
-          }
+          if (inst.ll) focusLatLon(inst.ll);
         };
         tr.appendChild(tcell);
 
@@ -299,8 +337,10 @@
           } else {
             const f = inst.byName.get(r.name);
             if (f) {
-              td.textContent = valText(f);
-              td.title = `size ${f.size} · hex ${spaced(f.hex)}` + (f.bit ? ` · bit ${f.bit}` : "");
+              const text = valText(f);
+              td.appendChild(el("div", "clip", text));
+              td.title = (String(text).length > 40 ? `${text}\n` : "")
+                + `size ${f.size} · hex ${spaced(f.hex)}` + (f.bit ? ` · bit ${f.bit}` : "");
               td.onclick = () => highlightField(inst.byteOffset, f);
               v = f.value;
             } else { td.textContent = "—"; td.classList.add("muted"); v = undefined; }
@@ -361,11 +401,15 @@
       const pkts = state.lastPackets || [];
       if (!pkts.length) { wrap.appendChild(el("p", "empty", "Decode to see a summary")); return; }
 
+      // Handshakes, GPRS messages, CRC and Priority are Teltonika (codec-id framed) notions;
+      // a sentence protocol is summarised by its message types instead.
+      const avl = pkts.some((p) => p.codec_id != null);
       let handshakes = 0, crcBad = 0, records = 0, gprs = 0, gpsValid = 0;
-      const byCodec = {}, prio = { Low: 0, High: 0, Panic: 0 };
+      const byCodec = {}, byType = {}, prio = { Low: 0, High: 0, Panic: 0 };
       let firstTs = null, lastTs = null, sMin = null, sMax = null, sSum = 0, sN = 0;
       pkts.forEach((p) => {
         byCodec[p.codec_name] = (byCodec[p.codec_name] || 0) + 1;
+        if (p.kind) byType[p.kind] = (byType[p.kind] || 0) + 1;
         if (p.kind === "imei") handshakes++;
         if (p.crc_ok === false) crcBad++;
         if ([12, 13, 14].includes(p.codec_id)) gprs++;
@@ -393,10 +437,12 @@
         stats.appendChild(t);
       };
       tile("Packets", pkts.length);
-      tile("AVL records", records);
-      tile("Handshakes", handshakes);
-      tile("GPRS msgs", gprs);
-      tile("CRC bad", crcBad, crcBad ? "bad" : "");
+      tile(avl ? "AVL records" : "Records", records);
+      if (avl) {
+        tile("Handshakes", handshakes);
+        tile("GPRS msgs", gprs);
+        tile("CRC bad", crcBad, crcBad ? "bad" : "");
+      }
       tile("Corrupt skipped", skipped, skipped ? "warn" : "");
       wrap.append(el("h3", "sum-h", "Overview"), stats);
 
@@ -408,8 +454,14 @@
         `${fmtTs(new Date(firstTs).toISOString())} → ${fmtTs(new Date(lastTs).toISOString())}`);
       wrap.append(el("h3", "sum-h", "Details"), kv);
 
-      wrap.append(el("h3", "sum-h", "Priority"));
-      wrap.appendChild(bars([["Low", prio.Low, "#3fb6ff"], ["High", prio.High, "#ffb454"], ["Panic", prio.Panic, "#ff6b6b"]]));
+      if (avl) {
+        wrap.append(el("h3", "sum-h", "Priority"));
+        wrap.appendChild(bars([["Low", prio.Low, "#3fb6ff"], ["High", prio.High, "#ffb454"], ["Panic", prio.Panic, "#ff6b6b"]]));
+      } else if (Object.keys(byType).length) {
+        wrap.append(el("h3", "sum-h", "By type"));
+        wrap.appendChild(bars(Object.entries(byType).sort((a, b) => b[1] - a[1])
+          .map(([n, c]) => [n, c, "#3fb6ff"])));
+      }
       wrap.append(el("h3", "sum-h", "By codec"));
       wrap.appendChild(bars(Object.entries(byCodec).map(([n, c]) => [n, c, "#00d18f"])));
     }
@@ -518,7 +570,7 @@
       const msg = q(".parse-msg");
       if (!state.lastPackets.length) { msg.className = "parse-msg err"; msg.textContent = "nothing to export"; return; }
       const { cols, rows } = buildGrid(state.lastPackets);
-      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "no AVL records to export"; return; }
+      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "no records to export"; return; }
       q(".more-panel").classList.remove("open");
 
       const overlay = el("div", "modal-overlay");
@@ -603,7 +655,10 @@
     });
     q(".hexin").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") decode(); });
     q(".hexin").addEventListener("input", onChange);
-    q(".view-sel").addEventListener("change", () => { rerender(); onChange(); closeMore(); });
+    q(".view-sel").addEventListener("change", () => {
+      q(".fields").scrollTo(0, 0);            // the grid's sideways scroll would hide the list's names
+      rerender(); onChange(); closeMore();
+    });
     q(".transport-sel").addEventListener("change", () => { onChange(); closeMore(); });
     q(".sort-sel").addEventListener("change", () => { rerender(); onChange(); });   // Order lives on the bar
     q(".tz-sel").addEventListener("change", () => {

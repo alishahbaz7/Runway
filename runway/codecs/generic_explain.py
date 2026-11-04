@@ -18,11 +18,17 @@ When a protocol has no grammar file yet, the walk still works: it falls back to 
 :class:`UnifiedRecord` the codec produced, so a brand-new codec is inspectable the moment it is
 dropped into ``codecs/`` — with better output as soon as someone writes its grammar.
 
-Two enrichments are applied on top of the grammar because they are properties of the data, not
-of any one protocol:
+One header can carry several layouts (AIS-140's ``$PVT``, Zenithra's 38- and 50-field ``$MMI``).
+A grammar entry may list them under ``"variants"``, keyed by field count — the same shape test
+the codecs' layout tables use — and the matching variant's field list replaces the default.
+
+Three enrichments are applied on top of the grammar because they are properties of the data,
+not of any one protocol:
 
 * **CAN frames** (``io["can"]``) are expanded to one row per frame — a single ``<id>:<payload>``
   blob in one cell is unreadable, and the bus is the point of a CAN-carrying protocol.
+* **Any other list the codec decoded** (IMU samples, neighbour cells, a future custom packet's
+  records) gets one row per item, for the same reason.
 * **Everything the codec decoded that the grammar did not name** is listed too (from ``io``),
   so a field the grammar has not caught up with is still visible rather than silently dropped.
 """
@@ -94,6 +100,7 @@ def _packet(rec: UnifiedRecord, chunk: bytes, byte_offset: int, grammar: dict | 
     fields += _io_fields(rec, {f["name"] for f in fields})
     fields += _signal_fields(rec)
     fields += _can_fields(rec)
+    fields += _list_fields(rec)
     return {
         "kind": rec.message_type or "message",
         "codec_id": None,
@@ -150,6 +157,9 @@ def _grammar_fields(tokens: list[tuple[str, int, int]],
         return set(), []
     header = tokens[0][0]
     spec = ((grammar.get("packet_types") or {}).get(header) or {})
+    variant = (spec.get("variants") or {}).get(str(len(tokens) - 1))
+    if variant:
+        spec = {**spec, **variant}
     specs = spec.get("fields") or []
     if not specs:
         return set(), []
@@ -271,6 +281,24 @@ def _can_fields(rec: UnifiedRecord) -> list[dict]:
                     "size": f.get("dlc") if f.get("dlc") is not None else "",
                     "value": data, "hex": data, "bit": "", "unit": "", "at": 0,
                     "hint": "raw bus bytes — scale with a DBC/CanPlus signature"})
+    return out
+
+
+def _list_fields(rec: UnifiedRecord) -> list[dict]:
+    """One row per item of every other list-of-records the codec decoded (``io["imu"]``,
+    ``io["nmr"]``, ...) — what :func:`_can_fields` does for CAN, without knowing the list."""
+    out = []
+    for key, items in (rec.io or {}).items():
+        if key in ("can", "can_signals") or not isinstance(items, list) or not items:
+            continue                                  # those two have their own renderers
+        if not all(isinstance(item, dict) for item in items):
+            continue
+        for i, item in enumerate(items, 1):
+            # "list" marks an item row: one record per line is right for the breakdown, but the
+            # Parser's grid (one column per field) leaves these out rather than add 20 columns
+            out.append({"group": f"{key} ({len(items)})", "name": f"{key}[{i}]", "size": "",
+                        "value": "  ".join(f"{k}={v}" for k, v in item.items()), "hex": "",
+                        "bit": "", "unit": "", "at": 0, "hint": "", "list": key})
     return out
 
 

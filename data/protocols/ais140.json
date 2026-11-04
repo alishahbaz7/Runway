@@ -64,7 +64,8 @@
             "NR": "Normal", "EA": "Emergency Alert", "TA": "Tamper Alert", "HP": "Health Packet",
             "IN": "Ignition On", "IF": "Ignition Off", "BD": "Vehicle Battery Disconnect",
             "BR": "Vehicle Battery Reconnect", "BL": "Internal Battery Low", "OT": "OTA Update Alert",
-            "RT": "Rash Turn", "HB": "Harsh Breaking", "HA": "Harsh Acceleration"
+            "RT": "Rash Turn", "HB": "Harsh Breaking", "HA": "Harsh Acceleration",
+            "IMU": "IMU Samples (custom packet, alert id 200)"
           }, "example": "NR" },
         { "index": 4, "name": "alert_id", "type": "uint", "ref": "message_alert_ids", "example": "6" },
         { "index": 5, "name": "packet_status", "type": "enum", "values": {"L": "Live", "H": "History"}, "example": "L" },
@@ -172,7 +173,8 @@
     "13": "Harsh Braking",
     "14": "Harsh Acceleration",
     "15": "Rash Turning",
-    "16": "Device Tampered (emergency button wire disconnect/cut)"
+    "16": "Device Tampered (emergency button wire disconnect/cut)",
+    "200": "IMU samples — custom packet (packet type IMU): 6-axis sensor data in the payload field"
   },
 
   "ota_commands": {

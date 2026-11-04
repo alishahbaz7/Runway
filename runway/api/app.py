@@ -26,11 +26,12 @@ import json
 import logging
 import re
 import sys
+import threading
 import time
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +44,7 @@ from .. import __version__
 from ..core import registry
 from ..core.interfaces import Source
 from ..core.models import RawFrame
+from ..convert import log_export
 from ..core.pipeline import Pipeline
 from ..qc import engine as qc_engine
 from ..qc import report as qc_report_builder
@@ -240,6 +242,8 @@ async def lifespan(_: FastAPI):
     _seed_protocols()
     _qc_reconcile_startup()
     _backup_db_daily()
+    _autostart_listeners()
+    housekeeping = asyncio.create_task(_housekeeping())
     try:
         import openpyxl  # noqa: F401
     except ImportError:                 # surface at boot, not when the operator clicks Download
@@ -251,7 +255,8 @@ async def lifespan(_: FastAPI):
     # into the live store, so a restart is a clean slate.
     log.info("Runway API ready (codecs: %s) — live view starts empty", sorted(registry.CODECS))
     yield
-    for task in _tasks.values():
+    housekeeping.cancel()
+    for task in [*_tasks.values(), *_replay_tasks.values()]:
         task.cancel()
 
 
@@ -294,6 +299,8 @@ class ListenBody(BaseModel):
     codec: str = "auto"
     host: str = "0.0.0.0"
     port: int = 5050
+    relay: str = ""                    # "host:port" of the next server — raw bytes forwarded
+    store: bool = False                # keep packets + IMU samples in data/telemetry.db
 
 
 class ParseBody(BaseModel):
@@ -561,10 +568,12 @@ def _job_view(jid: str) -> dict:
         connected = set(src.peers()) if (src is not None and hasattr(src, "peers")) else set()
         job["peers"] = sorted(connected)
         per = getattr(pipe, "per_peer", {}) or {}
+        links = src.relay_status() if hasattr(src, "relay_status") else {}
         job["clients"] = [
             {"peer": p, "records": per.get(p, {}).get("records", 0),
-             "bytes": per.get(p, {}).get("bytes", 0), "last": per.get(p, {}).get("last", 0),
-             "connected": p in connected}
+             "bytes": per.get(p, {}).get("bytes", 0), "first": per.get(p, {}).get("first", 0),
+             "last": per.get(p, {}).get("last", 0),
+             "connected": p in connected, "relay": links.get(p)}
             for p in sorted(set(per) | connected) if p and p != "?"
         ]
     return job
@@ -590,8 +599,18 @@ def _record_capture(job: dict, records: int, nbytes: int) -> None:
 # --------------------------------------------------------------------------- #
 # REST
 # --------------------------------------------------------------------------- #
+# When a Runway page last checked in. Every page polls /api/health every 4 s (shell.js), so after
+# a restart an open tab shows up here within seconds — the launcher reads it (?probe=1, which
+# does not count as a page) and opens a browser tab only when none is open, instead of one more
+# tab per restart.
+_page_seen_at = 0.0
+
+
 @app.get("/api/health")
-async def health():
+async def health(probe: bool = False):
+    global _page_seen_at
+    if not probe:
+        _page_seen_at = time.time()
     # deps: optional-at-import packages the UI warns about BEFORE they fail at use time
     # (e.g. openpyxl missing meant the XLS report 500'd only when the operator clicked
     # Download — on the wrong Python env that's the worst possible moment to find out)
@@ -609,6 +628,7 @@ async def health():
         "subscribers": hub.subscribers,
         "mode": _activity_mode(),
         "deps": {"openpyxl": has_openpyxl},
+        "page_seen_s": round(time.time() - _page_seen_at, 1) if _page_seen_at else None,
     }
 
 
@@ -643,15 +663,20 @@ def _looks_hex(text: str) -> bool:
 
 
 def _input_bytes(text: str) -> bytes:
-    """The Parser input accepts EITHER a hex dump OR the device's own text.
+    """The Parser input accepts a hex dump, the device's own text, OR a platform message-log
+    export (``<time> | <imei> | ,"MMI,...*37 | null"`` rows).
 
-    Which one it is, is decided from the content, not from a setting: if everything left after
-    dropping the usual separators is a hex digit, it's a dump; otherwise it is text off the wire
-    (``$MMI,...``, ``$GPRMC,...``) and is taken as ASCII bytes verbatim. Filtering text down to
-    its hex-looking characters — the old behaviour — silently shredded every ASCII protocol.
+    Which one it is, is decided from the content, not from a setting: an export is unwrapped
+    back into the stream the server received (``convert/log_export.py``); if everything left
+    after dropping the usual separators is a hex digit, it's a dump; otherwise it is text off the
+    wire (``$MMI,...``, ``$GPRMC,...``) and is taken as ASCII bytes verbatim. Filtering text down
+    to its hex-looking characters — the old behaviour — silently shredded every ASCII protocol.
     """
     if not text or not text.strip():
         raise HTTPException(400, "nothing to parse")
+    exported = log_export.unwrap(text)
+    if exported is not None:
+        return exported
     if _looks_hex(text):
         body = "".join(ch for ch in text if ch not in _HEX_SEPARATORS)
         if len(body) % 2:
@@ -849,6 +874,281 @@ async def ingest(body: IngestBody):
 @app.get("/api/devices")
 async def devices():
     return list(store.devices.values())
+
+
+# --------------------------------------------------------------------------- #
+# IMU — read back what a storing listener kept in data/telemetry.db. A sample's time comes
+# from its packet's time and the packet interval for its ignition state (the device spreads 20
+# samples over that interval — see storage/telemetry.py): measured from the packets, else the
+# device's IMUPKT values set here. Changing a setting re-times every stored sample.
+# --------------------------------------------------------------------------- #
+IMU_TIMING_KEY = "imu_timing"
+
+
+class ImuTimingBody(BaseModel):
+    ign_on_s: float = 10.0             # SET IMUPKT:1,<ignOnSec>,<ignOffSec> — default 1,10,2
+    ign_off_s: float = 2.0
+    measure: bool = True               # use the packets' own spacing when there are enough
+    anchor: str = "last"               # which sample the packet time marks
+
+
+def _imu_timing() -> dict:
+    from ..storage.telemetry import TIMING_DEFAULT
+
+    saved = db.get_setting(IMU_TIMING_KEY, {}) or {}
+    return {k: saved.get(k, v) for k, v in TIMING_DEFAULT.items()}
+
+
+@app.get("/api/imu/devices")
+async def imu_devices():
+    from ..storage.telemetry import telemetry
+    return await asyncio.get_running_loop().run_in_executor(None, telemetry.devices)
+
+
+@app.get("/api/imu/series")
+async def imu_series(device: str, start: Optional[float] = None, end: Optional[float] = None,
+                     points: int = 1200):
+    """Samples of one device in ``[start, end]`` (epoch seconds) — the last 15 minutes of
+    its data when no range is given."""
+    from ..storage.telemetry import telemetry
+
+    loop = asyncio.get_running_loop()
+    if start is None or end is None:
+        known = {d["device_id"]: d for d in await loop.run_in_executor(None, telemetry.devices)}
+        if device not in known:
+            raise HTTPException(404, f"no stored data for {device}")
+        end = known[device]["last"] + 1
+        start = end - 900
+    if end <= start:
+        raise HTTPException(400, "end must be after start")
+    timing = _imu_timing()
+    return await loop.run_in_executor(None, lambda: telemetry.imu_series(
+        device, start, end, points, timing))
+
+
+# --------------------------------------------------------------------------- #
+# Packet archive — every stored packet, one file per device per day (storage/archive.py):
+# list the device-days, download one, or replay one to a platform.
+# --------------------------------------------------------------------------- #
+STORE_SINKS = ("telemetry_store", "archive_store")     # what a listener's Store switch adds
+_replays: dict[str, dict] = {}
+_replay_tasks: dict[str, asyncio.Task] = {}
+_replay_seq = 0
+
+
+class ArchiveReplayBody(BaseModel):
+    device: str
+    day: str                           # YYYY-MM-DD
+    target: str                        # host:port of the platform
+    rate: float = 50.0                 # packets per second; 0 = as fast as the link takes them
+
+
+# Retention — what a 24x7 listener keeps. IMU samples and decoded packets are the bulk (~3.6 KB
+# an IMU packet: 0.6-3 GB a day for 20 devices); their per-minute summaries are ~1,000x smaller
+# and keep long ranges drawable after the samples go; the archive is the packets themselves,
+# gzipped, kept until a limit is set (0 = forever).
+RETENTION_KEY = "storage_retention"
+RETENTION_DEFAULT = {"samples_days": 7, "minute_days": 365, "archive_days": 0}
+_housekeeping_last: dict[str, Any] = {}
+
+
+class RetentionBody(BaseModel):
+    samples_days: int = 7
+    minute_days: int = 365
+    archive_days: int = 0
+
+
+def _retention() -> dict:
+    saved = db.get_setting(RETENTION_KEY, {}) or {}
+    return {k: int(saved.get(k, v)) for k, v in RETENTION_DEFAULT.items()}
+
+
+_housekeeping_busy = threading.Lock()
+
+
+def _housekeep_once() -> dict | None:
+    """Gzip finished archive days, then drop what is past retention. Blocking: run it in an
+    executor. None when a run is already going (the hourly one and a settings change)."""
+    import os
+    from ..storage.archive import archive
+    from ..storage.telemetry import telemetry
+
+    if not _housekeeping_busy.acquire(blocking=False):
+        return None
+    try:
+        keep = _retention()
+        out: dict[str, Any] = {"at": time.time(), "compressed": archive.compress_finished()}
+        if os.path.exists(telemetry.path):       # never create the database just to empty it
+            out["telemetry"] = telemetry.purge(keep["samples_days"], keep["minute_days"])
+        out["archive_files"] = archive.purge(keep["archive_days"]) if keep["archive_days"] else 0
+        out["took_s"] = round(time.time() - out["at"], 2)
+        _housekeeping_last.clear()
+        _housekeeping_last.update(out)
+        return out
+    finally:
+        _housekeeping_busy.release()
+
+
+async def _housekeeping() -> None:
+    """At start-up and every hour after."""
+    while True:
+        try:
+            out = await asyncio.get_running_loop().run_in_executor(None, _housekeep_once)
+            gone = out and sum((out.get("telemetry") or {}).values()) + out["archive_files"]
+            if out and (out["compressed"] or gone):
+                log.info("housekeeping: %s", out)
+        except Exception:
+            log.exception("housekeeping failed")
+        await asyncio.sleep(3600)
+
+
+def _storage_view() -> dict:
+    import os
+    import shutil
+    from ..storage.archive import archive
+    from ..storage.outbox import outbox
+    from ..storage.telemetry import telemetry
+
+    return {"retention": _retention(), "data_dir": DATA_DIR,
+            "free": shutil.disk_usage(DATA_DIR).free if os.path.isdir(DATA_DIR) else None,
+            "sizes": {"telemetry": telemetry.size(), "archive": archive.size(),
+                      "outbox": outbox.size(), "outbox_queued": outbox.total},
+            "last_housekeeping": dict(_housekeeping_last) or None}
+
+
+@app.get("/api/storage")
+async def storage_view():
+    return await asyncio.get_running_loop().run_in_executor(None, _storage_view)
+
+
+@app.put("/api/storage/retention")
+async def storage_retention(body: RetentionBody):
+    if not 1 <= body.samples_days <= 365:
+        raise HTTPException(400, "samples_days must be 1-365")
+    if not body.samples_days <= body.minute_days <= 3650:
+        raise HTTPException(400, "minute_days must be at least samples_days and at most 3650")
+    if not 0 <= body.archive_days <= 3650:
+        raise HTTPException(400, "archive_days must be 0 (keep forever) to 3650")
+    db.set_setting(RETENTION_KEY, body.model_dump())
+    loop = asyncio.get_running_loop()
+    # A shorter limit applies now, not in an hour — in the background: cutting a month of IMU
+    # samples to a week deletes hundreds of millions of rows.
+    loop.run_in_executor(None, _housekeep_once)
+    return await loop.run_in_executor(None, _storage_view)
+
+
+@app.get("/api/archive")
+async def archive_days():
+    from ..storage.archive import archive
+    return await asyncio.get_running_loop().run_in_executor(None, archive.days)
+
+
+@app.get("/api/archive/replays")
+async def archive_replays():
+    return sorted(_replays.values(), key=lambda r: r["started"], reverse=True)
+
+
+@app.get("/api/archive/{device}/{day}")
+async def archive_download(device: str, day: str):
+    from ..storage.archive import archive
+
+    path = archive.file_for(device, day)
+    if path is None:
+        raise HTTPException(404, f"no archive for {device} on {day}")
+    return FileResponse(path, filename=path.name)
+
+
+@app.post("/api/archive/replay")
+async def archive_replay(body: ArchiveReplayBody):
+    """Send one archived device-day to a platform: one connection, the device's login first,
+    every packet in its original order, exactly as received, at ``rate`` packets per second."""
+    global _replay_seq
+    from ..sources.tcp_server import parse_hostport
+    from ..storage.archive import archive
+
+    try:
+        host, port = parse_hostport(body.target)
+    except ValueError as exc:
+        raise HTTPException(400, f"target: {exc}")
+    if archive.file_for(body.device, body.day) is None:
+        raise HTTPException(404, f"no archive for {body.device} on {body.day}")
+    if body.rate < 0:
+        raise HTTPException(400, "rate must be 0 (as fast as possible) or more")
+    _replay_seq += 1
+    rid = f"replay-{_replay_seq}"
+    _replays[rid] = {"id": rid, "device": body.device, "day": body.day, "target": f"{host}:{port}",
+                     "rate": body.rate, "status": "running", "started": time.time(), "ended": None,
+                     "total": None, "sent": 0, "bytes_up": 0, "bytes_down": 0, "error": None}
+    _replay_tasks[rid] = asyncio.create_task(_run_replay(rid, host, port))
+    log.info("archive replay %s: %s %s -> %s:%d at %s/s", rid, body.device, body.day, host, port,
+             body.rate or "max")
+    return _replays[rid]
+
+
+@app.post("/api/archive/replays/{rid}/stop")
+async def archive_replay_stop(rid: str):
+    task = _replay_tasks.get(rid)
+    if task is None:
+        raise HTTPException(404, "replay not running")
+    task.cancel()
+    return {"stopped": rid}
+
+
+async def _run_replay(rid: str, host: str, port: int) -> None:
+    from ..storage.archive import archive, replay_lines
+
+    st = _replays[rid]
+    loop = asyncio.get_running_loop()
+    writer, rx = None, None
+    try:
+        lines = await loop.run_in_executor(None, replay_lines, archive, st["device"], st["day"])
+        st["total"] = len(lines)
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 10)
+
+        async def replies() -> None:              # the platform's ACKs/commands: counted, not used
+            while data := await reader.read(4096):
+                st["bytes_down"] += len(data)
+        rx = asyncio.create_task(replies())
+        t0 = loop.time()
+        for line in lines:
+            writer.write(line.raw)
+            await writer.drain()
+            st["sent"] += 1
+            st["bytes_up"] += len(line.raw)
+            if st["rate"]:                         # on schedule, not sleep-per-packet: Windows
+                ahead = t0 + st["sent"] / st["rate"] - loop.time()   # timers are ~15 ms coarse
+                if ahead > 0.02:
+                    await asyncio.sleep(ahead)
+        await asyncio.sleep(1.0)                   # let the last replies land
+        st["status"] = "done"
+    except asyncio.CancelledError:
+        st["status"] = "stopped"
+    except Exception as exc:  # noqa: BLE001
+        st.update(status="error", error=f"{type(exc).__name__}: {exc}")
+        log.warning("archive replay %s failed: %s", rid, st["error"])
+    finally:
+        if rx is not None:
+            rx.cancel()
+        if writer is not None:
+            writer.close()
+        st["ended"] = time.time()
+        _replay_tasks.pop(rid, None)
+
+
+@app.get("/api/imu/timing")
+async def imu_timing():
+    return _imu_timing()
+
+
+@app.put("/api/imu/timing")
+async def set_imu_timing(body: ImuTimingBody):
+    for name, v in (("ignition ON interval", body.ign_on_s), ("ignition OFF interval", body.ign_off_s)):
+        if not 2 <= v <= 3600:          # the device allows 2 s at the least (20 x 100 ms)
+            raise HTTPException(400, f"{name} must be between 2 and 3600 s")
+    if body.anchor not in ("first", "last"):
+        raise HTTPException(400, "anchor must be 'first' or 'last'")
+    db.set_setting(IMU_TIMING_KEY, body.model_dump())
+    return _imu_timing()
 
 
 @app.get("/api/devices/{device_id}/records")
@@ -1269,6 +1569,8 @@ async def listen_defaults():
     return {"host": config.get("default_listen_host", "0.0.0.0"),
             "port": config.get("default_listen_port", 5050),
             "codec": config.get("default_codec", "auto"),
+            "relay": config.get("default_relay", ""),
+            "store": bool(config.get("default_store", False)),
             "local_ip": _local_ip(),
             "hostname": socket.gethostname()}
 
@@ -1288,8 +1590,139 @@ def _spawn_listener(jid: str) -> None:
                                                     "state": kind, "peers": peers,
                                                     "port": job["port"]}})
 
-    source = TcpServerSource(host=job["host"], port=job["port"], on_event=_on_conn)
-    _spawn(jid, Pipeline(source, job["codec"], _default_sinks(), _enricher()))
+    source = TcpServerSource(host=job["host"], port=job["port"], on_event=_on_conn,
+                             routes=_routes_of(job))
+    sinks = _default_sinks()
+    if job.get("store"):
+        sinks.extend(registry.get_sink(n) for n in STORE_SINKS)
+    _spawn(jid, Pipeline(source, job["codec"], sinks, _enricher()))
+
+
+# A listener that relays or stores is a service, not a bench session: devices keep dialling in
+# and the next server depends on it, so it must come back by itself after a server restart.
+# Kept as {port: config} in settings; stopping or removing the session forgets it.
+AUTOSTART_KEY = "autostart_listeners"
+
+
+def _routes_of(job: dict) -> dict:
+    """A listener's relay rules: where all devices go, and each device's own target / "off"."""
+    return job.get("routes") or {"all": job.get("relay") or "", "devices": {}}
+
+
+def _autostart_save(job: dict) -> None:
+    saved = db.get_setting(AUTOSTART_KEY, {}) or {}
+    routes = _routes_of(job)
+    if routes["all"] or routes["devices"] or job.get("store"):
+        saved[str(job["port"])] = {**{k: job.get(k) for k in ("codec", "host", "port", "store")},
+                                   "relay": routes["all"], "routes": routes}
+    else:
+        saved.pop(str(job["port"]), None)
+    db.set_setting(AUTOSTART_KEY, saved)
+
+
+def _autostart_forget(job: dict | None) -> None:
+    if not job or job.get("kind") != "listen":
+        return
+    saved = db.get_setting(AUTOSTART_KEY, {}) or {}
+    if saved.pop(str(job.get("port")), None) is not None:
+        db.set_setting(AUTOSTART_KEY, saved)
+
+
+def _autostart_listeners() -> None:
+    """Server start: bring back every relaying / storing listener that was running."""
+    for cfg in (db.get_setting(AUTOSTART_KEY, {}) or {}).values():
+        jid = _new_job("listen", started=time.time(), peers=[], autostarted=True, **cfg)
+        try:
+            _spawn_listener(jid)
+            log.info("listener on :%s restarted (relay %s, store %s)", cfg.get("port"),
+                     cfg.get("relay") or "off", "on" if cfg.get("store") else "off")
+        except Exception as exc:  # noqa: BLE001 — one bad entry must not stop the server
+            _jobs[jid].update(status="error", error=str(exc))
+            log.exception("could not restart listener on :%s", cfg.get("port"))
+
+
+def _check_target(value: str, listen_port: int, label: str = "relay") -> str:
+    """Validate one relay target; refuse one that points back at this very listener."""
+    from ..sources.tcp_server import parse_hostport
+
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        host, port = parse_hostport(value)
+    except ValueError as exc:
+        raise HTTPException(400, f"{label}: {exc}")
+    if port == listen_port and host in ("127.0.0.1", "localhost", "0.0.0.0", "::1", _local_ip()):
+        raise HTTPException(400, f"{label} points back at this listener — that would loop forever")
+    return f"{host}:{port}"
+
+
+def _check_relay(body: ListenBody) -> str:
+    return _check_target(body.relay, body.port)
+
+
+class RoutesBody(BaseModel):
+    all: str = ""                      # "host:port" every device goes to; "" = none
+    devices: dict[str, str] = {}       # device id -> "host:port" | "off"; absent = follows "all"
+
+
+class StoreBody(BaseModel):
+    store: bool
+
+
+def _listen_job(job_id: str) -> dict:
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.get("kind") != "listen":
+        raise HTTPException(400, "only listener sessions relay or store")
+    return job
+
+
+@app.put("/api/listen/{job_id}/routes")
+async def set_listen_routes(job_id: str, body: RoutesBody):
+    """Change where devices are relayed while the session runs: connected devices follow at
+    once (a moved device's login is replayed to its new server first)."""
+    job = _listen_job(job_id)
+    routes = {"all": _check_target(body.all, job["port"], "all devices"), "devices": {}}
+    for dev, target in body.devices.items():
+        dev, target = dev.strip(), (target or "").strip()
+        if not dev or not target:
+            continue
+        routes["devices"][dev] = ("off" if target.lower() == "off"
+                                  else _check_target(target, job["port"], dev))
+    job["routes"], job["relay"] = routes, routes["all"]
+    pipe = _pipelines.get(job_id)
+    if pipe is not None and hasattr(pipe.source, "set_routes"):
+        await pipe.source.set_routes(routes)
+    if job_id in _tasks:
+        _autostart_save(job)
+    log.info("listener :%s relay rules: all -> %s, %d device rule(s)", job["port"],
+             routes["all"] or "none", len(routes["devices"]))
+    return {"job": _job_view(job_id)}
+
+
+@app.put("/api/listen/{job_id}/store")
+async def set_listen_store(job_id: str, body: StoreBody):
+    """Start or stop keeping this session's packets + IMU samples, without restarting it."""
+    job = _listen_job(job_id)
+    job["store"] = body.store
+    pipe = _pipelines.get(job_id)
+    if pipe is not None:
+        # Swap the list, never edit it in place: the pipeline may be mid-way through it.
+        have = [s for s in pipe.sinks if s.name in STORE_SINKS]
+        if body.store and not have:
+            added = [registry.get_sink(n) for n in STORE_SINKS]
+            for sink in added:
+                await sink.start()
+            pipe.sinks = [*pipe.sinks, *added]
+        elif not body.store and have:
+            pipe.sinks = [s for s in pipe.sinks if s.name not in STORE_SINKS]
+            for s in have:
+                await s.close()
+    if job_id in _tasks:
+        _autostart_save(job)
+    return {"job": _job_view(job_id)}
 
 
 @app.post("/api/listen")
@@ -1297,19 +1730,24 @@ async def listen(body: ListenBody):
     registry.load_plugins()
     if body.codec != "auto" and body.codec not in registry.CODECS:
         raise HTTPException(400, f"unknown codec '{body.codec}'")
+    relay = _check_relay(body)
 
     jid = _new_job("listen", codec=body.codec, host=body.host, port=body.port,
+                   relay=relay, routes={"all": relay, "devices": {}}, store=body.store,
                    started=time.time(), peers=[])
     try:
         _spawn_listener(jid)
     except Exception as exc:
         _jobs[jid].update(status="error", error=str(exc))
         raise HTTPException(500, f"could not start listener: {exc}")
+    _autostart_save(_jobs[jid])
 
     # Remember settings for next time.
     config.set("default_listen_host", body.host)
     config.set("default_listen_port", body.port)
     config.set("default_codec", body.codec)
+    config.set("default_relay", relay)
+    config.set("default_store", body.store)
     return {"job": _job_view(jid)}
 
 
@@ -1330,6 +1768,7 @@ async def resume(job_id: str):
     except Exception as exc:
         job.update(status="error", error=str(exc))
         raise HTTPException(500, f"could not resume listener: {exc}")
+    _autostart_save(job)
     return {"job": _job_view(job_id)}
 
 
@@ -1369,6 +1808,7 @@ async def stop(job_id: str):
     if job is not None:                       # reflect immediately so a poll mid-cancel
         job["status"] = "stopped"             # never sees it back as "running"
         job["ended"] = time.time()
+    _autostart_forget(job)                    # stopped by hand: don't bring it back on restart
     task.cancel()
     return {"stopped": job_id}
 
@@ -1378,6 +1818,7 @@ async def remove_job(job_id: str):
     """Drop a finished/stopped job from the list (must not be running)."""
     if job_id in _tasks:
         raise HTTPException(400, "stop the job before removing it")
+    _autostart_forget(_jobs.get(job_id))
     _jobs.pop(job_id, None)
     _pipelines.pop(job_id, None)
     return {"removed": job_id}

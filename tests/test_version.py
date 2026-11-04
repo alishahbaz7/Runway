@@ -25,7 +25,9 @@ def test_changelog_newest_section_is_the_current_version():
 
 def test_branch_name_matches_version():
     try:
-        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT,
+        # not `rev-parse --abbrev-ref HEAD`: once the release tag of the same name exists it
+        # answers "heads/v1.1.24", and the check would quietly skip
+        branch = subprocess.run(["git", "branch", "--show-current"], cwd=ROOT,
                                 capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("not a git checkout")
@@ -54,3 +56,17 @@ async def test_health_reports_running_and_on_disk_version():
         body = (await c.get("/api/health")).json()
     assert body["version"] == __version__
     assert body["code_version"] == __version__
+
+
+async def test_health_tells_the_launcher_whether_a_page_is_open():
+    """The launcher opens a browser tab only when no Runway page has checked in: its own
+    ?probe=1 call must not count as a page, a page's call must."""
+    import asyncio
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.get("/api/health")                                     # a page polling
+        await asyncio.sleep(0.25)
+        first = (await c.get("/api/health", params={"probe": 1})).json()["page_seen_s"]
+        await asyncio.sleep(0.25)
+        second = (await c.get("/api/health", params={"probe": 1})).json()["page_seen_s"]
+    assert first is not None and second > first                       # probes don't refresh it
