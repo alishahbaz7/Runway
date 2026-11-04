@@ -4,6 +4,10 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.26] — Unreleased
+
+Open for the next round of work after v1.1.25.
+
 ## [1.1.25] — 2026-11-04
 
 Headline: **devices can land directly on Runway** — each device's raw stream is relayed on to
