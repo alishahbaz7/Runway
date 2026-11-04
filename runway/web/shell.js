@@ -327,7 +327,18 @@
   // PROCESS — after a code update the two can silently diverge (new button, old API:
   // "Not Found" at the worst moment). Same for a missing optional dependency (openpyxl):
   // it used to surface only when the operator clicked Download. Say both loudly, up top.
-  const UI_VERSION = "1.1.24";   // bump together with pyproject.toml / __init__.py
+  // This page's version is the code that was on disk when it loaded — /api/health's
+  // code_version, captured from the first answer — so there is no literal here to bump.
+  let UI_VERSION = null;
+  // 1.1.9 vs 1.1.24: compare part by part as numbers, never as strings.
+  const cmpVersion = (a, b) => {
+    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const diff = (pa[i] || 0) - (pb[i] || 0);
+      if (diff) return diff;
+    }
+    return 0;
+  };
   const envWarn = document.createElement("div");
   envWarn.id = "env-warn";
   envWarn.style.display = "none";
@@ -338,17 +349,18 @@
   function refreshStatus() {
     fetch("/api/health").then((r) => r.json()).then((d) => {
       document.body.classList.remove("api-offline");
+      if (UI_VERSION === null) UI_VERSION = d.code_version || d.version || null;
       const v = document.getElementById("rail-version");
       if (v && d.version) v.textContent = "v" + d.version;
       if (d.mode && d.mode !== mode) { mode = d.mode; applyMode(); }
       const warns = [];
-      if (d.version && d.version !== UI_VERSION) {
+      if (d.version && UI_VERSION && d.version !== UI_VERSION) {
         // Say which side is behind, and what actually fixes it. The version pill in the rail
         // shows the SERVER's version, so "restart the server" on a stale page sent the operator
         // in the wrong direction. Assets are served no-cache, so a page older than the server
         // means a cached tab (reload) — a page newer than the server means the process is still
         // running the previous code (restart).
-        warns.push(d.version > UI_VERSION
+        warns.push(cmpVersion(d.version, UI_VERSION) > 0
           ? `This page is v${UI_VERSION} but the server is v${d.version} — reload the page (Ctrl+Shift+R) to load the updated UI.`
           : `The server is v${d.version} but this page is v${UI_VERSION} — restart the server to load the updated code.`);
       }

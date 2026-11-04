@@ -37,8 +37,8 @@ single new file in `runway/codecs/` — nothing downstream changes.
    **webhook/HTTP**, or persist to **SQLite** (Postgres/Timescale on the roadmap).
 
 Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
-for shareable/transferable parser files, and a standalone **`Runway.exe`** build (see
-`packaging/`). Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
+for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build
+(see `packaging/`). Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
 
 ---
 

@@ -1,14 +1,20 @@
-# PyInstaller spec — builds a standalone one-file Runway.exe.
+# PyInstaller spec — builds a standalone one-file Runway-v<version>.exe.
 #
 #   pip install pyinstaller
 #   pyinstaller packaging/Runway.spec --noconfirm       # run from the REPO ROOT
 #
-# Output: dist/Runway.exe  (double-click to start the server + open the dashboard).
+# Output: dist/Runway-v<version>.exe  (double-click to start the server + open the dashboard).
 # A `data/` folder is created next to the exe on first run (db, logs, repositories).
 #
 # One-file build: passing a.binaries + a.datas into EXE (no COLLECT) makes it one-file.
 
+import sys
+
 from PyInstaller.utils.hooks import collect_submodules
+
+# The release name is spelled once, in build_release.py (from runway.__version__).
+sys.path.insert(0, SPECPATH)
+from build_release import RELEASE_NAME  # noqa: E402
 
 # Paths in a .spec are relative to the spec's folder (packaging/), so reach up with ../.
 # Bundle the static web UI at runway/web (app.py looks for it under _MEIPASS/runway/web)
@@ -53,7 +59,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="Runway",
+    name=RELEASE_NAME,
     console=True,          # show the startup banner + URL + logs while testing
     upx=False,
 )

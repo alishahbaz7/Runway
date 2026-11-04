@@ -58,6 +58,23 @@ if getattr(sys, "frozen", False):
 else:
     WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 UPLOAD_DIR = Path(DATA_DIR) / "uploads"
+
+# The static UI is re-read from disk on every page load, but __version__ is fixed when the
+# process imports it. /api/health reports both, so the page can tell "server not restarted
+# after an update" from "stale browser tab" without a version literal of its own. A frozen
+# build cannot change under a running process, so there the two are the same.
+_INIT_PY = Path(__file__).resolve().parent.parent / "__init__.py"
+_VERSION_RE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.M)
+
+
+def _code_version() -> str:
+    if getattr(sys, "frozen", False):
+        return __version__
+    try:
+        m = _VERSION_RE.search(_INIT_PY.read_text(encoding="utf-8"))
+    except OSError:
+        return __version__
+    return m.group(1) if m else __version__
 SIGNATURES_DIR = Path(DATA_DIR) / "signatures"     # local repository of signature files
 SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
 PROTOCOLS_DIR = Path(DATA_DIR) / "protocols"       # local repository of protocol definitions
@@ -586,6 +603,7 @@ async def health():
     return {
         "status": "ok",
         "version": __version__,
+        "code_version": _code_version(),
         "codecs": len(registry.CODECS),
         "devices": len(store.devices),
         "subscribers": hub.subscribers,

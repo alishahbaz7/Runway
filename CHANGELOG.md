@@ -4,9 +4,29 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [1.1.24] — 2026-08-03
+## [1.1.24] — 2026-11-04
 
 Rename release. Headline: **the project is called Runway everywhere.** No behaviour changes.
+
+### Changed — release packaging
+- **Everything in a release carries one name, `Runway-v<version>`**: the zip, the folder it
+  unpacks to and the exe itself (`Runway-v1.1.24.exe` inside `Runway-v1.1.24\`). The old
+  `Runway-<version>-win64.zip` held a bare `Runway.exe`, so two installs side by side were
+  indistinguishable in Explorer, the taskbar and a bug report. The name is spelled once, in
+  `packaging/build_release.py`; `Runway.spec` imports it.
+- **Upgrading needs one manual step, now written down.** The exe keeps its `data` folder
+  beside itself and each version unpacks to its own folder, so a new version opens empty until
+  the previous `data` folder is moved in. `GETTING_STARTED.txt` says so. On the build machine,
+  `build_release.py` carries it over itself — never into the zip — and stops, naming the
+  folders, when more than one earlier install holds data rather than guess which one is live.
+  A rebuild no longer wipes a `data` folder created by running the exe from its build folder.
+- **One version declaration: `runway/__init__.py`.** `pyproject.toml` reads it (`dynamic`), and
+  the UI no longer carries its own copy — `/api/health` now reports `code_version` (the code
+  on disk) next to `version` (the running process), so the "restart the server / reload the
+  page" banner keeps working without a literal to forget. Versions are compared numerically:
+  the old string comparison would have ranked `1.1.9` above `1.1.24`.
+  `tests/test_version.py` fails the suite on a second version literal, a CHANGELOG whose newest
+  section is not the current version, or a version branch that doesn't match it.
 
 ### Changed
 - **`ProInfo` → `Runway` across the whole project.** The app, the exe and the UI were already

@@ -78,5 +78,10 @@ wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static
   downlink/commission commands are built by `encode`.
 - **CRC helpers** (`runway/core/crc.py`): `crc_itu` (GT06) and `crc16_ibm` (Teltonika) are verified
   against standard check vectors (`0x906E` / `0xBB3D`). Reuse them; don't re-roll.
+- **One version, declared only in `runway/__init__.py`.** `pyproject.toml` reads it (`dynamic`),
+  the UI learns it from `/api/health` (`version` = running process, `code_version` = code on
+  disk), and the release is named `Runway-v<version>` from it (`packaging/build_release.py`).
+  Never write the version as a literal anywhere else — `tests/test_version.py` fails on one, and
+  also requires the CHANGELOG's newest section and the `v<x.y.z>` branch name to match.
 - **Tests build packets with the real crc helpers** rather than hardcoding captures, so codec tests
   validate framing + field parsing end-to-end. New codecs should ship sample-based tests the same way.

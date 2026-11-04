@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "runway"
-version = "1.1.24"
+dynamic = ["version"]       # read from runway/__init__.py — the one version declaration
 description = "Runway - Unified telematics protocol parser, visualizer & relay utility"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,9 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
 [project.scripts]
 runway = "runway.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "runway.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["runway*"]
