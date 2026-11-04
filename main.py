@@ -18,6 +18,7 @@ from runway import __version__
 from runway.cli import main
 
 SUBCOMMANDS = {"serve", "replay", "listen", "codecs"}
+TOP_LEVEL_FLAGS = {"--version", "-h", "--help"}   # answered by the CLI itself, not `serve`
 
 
 def _git_branch() -> str:
@@ -38,7 +39,7 @@ def _banner() -> None:
 
 if __name__ == "__main__":
     # Default to `serve` when no sub-command is given (no args, or only flags like --port).
-    if len(sys.argv) == 1 or sys.argv[1] not in SUBCOMMANDS:
+    if len(sys.argv) == 1 or sys.argv[1] not in SUBCOMMANDS | TOP_LEVEL_FLAGS:
         sys.argv.insert(1, "serve")
     _banner()
     main()
