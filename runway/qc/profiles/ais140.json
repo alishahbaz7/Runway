@@ -1,0 +1,30 @@
+{
+  "schema": "1",
+  "protocol": "ais140",
+  "label": "AIS-140 (Locate 140B)",
+  "raw_view": "ascii",
+  "stale_timeout_s": 600,
+  "_note": "QC coverage catalogue for AIS-140 / Locate 140B — the expected packet types + the 16 alert ids from the reference QC sheet. 'required' items must be exercised for a PASS; the rest are optional. 'skippable':true marks the items an operator is ALLOWED to waive on the bench (missing -> Conditional Pass, not fail) — only these show a Skip control in the Summary and only these are accepted by /api/qc/{id}/skip; every other item is mandatory and cannot be skipped. Per the bench rule the skippable set is the five hard-to-trigger alerts: Low battery, Low battery removed, Harsh Braking, Harsh Acceleration, Rash Turning. Match rules key on the codec's message_type + io.alert_id. 'group' splits the UI into Packets vs Alerts; 'code' is the on-wire packet_type code (e.g. BR). Edit 'required'/'skippable' to change what a lot must satisfy.",
+  "coverage": [
+    { "key": "login",     "label": "Login",                        "group": "packet", "code": "LGN", "match": { "message_type": "login" },     "required": true },
+    { "key": "live",      "label": "Location Update (live)",       "group": "packet", "code": "NR",  "match": { "alert_id": 1 },                "required": true },
+    { "key": "history",   "label": "Location Update (history)",    "group": "packet", "code": "NR",  "match": { "alert_id": 2 },                "required": false },
+    { "key": "health",    "label": "Health packet",                "group": "packet",    "code": "HEL", "match": { "message_type": "health" },       "required": true },
+    { "key": "emr",       "label": "Emergency ON",                 "group": "emergency", "code": "EMR", "match": { "message_type": "emergency" },    "required": true },
+    { "key": "sem",       "label": "Emergency OFF",                "group": "emergency", "code": "SEM", "match": { "message_type": "stop_message" }, "required": true },
+    { "key": "alert_3",   "label": "Disconnect main battery",      "group": "alert",  "code": "BD",  "match": { "alert_id": 3 },                "required": true },
+    { "key": "alert_4",   "label": "Low battery",                  "group": "alert",  "code": "BL",  "match": { "alert_id": 4 },                "required": true, "skippable": true },
+    { "key": "alert_5",   "label": "Low battery removed",          "group": "alert",  "code": "BL",  "match": { "alert_id": 5 },                "required": true, "skippable": true },
+    { "key": "alert_6",   "label": "Connect back to main battery", "group": "alert",  "code": "BR",  "match": { "alert_id": 6 },                "required": true },
+    { "key": "alert_7",   "label": "Ignition ON",                  "group": "alert",  "code": "IN",  "match": { "alert_id": 7 },                "required": true },
+    { "key": "alert_8",   "label": "Ignition OFF",                 "group": "alert",  "code": "IF",  "match": { "alert_id": 8 },                "required": true },
+    { "key": "alert_9",   "label": "GPS box opened",               "group": "alert",  "code": "",    "match": { "alert_id": 9 },                "required": false },
+    { "key": "alert_10",  "label": "Emergency state ON",           "group": "alert",  "code": "EA",  "match": { "alert_id": 10 },               "required": true },
+    { "key": "alert_11",  "label": "Emergency state OFF",          "group": "alert",  "code": "EA",  "match": { "alert_id": 11 },               "required": true },
+    { "key": "alert_12",  "label": "OTA parameter change",         "group": "alert",  "code": "OT",  "match": { "alert_id": 12 },               "required": false },
+    { "key": "alert_13",  "label": "Harsh Braking",                "group": "alert",  "code": "HB",  "match": { "alert_id": 13 },               "required": true, "skippable": true },
+    { "key": "alert_14",  "label": "Harsh Acceleration",           "group": "alert",  "code": "HA",  "match": { "alert_id": 14 },               "required": true, "skippable": true },
+    { "key": "alert_15",  "label": "Rash Turning",                 "group": "alert",  "code": "RT",  "match": { "alert_id": 15 },               "required": true, "skippable": true },
+    { "key": "alert_16",  "label": "Device Tampered",              "group": "alert",  "code": "DT",  "match": { "alert_id": 16 },               "required": true }
+  ]
+}

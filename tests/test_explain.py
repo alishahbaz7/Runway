@@ -6,8 +6,8 @@ explainer is exercised against valid framing, names and CRCs end-to-end.
 
 from __future__ import annotations
 
-from proinfo.codecs.teltonika_explain import explain
-from proinfo.core.crc import crc16_ibm
+from runway.codecs.teltonika_explain import explain
+from runway.core.crc import crc16_ibm
 
 
 def _data(codec_id: int, count: int, record: bytes) -> bytes:
@@ -149,7 +149,7 @@ def test_explain_skips_corrupt_and_continues():
 async def test_parse_endpoint():
     from httpx import ASGITransport, AsyncClient
 
-    from proinfo.api.app import app
+    from runway.api.app import app
 
     payload = {"hex": _data(0x08, 1, _rec8()).hex(), "transport": "tcp"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -159,3 +159,114 @@ async def test_parse_endpoint():
     data = r.json()
     assert data["ok"] and data["records"][0]["speed_kph"] == 60
     assert bad.status_code == 400                          # invalid hex rejected
+
+
+# --------------------------------------------------------------------------- #
+# Protocol-agnostic parsing: the Parser page is not a Teltonika tool.
+#
+# The endpoint decides two things from the data itself — is this a hex dump or the device's
+# own text, and which registered codec reads it — and the field breakdown comes from the
+# codec (its own explainer if it has one) plus the declarative grammar in the protocol
+# database. These tests pin that contract for a text protocol, a binary one, and a protocol
+# with no grammar published, so no caller can quietly go back to assuming one protocol.
+# --------------------------------------------------------------------------- #
+ZENITHRA_CAN = (
+    "$MMI,V2.2.0,5.1.29C,NR,1,L,868221073948609,DL1CAB1234,1,03082026,130441,28.550492,N,"
+    "77.268890,E,0.0,0,30,223,0.91,0.49,IND airtel,1,1,13.5,4.1,O,31,404,10,946,E28130C,"
+    "0000,00,0.7,0.0,000000E1:000040A0010001E2;00000120:0002FEA200000000,(),000007*46"
+)
+
+
+async def _post(path: str, body: dict):
+    from httpx import ASGITransport, AsyncClient
+
+    from runway.api.app import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        return await c.post(path, json=body)
+
+
+def _groups(packet: dict) -> dict:
+    out: dict = {}
+    for f in packet["fields"]:
+        out[f["group"]] = out.get(f["group"], 0) + 1
+    return out
+
+
+async def test_parse_ascii_text_is_not_shredded_into_hex():
+    """The regression that made the Parser useless for every ASCII protocol: the input was
+    filtered down to its hex-looking characters, so a $-sentence decoded to nothing."""
+    r = await _post("/api/parse", {"hex": ZENITHRA_CAN})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["protocol"] == "zenithra"            # detected from the bytes, not configured
+    assert len(d["packets"]) == 1 and d["skipped"] == 0 and d["error"] is None
+
+    pkt = d["packets"][0]
+    named = {f["name"]: f for f in pkt["fields"]}
+    assert named["imei"]["value"] == "868221073948609"
+    assert named["speed_kph"]["unit"] == "km/h"                    # unit from the grammar
+    assert "history" in named["packet_status"]["hint"]             # value table from the grammar
+    # byte offsets let the UI highlight the exact characters of a field in the pasted text
+    assert ZENITHRA_CAN[named["imei"]["at"]:][:15] == "868221073948609"
+
+    # the CAN bus is expanded to one row per frame, not left as one unreadable blob
+    can = [f for f in pkt["fields"] if f["group"].startswith("CAN frames")]
+    assert [f["name"] for f in can] == ["CAN 0x0E1", "CAN 0x120"]
+    assert can[0]["value"] == "000040A0010001E2" and can[0]["size"] == 8
+
+    # and the normalized record still feeds the map/table/summary
+    assert d["records"][0]["latitude"] == 28.550492
+    assert d["records"][0]["speed_kph"] == 0.0
+
+
+async def test_parse_keeps_the_codec_s_own_explainer():
+    """A codec that has more to say than a generic walk (bit-level sizes, verified CRC) keeps
+    saying it — the generic path must not flatten Teltonika's breakdown."""
+    r = await _post("/api/parse", {"hex": _data(0x08, 1, _rec8()).hex()})
+    d = r.json()
+    assert d["protocol"] == "teltonika"
+    pkt = d["packets"][0]
+    assert pkt["crc_ok"] is True                                   # only its explainer verifies this
+    assert any(f["bit"] for f in pkt["fields"])                    # bit column is populated
+    assert any(g.startswith("AVL Record") for g in _groups(pkt))   # its own grouping
+
+
+async def test_parse_protocol_override_and_unknown_name():
+    forced = await _post("/api/parse", {"hex": ZENITHRA_CAN, "protocol": "ais140"})
+    assert forced.status_code == 200
+    assert forced.json()["protocol"] == "ais140"        # operator's choice wins over detection
+    bad = await _post("/api/parse", {"hex": ZENITHRA_CAN, "protocol": "nope"})
+    assert bad.status_code == 400
+
+
+async def test_parse_without_a_published_grammar_still_breaks_fields_down():
+    """No grammar file for this codec: the sentence's own tokens are shown positionally and the
+    decoded record supplies the meaning, so a brand-new codec is inspectable immediately."""
+    r = await _post("/api/parse", {"hex": "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"})
+    d = r.json()
+    assert d["protocol"] == "nmea"
+    pkt = d["packets"][0]
+    groups = _groups(pkt)
+    assert any("no grammar published" in g for g in groups)
+    assert groups["Decoded record"] >= 4
+    named = {f["name"]: f["value"] for f in pkt["fields"]}
+    assert named["message_type"] == "RMC" and named["latitude"].startswith("48.11")
+
+
+async def test_parse_stream_reports_the_protocol_it_used():
+    """The UI reads the final NDJSON line; it needs the resolved protocol to label the result
+    and to sync the Dashboard through the same codec."""
+    import json
+
+    r = await _post("/api/parse-stream", {"hex": ZENITHRA_CAN})
+    result = json.loads([ln for ln in r.text.splitlines() if ln.strip()][-1])
+    assert result["type"] == "result" and result["protocol"] == "zenithra"
+    assert len(result["records"]) == 1
+
+
+async def test_ingest_accepts_text_and_auto_detects():
+    """Dashboard sync takes the same input the Parser took, with no protocol assumed."""
+    r = await _post("/api/ingest", {"hex": ZENITHRA_CAN, "peer": "test-parser"})
+    assert r.status_code == 200
+    assert r.json()["records"] == 1

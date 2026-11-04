@@ -1,9 +1,9 @@
-# ProInfo
+# Runway
 
-**Pro**(tocol) + **Info**(rmation) — a unified utility to **parse, visualize and relay**
+*Where telematics data lands & takes off* — a unified utility to **parse, visualize and relay**
 telematics packets from any IoT tracking device, regardless of OEM or protocol.
 
-Point it at a device, or drop in a captured log, and ProInfo decodes the raw bytes into
+Point it at a device, or drop in a captured log, and Runway decodes the raw bytes into
 one readable, normalized format — on a live map, in a packet inspector, and (optionally)
 forwarded on to your platform.
 
@@ -18,23 +18,27 @@ mqtt   ─▶│ mqtt /  │     │ teltonika│     │              │     �
 ```
 
 Everything that varies between devices lives in **plugins**. Adding a protocol is a
-single new file in `proinfo/codecs/` — nothing downstream changes.
+single new file in `runway/codecs/` — nothing downstream changes.
 
 ---
 
 ## What it does (the four pillars)
 
 1. **Parse anything** — pluggable codecs per protocol. Ships with **GT06/Concox**,
-   **Teltonika Codec 8/8E**, **NMEA-0183**, a **generic hex** fallback, and a
-   **template** to add your own OEM protocol.
+   **Teltonika (Codec 8/8E/16 + GPRS 12/13/14)**, **AIS-140 (Locate 140B)**,
+   **Zenithra Ax1 sCAN** (AIS-140 + inline CAN), **NMEA-0183**, a **generic hex** fallback,
+   and a **template** to add your own OEM protocol.
 2. **Visualize** — a web dashboard with a live map, per-device trails, a streaming
    packet table, and a hex + decoded-tree inspector. Single device or many at once.
-3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have the device
-   stream live to a built-in TCP listener.
+3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have devices
+   stream live to the built-in **Live TCP** server (start/stop listeners, see connected
+   clients, filter/log per client).
 4. **Relay** — forward decoded (or raw) traffic onward to your platform via **TCP**,
    **webhook/HTTP**, or persist to **SQLite** (Postgres/Timescale on the roadmap).
 
-Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
+Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
+for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build
+(see `packaging/`). Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.
 
 ---
 
@@ -42,16 +46,16 @@ Runs **locally first**, packaged in **Docker** so your team can push it to the c
 
 ```bash
 # 1. Install (editable, with dev extras for tests)
-cd ProInfo
+cd Runway
 python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -e ".[dev]"
 
 # 2. Parse a capture from the command line
-proinfo replay tests/fixtures/nmea_sample.log --codec nmea
-proinfo codecs                      # list available protocol codecs
+runway replay tests/fixtures/nmea_sample.log --codec nmea
+runway codecs                      # list available protocol codecs
 
 # 3. Launch the dashboard (then open http://127.0.0.1:8080)
-proinfo serve
+runway serve
 ```
 
 In the dashboard you can upload a log, pick a codec (or *auto-detect*), watch packets
@@ -60,15 +64,17 @@ stream onto the map, and click any packet to inspect its raw bytes and decoded f
 ### Live device
 
 ```bash
-proinfo listen --codec gt06 --port 5050        # then point the device at this host:5050
+runway listen --codec gt06 --port 5050        # then point the device at this host:5050
 ```
-or start a listener from the dashboard ("Live TCP listener" panel).
+or use **Capture → Live TCP** in the dashboard: start a listener (protocol/port/IP), watch
+connected clients and a live packet feed, filter or **log** per client (continuous server-side
+capture to TXT/CSV), and send downlink commands.
 
 ### Relay onward
 
 ```bash
 # Parse a live GT06 stream, persist it, and forward raw bytes to your platform:
-proinfo listen --codec gt06 --port 5050 --db proinfo.db --relay platform.example.com:6000
+runway listen --codec gt06 --port 5050 --db runway.db --relay platform.example.com:6000
 ```
 
 ---
@@ -76,15 +82,15 @@ proinfo listen --codec gt06 --port 5050 --db proinfo.db --relay platform.example
 ## Project layout
 
 ```
-proinfo/
+runway/
   core/        models · plugin interfaces · registry · pipeline engine · crc
   sources/     file_replay · tcp_server            (how bytes get IN)
-  codecs/      gt06 · teltonika · nmea · generic_hex · custom_template   (decode)
+  codecs/      gt06 · teltonika · ais140 · zenithra · nmea · generic_hex · custom_template
   sinks/       console · memory_store · ws_broadcast · webhook · tcp_relay (out)
   storage/     live (in-mem store + WS hub) · sqlite_store
   api/         app.py  (FastAPI: REST + WebSocket + upload + dashboard host)
   web/         index.html · app.js · style.css     (the dashboard)
-  cli.py       proinfo serve | replay | listen | codecs
+  cli.py       runway serve | replay | listen | codecs
 docs/          ARCHITECTURE · ADDING_A_PROTOCOL · ROADMAP
 config/        pipeline.example.yaml
 tests/         codec + pipeline tests with fixtures
@@ -92,7 +98,7 @@ tests/         codec + pipeline tests with fixtures
 
 ## Add a new protocol
 
-Copy `proinfo/codecs/custom_template.py`, implement `detect()` and `decode()`, drop a
+Copy `runway/codecs/custom_template.py`, implement `detect()` and `decode()`, drop a
 sample in `samples/`. It auto-registers everywhere. Full guide:
 [docs/ADDING_A_PROTOCOL.md](docs/ADDING_A_PROTOCOL.md).
 

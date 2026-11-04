@@ -1,11 +1,11 @@
 # Adding a new protocol (codec)
 
-Adding support for a new OEM/device is one file. Nothing else in ProInfo changes.
+Adding support for a new OEM/device is one file. Nothing else in Runway changes.
 
 ## 1. Copy the template
 
 ```bash
-cp proinfo/codecs/custom_template.py proinfo/codecs/acme.py
+cp runway/codecs/custom_template.py runway/codecs/acme.py
 ```
 
 ## 2. Name it
@@ -82,8 +82,8 @@ Drop a capture in `samples/acme_capture.hex` and a test in `tests/` (see
 `tests/test_codecs.py` for the pattern). Then:
 
 ```bash
-proinfo codecs                                  # your codec should be listed
-proinfo replay samples/acme_capture.hex --codec acme --hex
+runway codecs                                  # your codec should be listed
+runway replay samples/acme_capture.hex --codec acme --hex
 pytest
 ```
 

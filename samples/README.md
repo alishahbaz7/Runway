@@ -11,9 +11,9 @@ Accepted formats (auto-detected by the file-replay source):
 Examples:
 
 ```bash
-proinfo replay samples/my_gt06_capture.hex --codec gt06 --hex
-proinfo replay samples/nmea_drive.log --codec auto
+runway replay samples/my_gt06_capture.hex --codec gt06 --hex
+runway replay samples/nmea_drive.log --codec auto
 ```
 
-Tip: capture live traffic with `proinfo listen --codec auto --port 5050` and tee the
+Tip: capture live traffic with `runway listen --codec auto --port 5050` and tee the
 raw bytes, or sniff with Wireshark/tcpdump and export the TCP payload as hex.

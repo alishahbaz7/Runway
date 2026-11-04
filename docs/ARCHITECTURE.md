@@ -1,4 +1,4 @@
-# ProInfo — Architecture
+# Runway — Architecture
 
 ## Goal
 
@@ -8,7 +8,7 @@ protocols and new transports, and easy to lift from a laptop to the cloud.
 
 ## The pipeline
 
-Every flow through ProInfo is the same four stages:
+Every flow through Runway is the same four stages:
 
 ```
  Source  ──bytes──▶  Codec  ──UnifiedRecord──▶  Pipeline  ──▶  Sinks
@@ -24,7 +24,7 @@ Every flow through ProInfo is the same four stages:
 - **Sink** — consumes records: the in-memory store (for the dashboard), the WebSocket
   broadcaster, a webhook, a TCP relay, SQLite, the console.
 
-The three plugin types are defined in [`proinfo/core/interfaces.py`](../proinfo/core/interfaces.py).
+The three plugin types are defined in [`runway/core/interfaces.py`](../runway/core/interfaces.py).
 
 ## Why plugins + a registry
 
@@ -39,7 +39,7 @@ Devices differ in *two* dimensions: how they connect (transport) and how they en
 
 ## The unified data model
 
-[`proinfo/core/models.py`](../proinfo/core/models.py) defines `UnifiedRecord` — the
+[`runway/core/models.py`](../runway/core/models.py) defines `UnifiedRecord` — the
 contract between "everything upstream" and "everything downstream". Only `device_id` and
 `protocol` are required; codecs fill in whatever their message carried. Protocol-specific
 telemetry that has no first-class field goes into `io` (e.g. Teltonika AVL IO elements),
@@ -80,7 +80,7 @@ parse loop. Blocking work (SQLite) is pushed to a thread executor.
 
 | Concern        | Local (today)              | Cloud (roadmap)                       |
 |----------------|----------------------------|---------------------------------------|
-| Run            | `proinfo serve`            | Docker / `docker compose`             |
+| Run            | `runway serve`            | Docker / `docker compose`             |
 | Live state     | in-process `store` + `hub` | Redis pub/sub + shared cache          |
 | Persistence    | `sqlite_store` sink        | Postgres/TimescaleDB sink (same API)  |
 | Scale-out      | single process             | N stateless workers behind a balancer |

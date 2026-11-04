@@ -1,7 +1,39 @@
 # Runway — Session Notes
 
 Running handoff log. Newest session on top. Product name: **Runway** ("where telematics
-data lands & takes off"); internal Python package stays `proinfo`.
+data lands & takes off"); internal Python package stays `runway`.
+
+---
+
+## 2026-06-30 — `v1.1.0`
+
+Branch `v1.1.0` (version `1.1.0`). Tests: **41 passing** (`python -m pytest -q`). Since 1.0.0
+this cycle added the **Protocols** repository, the **Converter** (CanPlus XML → JSON/DBC), the
+standalone **`Runway.exe`** build, and the headline **Live TCP server**.
+
+### Live TCP server (Capture → Live TCP)
+- Start/stop/resume listeners (Protocol incl. **Auto** + **Generic (raw)**, Port, auto-detected
+  **IP**); running cards show status/uptime/records/bytes and update live (2.5s poll + WS).
+- **Per-client**: checkboxes filter the feed per client (hide ≠ stop) + All/None; per-client
+  packet **count** and **idle** tracked **server-side** (`pipeline.per_peer` → `job.clients`),
+  so they survive reloads. Downlink **Send** per client.
+- **Live packets** feed: `Timestamp | Payload` header, complete packet (click a row → full
+  HEX/ASCII), remembered HEX/ASCII view, feed persists across navigation.
+- **Logging vs Download**: one-time **Download** (buffered, TXT/CSV, all/selected, ASCII/HEX)
+  **and** continuous **Start/Stop log** — server-side, chosen folder+filename, flushed per
+  packet + fsync'd (crash/power-safe), append-only; timestamps `DD-MMM-YYYY HH:MM:SS:zzz`.
+
+### Working rules in force (see memory)
+- **3 dev phases**: local edits (incl. version bumps) by default → push only when asked →
+  build exe/zip only when asked.
+- **Retention**: user config persists (`localStorage`) until changed; page data persists
+  across nav (`sessionStorage`/server snapshot) until Clear/restart.
+- `RUNWAY_DATA_DIR` overrides the data dir; tests use a temp dir (no pollution).
+
+### Pending / notes
+- Server per-client counts reset when a listener stops/resumes (live, not durable) — can move
+  to the DB if cross-restart totals are wanted.
+- Continuous log currently captures **all** packets; could honor the per-client selection.
 
 ---
 
@@ -54,7 +86,7 @@ without a manual restart.
 ### Also shipped (added after the main session)
 - **Converter** (Tools → Converter): upload a **CanPlus `*.Config.XML`** vehicle signature →
   view/edit the signals in a table → export **JSON** and **DBC**. Parser/exporters in
-  `proinfo/convert/canplus.py` (+ root `canplus_signature.py` CLI shim); endpoints
+  `runway/convert/canplus.py` (+ root `canplus_signature.py` CLI shim); endpoints
   `POST /api/convert/parse` and `/api/convert/export`. Descriptor decode is verified
   against the file's own mult/div; CAN-id low byte = descriptor byte 1 (SOC `0xAC` ↔ PID
   `0x3AC`). **Open:** field **start-bit/length** isn't in the XML — user edits it in the

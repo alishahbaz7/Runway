@@ -1,4 +1,4 @@
-# ProInfo — Architecture & Design
+# Runway — Architecture & Design
 
 **Draft v0.1 · 2026-06-25 · for discussion (nothing here is final — mark it up).**
 
@@ -27,7 +27,7 @@ normalized stream you can see, store and forward. Four pillars:
    HTTP, serial, BLE…) without touching the rest of the system.
 2. **Visualize** — one device or many, on a live map + a hex/decoded packet inspector.
 3. **Two ways in** — replay an uploaded log/`.loc` file, *or* take live data off a device.
-4. **Relay** — forward device → ProInfo → platform via TCP, API or webhook.
+4. **Relay** — forward device → Runway → platform via TCP, API or webhook.
 
 Non-negotiables shaping every decision: runs **locally first**, handles **physically-attached
 devices** (serial/BLE), scales to a **shared cloud instance** — all from **one codebase**.
@@ -82,7 +82,7 @@ packets via session state.
 
 ---
 
-## 4. Core interfaces (`proinfo-core`, pure — no framework, no I/O)
+## 4. Core interfaces (`runway-core`, pure — no framework, no I/O)
 
 ```python
 class Source:
@@ -257,20 +257,20 @@ outage queues rather than drops.
 ## 14. Repo structure (monorepo)
 
 ```
-proinfo/
+runway/
   packages/
-    proinfo-core/      # PURE: models · Codec interface · registry · framing · crc · declarative engine
+    runway-core/      # PURE: models · Codec interface · registry · framing · crc · declarative engine
       codecs/          # one folder per protocol: parser + samples/ + tests/ colocated
         gt06/  teltonika/  nmea/  acme_t2.yaml  …
-    proinfo-io/        # sources & sinks: serial, ble, tcp, udp, mqtt, http, file; relays
-    proinfo-hub/       # FastAPI: REST/WS · repos · auth · job runner
-    proinfo-agent/     # edge: device discovery + I/O + local UI + forward-to-hub
-    proinfo-web/       # TypeScript dashboard
+    runway-io/        # sources & sinks: serial, ble, tcp, udp, mqtt, http, file; relays
+    runway-hub/       # FastAPI: REST/WS · repos · auth · job runner
+    runway-agent/     # edge: device discovery + I/O + local UI + forward-to-hub
+    runway-web/       # TypeScript dashboard
   deploy/              # Dockerfiles · compose · k8s · config/{local,server,agent}.yaml
   docs/  samples/  tests/
 ```
 
-> Note: the current repo is the **v0.1 spike** in a flat `proinfo/` package (proves the
+> Note: the current repo is the **v0.1 spike** in a flat `runway/` package (proves the
 > Source/Codec/Sink idea, working CLI + dashboard + tests). It migrates into the package layout
 > above as we enter P2.
 

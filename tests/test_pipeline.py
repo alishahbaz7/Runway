@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from proinfo.core import registry
-from proinfo.core.interfaces import Sink
-from proinfo.core.models import UnifiedRecord
-from proinfo.core.pipeline import Pipeline
-from proinfo.sources.file_replay import FileReplaySource
+from runway.core import registry
+from runway.core.interfaces import Sink
+from runway.core.models import UnifiedRecord
+from runway.core.pipeline import Pipeline
+from runway.sources.file_replay import FileReplaySource
 
 FIX = Path(__file__).parent / "fixtures"
 

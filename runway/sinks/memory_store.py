@@ -1,0 +1,40 @@
+"""Write records into the in-memory live store the REST API reads from.
+
+Also mirrors the per-device summary into the durable ``devices`` table so the device
+registry survives a restart. The live ``store`` stays the hot read path; the SQLite write
+runs in a thread executor so it never blocks the asyncio pipeline.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from ..core.interfaces import Sink
+from ..core.models import UnifiedRecord
+from ..core.registry import register_sink
+from ..storage.live import db, store
+
+log = logging.getLogger("runway.memory_store")
+
+
+@register_sink
+class MemoryStoreSink(Sink):
+    name = "memory_store"
+
+    async def handle(self, record: UnifiedRecord) -> None:
+        d = store.add(record)
+        # ws_broadcast runs right after this sink (Pipeline awaits sinks in order) and needs
+        # the same seq the store just stamped — carry it on the record itself rather than
+        # have ws_broadcast re-derive its own (it has no access to the store's counter).
+        record.extra["seq"] = d["seq"]
+        info = store.devices.get(record.device_id)
+        if info is not None:
+            await asyncio.get_event_loop().run_in_executor(None, self._persist, dict(info))
+
+    @staticmethod
+    def _persist(info: dict) -> None:
+        try:
+            db.upsert_device(info)
+        except Exception:               # persistence must never break the live pipeline
+            log.exception("failed to persist device %s", info.get("device_id"))
