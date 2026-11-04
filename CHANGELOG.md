@@ -28,6 +28,12 @@ Rename release. Headline: **the project is called Runway everywhere.** No behavi
   `tests/test_version.py` fails the suite on a second version literal, a CHANGELOG whose newest
   section is not the current version, or a version branch that doesn't match it.
 
+### Fixed
+- **`Runway-v<version>.exe --version` (and `python main.py --version`) print the version.**
+  Both launchers default to `serve` when the first argument isn't a sub-command, so `--version`
+  and `--help` were handed to `serve` and rejected as unknown flags — the one command that
+  answers "which build is this?" without starting a server didn't work on the exe.
+
 ### Changed
 - **`ProInfo` → `Runway` across the whole project.** The app, the exe and the UI were already
   branded Runway while the repo, the Python package and the CLI still said `proinfo` — two names
