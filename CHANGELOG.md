@@ -4,6 +4,12 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.25] — Unreleased
+
+In progress: the **IMU packet** (packet type `IMU`, alert id `200`) — 6-axis sensor samples
+carried in the last field of the AIS-140 packet, from Locate 140 VB (`$PVT`) and Zenithra sCAN
+(`$MMI`) firmware.
+
 ## [1.1.24] — 2026-11-04
 
 Rename release. Headline: **the project is called Runway everywhere.** No behaviour changes.

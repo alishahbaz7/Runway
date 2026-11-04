@@ -25,7 +25,9 @@ def test_changelog_newest_section_is_the_current_version():
 
 def test_branch_name_matches_version():
     try:
-        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT,
+        # not `rev-parse --abbrev-ref HEAD`: once the release tag of the same name exists it
+        # answers "heads/v1.1.24", and the check would quietly skip
+        branch = subprocess.run(["git", "branch", "--show-current"], cwd=ROOT,
                                 capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("not a git checkout")
