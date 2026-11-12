@@ -111,6 +111,17 @@ def test_no_rule_on_a_bare_structural_element():
                     f"{p.name}: a rule on bare {sel!r} — style the element by its class or id"
 
 
+def test_the_first_start_is_a_welcome_not_a_notice():
+    """The user, 12-11-2026, on "Who is using Runway? Runway reports your name, this computer…":
+    "Not acceptable at all" — it read as being watched. The first start greets, as BluePulse does;
+    what is shared lives in Settings → Usage reporting."""
+    js = _code(_text(WEB / "appctl.js"))                 # what the page shows, not the comments
+    assert "Hi! May I have your name, please?" in js
+    assert "to greet you" in js
+    for notice in ("Who is using", "reports your name", "this computer, the app version"):
+        assert notice not in js, f"appctl.js: {notice!r} — the first start welcomes, it does not warn"
+
+
 def test_every_page_is_framed_by_the_shell():
     for p in PAGES:
         html = _text(p)

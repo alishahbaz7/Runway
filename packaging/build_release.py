@@ -104,10 +104,10 @@ COMMAND LINE (optional)
   versions\\{rel}\\{exe} codecs
   versions\\{rel}\\{exe} --version
 
-USAGE REPORTING
-  Runway reports your name, this computer, the app version and how the app is
-  used (time running, pages opened, errors, counts). Never device IMEIs,
-  packets, endpoints, keys or files. Settings -> Usage reporting shows it.
+YOUR NAME
+  The first start asks your name — to greet you, and to make Runway better
+  for you. Settings -> Usage reporting shows what is shared; never device
+  IMEIs, packets, endpoints, keys or files.
 """
 
 

@@ -48,8 +48,14 @@
   let upd = null;             // GET /api/update
 
   // ---- first start: the name ---------------------------------------------------------------------
+  // A welcome, not a notice: the app getting to know its person (the user, 12-11-2026: "Who is
+  // using Runway? Runway reports your name…" read as someone watching — "not acceptable at all").
+  // The same words as BluePulse, so every app greets the same way; what is shared is in Settings.
   // Name only; Continue once something is typed; no Esc, no backdrop click — but nothing else waits
   // on the server: the name is saved at once and sent in the background.
+  const WELCOME = "Hi! May I have your name, please?";
+  const WELCOME_TEXT = "We'll use it to greet you and to make Runway better for you. "
+    + "Settings → Usage reporting shows what is shared.";
   function askName(edit) {
     return new Promise((resolve) => {
       const d = el("dialog", "ui-dlg");
@@ -57,12 +63,9 @@
         '<form method="dialog"><div class="ui-dlg-head"><h2></h2></div>' +
         '<div class="ui-dlg-body"></div>' +
         '<div class="ui-dlg-foot"><span class="spacer"></span></div></form>';
-      d.querySelector("h2").textContent = edit ? "Your name" : "Who is using Runway?";
+      d.querySelector("h2").textContent = edit ? "Your name" : WELCOME;
       const body = d.querySelector(".ui-dlg-body");
-      if (!edit) {
-        body.appendChild(el("p", "ui-dlg-text",
-          "Runway reports your name, this computer, the app version and how the app is used."));
-      }
+      body.appendChild(el("p", "ui-dlg-text", WELCOME_TEXT));
       const lab = el("label", "ui-dlg-field", "Name");
       const input = el("input");
       input.maxLength = 80;

@@ -7,6 +7,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
 ## [1.1.27] — Unreleased
 
 ### Changed
+- **The first start welcomes you instead of warning you.** 1.1.26 opened with "Who is using
+  Runway? Runway reports your name, this computer, the app version and how the app is used." — a
+  notice that read as being watched. It now asks the way BluePulse does: "Hi! May I have your
+  name, please?", then "We'll use it to greet you and to make Runway better for you. Settings →
+  Usage reporting shows what is shared." What is shared is unchanged and still listed in Settings.
 - **The release build stops when this version's CHANGELOG section is empty** — every copy shows
   those notes in its update offer, so a release without them would offer an update that says
   nothing.

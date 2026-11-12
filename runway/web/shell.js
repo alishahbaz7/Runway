@@ -583,7 +583,7 @@
   refreshStatus();
   setInterval(refreshStatus, 4000);
 
-  // Usage reporting and updates (the first-start name, the greeting, the update offer and chip,
+  // Usage reporting and updates (the first-start welcome, the greeting, the update offer and chip,
   // their Settings sections) — on every page, without each page loading it.
   const appctl = document.createElement("script");
   appctl.src = "appctl.js";
