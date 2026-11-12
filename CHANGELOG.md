@@ -7,6 +7,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
 ## [1.1.27] — Unreleased
 
 ### Changed
+- **Runway opens like an app.** It used to start a black command window and then a browser tab;
+  now it opens in **its own window** (Edge's app mode: no address bar, no tabs, Runway's title and
+  icon) and shows itself **by the clock**: left-click opens Runway, right-click has *Open Runway*,
+  *Logs* and *Quit Runway* — which asks first while listeners run, since quitting drops their
+  devices. No command window any more; the log it showed is on the Logs page. Underneath it is
+  still a server, on purpose: closing the window leaves listeners, relays and storage running
+  (24x7), other PCs on the LAN can still open it, and starting Runway again from the pinned icon
+  brings the running one to the front instead of failing on a busy port. If another program holds
+  the port, a message says so instead of nothing happening. A run from source keeps its console
+  but opens the same window.
 - **The first start welcomes you instead of warning you.** 1.1.26 opened with "Who is using
   Runway? Runway reports your name, this computer, the app version and how the app is used." — a
   notice that read as being watched. It now asks the way BluePulse does: "Hi! May I have your

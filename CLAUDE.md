@@ -146,6 +146,13 @@ wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static
   `data/update.json`). Both are off in a run from source unless pointed at a test server
   (`RUNWAY_USAGE_URL`, `RUNWAY_UPDATE_MANIFEST_URL`). Page side: `web/appctl.js`, loaded by the
   shell. Packaging and publishing: `packaging/README.md`.
+- **On the desktop** (`runway/desktop.py`, stdlib ctypes): `serve` opens Runway in Edge's app mode
+  (its own window) unless one of this server's pages is already open; a second start finds the
+  running Runway (`/api/health`) and brings it to the front; release builds are windowed (no
+  console — `packaging/runway_main.py` gives a terminal command its console back and writes
+  `data/runway.crash.log` + a message box if start-up fails) and show a tray icon (Open · Logs ·
+  Quit, Quit asks while listeners run; `RUNWAY_TRAY=1` shows it from source). It stays a server
+  underneath on purpose: closing the window must not stop 24x7 relays.
 - **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse is the
   bar). `shell.js` builds the rail + top bar around each page's `#content` and exposes
   `window.RunwayUI` — the one icon map (`icons`, `icon()`, `<span data-icon>` painted on load;

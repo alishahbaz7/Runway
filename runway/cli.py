@@ -58,18 +58,41 @@ async def _listen(args) -> None:
     await pipe.run()
 
 
-PAGE_GRACE_S = 5.0          # an open Runway tab checks in every 4 s
+PAGE_GRACE_S = 5.0          # an open Runway page checks in every 4 s
 
 
-def _open_unless_open(url: str) -> None:
-    """Open the dashboard in a browser — but not when a Runway tab is already open. Every
-    restart used to add one more tab; an open page checks in with the server within seconds
-    (``page_seen_s`` on /api/health), so wait for the server, give pages that long, then decide.
-    ``?probe=1`` keeps this check from counting as a page itself."""
+def _runway_answers(url: str, timeout: float = 1.5) -> bool:
+    """A Runway server already answers at ``url`` (``?probe=1``: not counted as a page)."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{url}/api/health?probe=1", timeout=timeout) as r:
+            return "version" in json.load(r)
+    except Exception:
+        return False
+
+
+def _port_free(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host or "0.0.0.0", port))
+            return True
+        except OSError:
+            return False
+
+
+def _open_when_ready(url: str) -> None:
+    """Show Runway once the server answers: in its own window (Edge's app mode), unless a Runway
+    window is already open — after a restart or an update it reconnects by itself. Off Windows,
+    a browser tab, unless an open page checks in within a few seconds."""
     import json
     import time
     import urllib.request
-    import webbrowser
+
+    from . import desktop
 
     probe = f"{url}/api/health?probe=1"
     for _ in range(120):                   # wait until the server accepts connections
@@ -78,18 +101,51 @@ def _open_unless_open(url: str) -> None:
             break
         except Exception:
             time.sleep(0.5)
-    time.sleep(PAGE_GRACE_S)
-    try:
-        seen = json.load(urllib.request.urlopen(probe, timeout=2)).get("page_seen_s")
-    except Exception:
-        seen = None
-    if seen is not None:
-        print(f"A Runway tab is already open — not opening another ({url})")
+    # No Runway window anywhere: open at once (a cold start). One open — after a restart, or a copy
+    # on another port — counts only if a page of THIS server checks in within a few seconds.
+    if desktop.IS_WINDOWS and not desktop.runway_windows():
+        desktop.open_app_window(url)
         return
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass  # no browser available (headless) - the URL is printed anyway
+    deadline = time.monotonic() + PAGE_GRACE_S
+    while time.monotonic() < deadline:
+        try:
+            if json.load(urllib.request.urlopen(probe, timeout=2)).get("page_seen_s") is not None:
+                print(f"A Runway window is already open — not opening another ({url})")
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+    desktop.open_app_window(url)
+
+
+def _start_tray(url: str) -> None:
+    """The icon by the clock: Open Runway, Logs, Quit Runway (asks first while listeners run)."""
+    import os
+    import sys
+
+    from . import __version__, desktop
+
+    def listeners() -> int:
+        app_mod = sys.modules.get("runway.api.app")
+        try:
+            return app_mod._running_listeners() if app_mod else 0
+        except Exception:
+            return 0
+
+    def quit_runway() -> None:
+        question = desktop.quit_question(listeners())
+        if question and desktop.message_box(question, "Quit Runway?",
+                                            desktop.MB_YESNO | desktop.MB_ICONWARNING) != desktop.IDYES:
+            return
+        from .update.service import shut_down
+        shut_down()
+
+    base = getattr(sys, "_MEIPASS", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packaging"))
+    desktop.start_tray(icon_path=os.path.join(base, "runway.ico"),
+                       on_open=lambda: desktop.show(url),
+                       on_logs=lambda: desktop.open_app_window(url + "/logs.html"),
+                       on_quit=quit_runway,
+                       tip=lambda: desktop.tray_tip(__version__, listeners()))
 
 
 def _wait_for_port(host: str, port: int, seconds: float) -> None:
@@ -110,27 +166,47 @@ def _wait_for_port(host: str, port: int, seconds: float) -> None:
 
 
 def _serve(args) -> None:
+    import os
+
     import uvicorn
 
-    from . import install
+    from . import desktop, install
 
     # how this server was started — a restart into a new version serves on the same address
     install.SERVE_ARGS[:] = ["serve", "--host", args.host, "--port", str(args.port)] + \
         (["--no-browser"] if getattr(args, "no_browser", False) else [])
-    if getattr(args, "wait_port", 0):
-        _wait_for_port(args.host, args.port, args.wait_port)
 
     # 0.0.0.0 means "all interfaces" - the browser should still hit localhost.
     host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
     url = f"http://{host}:{args.port}"
 
+    if getattr(args, "wait_port", 0):
+        _wait_for_port(args.host, args.port, args.wait_port)       # a restart into a new version
+    elif _runway_answers(url):
+        # Runway already runs here (started again from the pinned icon): show it, don't start a second
+        print(f"Runway is already running at {url}")
+        if not getattr(args, "no_browser", False):
+            desktop.show(url)
+        return
+    elif not _port_free(args.host, args.port):
+        text = (f"Port {args.port} is in use by another program, so Runway cannot start.\n\n"
+                f"Close that program, or start Runway on another port (serve --port 9000).")
+        if install.FROZEN:
+            desktop.message_box(text, "Runway", desktop.MB_OK | desktop.MB_ICONERROR)
+        print(text)
+        raise SystemExit(1)
+
     if not getattr(args, "no_browser", False):
         import threading
 
         # Daemon thread: it must never keep Ctrl+C waiting.
-        threading.Thread(target=_open_unless_open, args=(url,), daemon=True).start()
-        print(f"Opening {url} in your browser unless a Runway tab is already open "
+        threading.Thread(target=_open_when_ready, args=(url,), daemon=True).start()
+        print(f"Opening {url} in its own window unless a Runway window is already open "
               "(use --no-browser to disable)")
+
+    # A release build has no console window: the tray icon is how Runway is seen running and stopped.
+    if install.FROZEN or os.environ.get("RUNWAY_TRAY"):
+        _start_tray(url)
 
     uvicorn.run("runway.api.app:app", host=args.host, port=args.port,
                 reload=args.reload, log_level="info")

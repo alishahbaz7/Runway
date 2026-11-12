@@ -39,6 +39,8 @@ def start(running_listeners: Callable[[], int]) -> None:
 
 def stop() -> None:
     usage_mod.usage.stop()                      # closes the session; waits 3 s at most
+    from .. import desktop
+    desktop.stop_tray()                         # take the icon away with the server, not after it
 
 
 def _updates() -> UpdateService:
