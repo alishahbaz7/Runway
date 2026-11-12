@@ -356,10 +356,13 @@ def test_the_release_manifest_reads_back_in_the_app():
     import build_release
     from runway import __version__
 
-    notes = build_release.changelog_section(
+    sample = "# Changelog\n\n## [9.2.0] — Unreleased\n\n## [9.1.0] — 2026-11-20\n\n### Added\n- **A thing**\n\n## [9.0.0]\n- older\n"
+    assert build_release.changelog_section(sample, "9.1.0") == "### Added\n- **A thing**"
+    assert build_release.changelog_section(sample, "9.2.0") == ""          # a fresh cycle: nothing yet
+    # the real CHANGELOG has a section for this version (its notes may be empty early in a cycle)
+    build_release.changelog_section(
         (Path(__file__).resolve().parent.parent / "CHANGELOG.md").read_text(encoding="utf-8"), __version__)
-    assert notes and not notes.startswith("## ")
-    data = build_release.build_manifest(notes=notes, sha="b" * 64, size=123, minimum=None)
+    data = build_release.build_manifest(notes="What changed", sha="b" * 64, size=123, minimum=None)
     from runway.update import config
     m = mf.parse(json.dumps(data), base=config.MANIFEST_URL, expected_app=install.APP_NAME)
     assert str(m.version) == __version__ and m.windows.file == f"{install.release_name()}.zip"

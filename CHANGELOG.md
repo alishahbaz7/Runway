@@ -4,6 +4,13 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.27] — Unreleased
+
+### Changed
+- **The release build stops when this version's CHANGELOG section is empty** — every copy shows
+  those notes in its update offer, so a release without them would offer an update that says
+  nothing.
+
 ## [1.1.26] — 2026-11-12
 
 ### Added

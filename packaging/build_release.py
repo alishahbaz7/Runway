@@ -256,6 +256,10 @@ def main() -> int:
             z.write(p, Path(INSTALL_FOLDER) / p.relative_to(stage))
 
     notes = changelog_section((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), VER)
+    if not notes:
+        print(f"ERROR: the CHANGELOG section for {VER} is empty — copies would be offered an update "
+              "with no notes. Write it, then build again.", file=sys.stderr)
+        return 1
     sha, size = sha256_of(zpath), zpath.stat().st_size
     (DIST / "latest.json").write_text(json.dumps(build_manifest(notes=notes, sha=sha, size=size, minimum=minimum),
                                                  indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
