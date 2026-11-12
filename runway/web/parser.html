@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runway · Packet Parser</title>
+  <title>Runway · Packet parser</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="parser">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
-      <h1>Packet Parser</h1>
-      <span class="tag">Decode device packets — one tab per device</span>
+      <h1>Packet parser</h1>
+      <span class="tag">Decode device packets, one tab per device. Paste hex or the device's own text, one packet or many; Ctrl+Enter decodes.</span>
       <span class="spacer"></span>
       <span class="pill" id="stat-tabs">1 tab</span>
     </header>
@@ -25,48 +25,48 @@
   <template id="tab-tpl">
     <div class="panel">
       <div class="parsebar">
-        <label>Enter data (hex dump or the device's own text — paste one or many packets):</label>
-        <textarea class="hexin" placeholder="000F33353633…   or   $MMI,V2.2.0,…*BC   or   $GPRMC,123519,A,…*6A"
-                  title="click a field or signal to highlight its bytes here"></textarea>
+        <label>Packets</label>
+        <textarea class="hexin" spellcheck="false" placeholder="000F33353633…   $MMI,V2.2.0,…*BC   $GPRMC,123519,A,…*6A"
+                  title="Click a field or signal to highlight its bytes here"></textarea>
         <div class="controls">
           <!-- always-visible essentials -->
-          <span class="seg">Protocol:
+          <span class="seg">Protocol
             <select class="proto-sel" title="Auto-detect reads the bytes; pick a protocol to force one">
               <option value="auto" selected>Auto-detect</option>
             </select>
           </span>
-          <span class="seg">Order:
+          <span class="seg">Order
             <select class="sort-sel">
               <option value="feed">Feed order</option>
-              <option value="asc">Time ↑ (oldest first)</option>
-              <option value="desc">Time ↓ (newest first)</option>
+              <option value="asc">Oldest first</option>
+              <option value="desc">Newest first</option>
             </select>
           </span>
-          <span class="seg">Signature:
-            <select class="sig-sel"><option value="">— none —</option></select>
-            <button class="sig-apply ghost">Apply</button>
+          <span class="seg">Signature
+            <select class="sig-sel"><option value="">None</option></select>
+            <button class="sig-apply ghost" type="button">Apply</button>
           </span>
           <span class="parse-msg"></span>
           <span class="spacer"></span>
-          <button class="decode-btn">Decode ▶</button>
-          <button class="more-btn ghost">More ▾</button>
+          <button class="more-btn ghost" type="button"><span data-icon="more"></span>More</button>
+          <button class="decode-btn" type="button" title="Decode (Ctrl+Enter)"><span data-icon="play"></span>Decode</button>
 
           <!-- overflow dropdown -->
           <div class="more-panel">
-            <span class="seg">View:
+            <span class="seg">View
               <select class="view-sel">
                 <option value="grid" selected>Grid</option>
                 <option value="grouped">By record</option>
                 <option value="flat">Flat</option>
               </select>
             </span>
-            <span class="seg">Transport:
+            <span class="seg">Transport
               <select class="transport-sel">
                 <option value="tcp" selected>TCP</option>
                 <option value="udp">UDP</option>
               </select>
             </span>
-            <span class="seg">Time zone:
+            <span class="seg">Time zone
               <select class="tz-sel">
                 <option value="ist" selected>IST (UTC+5:30)</option>
                 <option value="utc">UTC / GMT</option>
@@ -80,30 +80,35 @@
               <span class="tz-custom" style="display:none">
                 UTC
                 <select class="tz-sign"><option value="+">+</option><option value="-">−</option></select>
-                <input class="tz-h" type="number" min="0" max="14" value="5" title="hours" /> :
-                <input class="tz-m" type="number" min="0" max="59" value="30" title="minutes" />
+                <input class="tz-h" type="number" min="0" max="14" value="5" title="Hours" /> :
+                <input class="tz-m" type="number" min="0" max="59" value="30" title="Minutes" />
               </span>
             </span>
             <div class="more-actions">
-              <input type="file" class="file-input" accept=".hex,.txt,.log,.csv,.dump" style="display:none" />
-              <button class="upload-btn ghost" title="upload a file of hex packets, one per line">⤒ Upload</button>
-              <button class="sample-btn ghost">Load sample</button>
-              <button class="download-btn ghost">⤓ CSV</button>
-              <button class="clear-btn ghost">Clear</button>
+              <input type="file" class="file-input" accept=".hex,.txt,.log,.csv,.dump" hidden />
+              <button class="upload-btn ghost" type="button" title="A file of packets, one per line"><span data-icon="upload"></span>Upload</button>
+              <button class="sample-btn ghost" type="button"><span data-icon="file"></span>Load sample</button>
+              <button class="download-btn ghost" type="button"><span data-icon="download"></span>CSV</button>
+              <button class="clear-btn ghost" type="button"><span data-icon="x"></span>Clear</button>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="parser-main">
-        <section class="fields"><p class="empty">Paste a packet and hit Decode</p></section>
-        <aside class="parser-right">
-          <div class="summary"><p class="empty">Decode to see a summary</p></div>
+      <div class="parser-main ui-split">
+        <div class="fields"><p class="empty">No packets decoded yet</p></div>
+        <div class="parser-right">
+          <div class="pane-head">
+            <span class="pane-title">Summary</span>
+            <span class="spacer"></span>
+            <button class="ui-icon-btn" type="button" data-fold-toggle></button>
+          </div>
+          <div class="summary"><p class="empty">No summary yet</p></div>
           <div class="map-wrap">
-            <div class="map-head"><span>Map</span><button class="map-fold ghost mini">Hide map ▾</button></div>
+            <div class="map-head"><span>Map</span><button class="map-fold ghost mini" type="button"></button></div>
             <div class="parser-map"></div>
           </div>
-        </aside>
+        </div>
       </div>
     </div>
   </template>

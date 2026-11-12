@@ -217,3 +217,50 @@ def test_a_database_from_before_the_summaries_gets_them_on_open(tmp_path):
     assert (dev["packets"], dev["imu_samples"]) == (12, 240)
     assert s._db().execute("SELECT SUM(n), SUM(pk) FROM imu_minute").fetchone() == (240, 12)
     s.close()
+
+
+# -- speed alongside the samples ---------------------------------------------------------------- #
+def test_speed_comes_per_packet_then_per_bucket_then_per_minute(store):
+    from datetime import timedelta
+
+    imu = _records((FIX / "zenithra_imu_sample.log").read_bytes())[0]
+    for i in range(360):                                   # 12 min, a packet every 2 s, 0-59 km/h
+        r = imu.model_copy(deep=True)
+        r.event_time, r.speed_kph = imu.event_time + timedelta(seconds=2 * i), float(i % 60)
+        store.write(r)
+    t0 = imu.event_time.timestamp()
+    fine = store.imu_series(DEV, t0 - 1, t0 + 61, points=50)          # 31 packets fit: as reported
+    assert fine["speed"]["t"][:3] == pytest.approx([t0, t0 + 2, t0 + 4])
+    assert fine["speed"]["mean"][:3] == [0.0, 1.0, 2.0] and fine["speed"]["w"] is None
+    wide = store.imu_series(DEV, t0 - 1, t0 + 721, points=50)         # 360 packets: buckets
+    sp = wide["speed"]
+    assert sp["w"] == pytest.approx(722 / 50) and max(sp["max"]) == 59.0 and min(sp["min"]) == 0.0
+    assert wide["mode"] == "buckets" and set(sp["t"]) <= set(wide["t"])  # the samples' own buckets
+    long = store.imu_series(DEV, t0 - 3600, t0 + 3600 * 23, points=50)   # minute summaries
+    assert long["mode"] == "minutes" and max(long["speed"]["max"]) == 59.0
+    assert long["speed"]["mean"][0] == pytest.approx(sum(range(30)) / 30, abs=15)
+
+
+def test_a_v1_1_25_database_gets_speed_in_its_minute_summaries(tmp_path):
+    from datetime import timedelta
+
+    path = str(tmp_path / "telemetry.db")
+    s = TelemetryStore(path)
+    imu = _records((FIX / "zenithra_imu_sample.log").read_bytes())[0]
+    for i in range(30):
+        r = imu.model_copy(deep=True)
+        r.event_time, r.speed_kph = imu.event_time + timedelta(seconds=2 * i), 40.0 + i
+        s.write(r)
+    db = s._db()
+    db.execute("DROP TABLE imu_minute")                    # rebuild it as v1.1.25 made it
+    db.execute("CREATE TABLE imu_minute (device_id TEXT NOT NULL, minute INTEGER NOT NULL, "
+               "n INTEGER NOT NULL, pk INTEGER NOT NULL, "
+               + ", ".join(f"{a}_min REAL, {a}_max REAL, {a}_sum REAL" for a in
+                           ("ax", "ay", "az", "pitch", "roll", "yaw", "amag"))
+               + ", PRIMARY KEY (device_id, minute)) WITHOUT ROWID")
+    db.commit()
+    s.close()
+    s = TelemetryStore(path)                               # opens: summaries rebuilt, speed added
+    row = s._db().execute("SELECT SUM(spd_n), MIN(spd_min), MAX(spd_max), SUM(spd_sum) FROM imu_minute").fetchone()
+    assert row == (30, 40.0, 69.0, sum(40.0 + i for i in range(30)))
+    s.close()

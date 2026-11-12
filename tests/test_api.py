@@ -175,6 +175,7 @@ async def test_tcp_listen_connect_send_stop():
             await asyncio.sleep(0.2)
             job = next(j for j in (await c.get("/api/jobs")).json() if j["id"] == jid)
             assert job["peers"] and job["records"] >= 1
+            assert job["clients"][0]["device_id"] == "356307042441013"     # named by the server
 
             # downlink: raw hex -> device receives the bytes
             s = await c.post(f"/api/send/{jid}", json={"peer": job["peers"][0], "mode": "hex", "value": "68656c6c6f"})

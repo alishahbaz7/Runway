@@ -1,0 +1,409 @@
+/* Device OTA — page styles.
+ *
+ * The house component language (BluePulse / InTouch): titled cards over a rule, tone pills, a dot
+ * or count beside a heading, outlined buttons with a word and an icon, one filled primary action,
+ * sentence case throughout. Drawn in Runway's theme tokens so it sits right in light and dark.
+ *
+ * Everything is scoped under body[data-page="ota"]: Runway's global control rules (button, input,
+ * label, h2) are written for its older pages and must not leak in — each one this page meets is
+ * reset below where it applies.
+ */
+
+body[data-page="ota"] { --panel-w: 296px; }   /* the shared tokens (--dim, --frame, …) live in style.css */
+
+body[data-page="ota"] .spacer { flex: 1; }
+/* mono fields keep monospace (the shared rule gives every other control the page font) */
+body[data-page="ota"] input.mono, body[data-page="ota"] textarea.mono { font-family: var(--mono); }
+
+/* ---- buttons -------------------------------------------------------------- */
+body[data-page="ota"] .ota-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: auto; height: 34px; margin: 0; padding: 0 13px; box-sizing: border-box;
+  border: 1px solid var(--frame); border-radius: 6px; background: transparent; color: var(--text);
+  font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer;
+}
+body[data-page="ota"] .ota-btn:hover:not(:disabled) {
+  background: var(--hover); border-color: color-mix(in srgb, var(--frame) 70%, var(--text));
+}
+body[data-page="ota"] .ota-btn:active:not(:disabled) { transform: translateY(1px); }
+body[data-page="ota"] .ota-btn:disabled { opacity: .55; cursor: default; }
+body[data-page="ota"] .ota-btn.primary {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600;
+}
+body[data-page="ota"] .ota-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover); border-color: var(--accent-hover);
+}
+body[data-page="ota"] .ota-btn.sm { height: 28px; padding: 0 9px; gap: 5px; font-size: 12.5px; }
+body[data-page="ota"] .ota-btn.sm .ui-ico svg { width: 14px; height: 14px; }
+body[data-page="ota"] .ota-btn.quiet { border-color: transparent; color: var(--dim); }
+body[data-page="ota"] .ota-btn.quiet:hover:not(:disabled) { background: var(--hover); color: var(--text); border-color: transparent; }
+body[data-page="ota"] .ota-btn.danger {
+  color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+body[data-page="ota"] .ota-btn.danger:hover:not(:disabled) { background: var(--danger-bg); border-color: var(--danger); }
+body[data-page="ota"] .ota-btn.danger-fill {
+  background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600;
+}
+body[data-page="ota"] .ota-btn.danger-fill:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, #000); }
+
+body[data-page="ota"] .ota-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 30px; height: 30px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--dim); cursor: pointer;
+}
+body[data-page="ota"] .ota-icon-btn:hover { background: var(--hover); color: var(--text); }
+body[data-page="ota"] .ota-icon-btn svg { width: 17px; height: 17px; }
+
+.ota-spin {
+  width: 14px; height: 14px; flex: none; border-radius: 50%; box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top-color: currentColor;
+  animation: ota-spin .8s linear infinite;
+}
+@keyframes ota-spin { to { transform: rotate(360deg); } }
+
+/* ---- inputs --------------------------------------------------------------- */
+body[data-page="ota"] .ota-main input:not([type="checkbox"]),
+body[data-page="ota"] .ota-main select,
+body[data-page="ota"] .ota-dlg input {
+  width: 100%; height: 34px; margin: 0; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid var(--frame); border-radius: 6px; background: var(--panel-2); color: var(--text);
+  font-size: 13px;
+}
+body[data-page="ota"] .ota-dlg input.mono { font-size: 12.5px; letter-spacing: .01em; }
+body[data-page="ota"] .ota-dlg input[readonly] {
+  color: var(--dim); background: color-mix(in srgb, var(--panel-2) 45%, var(--panel));
+}
+body[data-page="ota"] .ota-dlg input.bad { border-color: var(--danger); }
+body[data-page="ota"] input::placeholder { color: var(--muted); }
+
+/* ---- pills: a tone colour as text, over a tint of itself, outlined in it --- */
+.ota-pill {
+  --c: var(--dim);
+  display: inline-flex; align-items: center; height: 22px; padding: 0 9px; box-sizing: border-box;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+  background: color-mix(in srgb, var(--c) var(--tint), transparent); color: var(--c);
+  font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.ota-pill.sm { height: 19px; padding: 0 7px; font-size: 11px; }
+.ota-pill.ok { --c: var(--ok-ink); }
+.ota-pill.warn { --c: var(--warn-ink); }
+.ota-pill.bad { --c: var(--danger-ink); }
+.ota-pill.accent { --c: var(--accent-ink); }
+.ota-pill.muted { --c: var(--muted); }
+.ota-count { font-size: 12.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---- tabs: one per session, like Capture ------------------------------------ */
+.ota-tabs {
+  flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
+  background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none;
+}
+.ota-tabs::-webkit-scrollbar { display: none; }
+.ota-tab {
+  position: relative; display: flex; align-items: center; gap: 8px; flex: none;
+  height: 36px; max-width: 250px; padding: 0 5px 0 12px; box-sizing: border-box;
+  border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
+  color: var(--dim); font-size: 13px; font-weight: 500; cursor: pointer; user-select: none;
+}
+.ota-tab:hover { background: var(--hover); color: var(--text); }
+.ota-tab.active {
+  background: var(--bg); color: var(--text); font-weight: 600; border-color: var(--border);
+  height: 37px; margin-bottom: -1px;
+}
+.ota-tab.active::before {
+  content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px;
+  background: var(--accent); border-radius: 8px 8px 0 0;
+}
+.ota-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ota-tab.draft .ota-tab-name { color: var(--muted); font-weight: 500; }
+body[data-page="ota"] .ota-tab-x {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 22px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); cursor: pointer; opacity: .75;
+}
+body[data-page="ota"] .ota-tab-x svg { width: 13px; height: 13px; }
+body[data-page="ota"] .ota-tab-x:hover { opacity: 1; background: var(--hover); color: var(--text); }
+body[data-page="ota"] .ota-tab-add {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; align-self: center;
+  width: 30px; height: 30px; margin: 0 0 3px 6px; padding: 0; border: 1px dashed var(--frame);
+  border-radius: 7px; background: transparent; color: var(--dim); cursor: pointer;
+}
+body[data-page="ota"] .ota-tab-add svg { width: 15px; height: 15px; }
+body[data-page="ota"] .ota-tab-add:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---- main: the profile panel | the work ------------------------------------- */
+.ota-main {
+  flex: 1; min-height: 0; position: relative; display: grid;
+  grid-template-columns: var(--panel-w) minmax(0, 1fr);
+  transition: grid-template-columns .18s ease-out;
+}
+:root[data-ota-panel="folded"] .ota-main { grid-template-columns: var(--strip-w) minmax(0, 1fr); }
+
+.ota-panel {
+  grid-column: 1; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--panel); border-right: 1px solid var(--border); overflow: hidden;
+}
+.ota-panel-head {
+  flex: none; display: flex; align-items: center; gap: 6px; height: 46px; padding: 0 8px 0 16px;
+  box-sizing: border-box; border-bottom: 1px solid var(--border);
+}
+.ota-panel-title { flex: 1; font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.ota-panel-body { flex: 1; min-height: 0; overflow-y: auto; }
+.ota-panel-strip { display: none; }
+
+:root[data-ota-panel="folded"] .ota-panel-title,
+:root[data-ota-panel="folded"] .ota-panel-body { display: none; }
+:root[data-ota-panel="folded"] .ota-panel-head { padding: 0; justify-content: center; }
+:root[data-ota-panel="folded"] .ota-panel-strip {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0;
+}
+
+.ota-psec { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.ota-psec-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.ota-psec > .ota-btn { align-self: flex-start; }
+.ota-rule { height: 1px; flex: none; background: var(--border); }
+.ota-empty-line { margin: 0; font-size: 13px; color: var(--dim); }
+.ota-dim { color: var(--muted); }
+
+.ota-ident { display: flex; align-items: center; gap: 11px; }
+.ota-ident-ico {
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 8px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.ota-ident-ico svg { width: 19px; height: 19px; }
+.ota-ident-txt { flex: 1; min-width: 0; }
+.ota-ident-name {
+  font-size: 14.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ota-ident-sub {
+  margin-top: 2px; font-size: 12px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ota-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 14px; align-items: center; margin: 4px 0 0; }
+.ota-facts dt { margin: 0; font-size: 12.5px; color: var(--dim); }
+.ota-facts dd { margin: 0; min-width: 0; font-size: 13px; color: var(--text); }
+.ota-facts dd.mono { font-size: 12.5px; }
+.ota-ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ota-keyline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ota-keyline-sub { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+.ota-hist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ota-hist-item {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px;
+  padding: 6px 8px; border-left: 2px solid transparent; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.ota-hist-item:hover { background: var(--hover); }
+.ota-hist-item.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+.ota-hist-t { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ota-hist-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ota-hist-auto { margin-left: 6px; font-size: 11.5px; color: var(--muted); }
+
+body[data-page="ota"] .ota-strip-btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--dim); cursor: pointer;
+}
+body[data-page="ota"] .ota-strip-btn:hover { background: var(--hover); color: var(--text); }
+body[data-page="ota"] .ota-strip-btn svg { width: 18px; height: 18px; }
+.ota-strip-dot {
+  position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted); box-shadow: 0 0 0 2px var(--panel);
+}
+.ota-strip-dot.ok { background: var(--ok); }
+.ota-strip-dot.warn { background: var(--warn); }
+.ota-strip-badge {
+  position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 8px; background: var(--accent); color: var(--on-accent);
+  font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center;
+}
+
+/* ---- work area ---------------------------------------------------------------- */
+.ota-work {
+  grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; overflow: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 14px; background: var(--bg);
+  container: ota-work / inline-size;
+}
+
+.ota-notice {
+  flex: none; display: flex; align-items: center; gap: 9px; padding: 8px 6px 8px 12px;
+  border: 1px solid; border-radius: 6px; font-size: 13px; color: var(--text);
+}
+.ota-notice-t { flex: 1; }
+.ota-notice.bad { background: color-mix(in srgb, var(--danger) 10%, var(--panel)); border-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+.ota-notice.bad .ui-ico { color: var(--danger); }
+.ota-notice.warn { background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
+.ota-notice.warn .ui-ico { color: var(--warn); }
+.ota-notice.ok { background: color-mix(in srgb, var(--ok) 10%, var(--panel)); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.ota-notice.ok .ui-ico { color: var(--ok); }
+
+.ota-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ota-chooser { flex: none; }                       /* its own height, not stretched down the page */
+.ota-card-head {
+  display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 10px 12px 10px 16px;
+  box-sizing: border-box; border-bottom: 1px solid var(--border);
+}
+.ota-card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+
+.ota-prof-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; padding: 14px; }
+body[data-page="ota"] .ota-prof-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; height: auto; margin: 0; padding: 12px 14px;
+  box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  color: var(--text); font-weight: 400; text-align: left; cursor: pointer;
+}
+body[data-page="ota"] .ota-prof-card:hover {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
+}
+.ota-prof-card .ota-ident-ico { width: 38px; height: 38px; }
+.ota-prof-card-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ota-prof-card-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ota-prof-card-imei { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ota-prof-card-pills { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; }
+
+.ota-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 16px; text-align: center; }
+.ota-empty .ui-ico svg { width: 30px; height: 30px; color: var(--muted); }
+.ota-empty-t { margin: 0; font-size: 14px; color: var(--dim); }
+
+/* ---- the exchange ------------------------------------------------------------- */
+.ota-flow { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.ota-toolbar {
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px;
+  padding: 8px 12px 8px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+}
+body[data-page="ota"] .ota-tool { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 13px; color: var(--text); }
+.ota-tool-l { font-size: 12.5px; font-weight: 600; color: var(--dim); }
+body[data-page="ota"] .ota-tool select { width: auto; min-width: 190px; }
+body[data-page="ota"] .ota-tool #ota-keycode { min-width: 118px; }
+body[data-page="ota"] .ota-auto { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; color: var(--text); cursor: pointer; }
+
+/* the request on the left, the response on the right; readable on top, the wire below */
+.ota-grid {
+  flex: 1; min-height: 440px; display: grid; gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(160px, 1fr) minmax(160px, 1fr);
+  grid-template-areas: "p1 p4" "p2 p3";
+}
+.ota-pane {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.ota-pane:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.ota-pane-head {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 6px 0 12px;
+  box-sizing: border-box; border-bottom: 1px solid var(--border);
+}
+.ota-pane-n {
+  display: grid; place-items: center; flex: none; width: 21px; height: 21px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 700;
+}
+.ota-pane-t { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+/* The pills take the head's free space; one that does not fit wraps onto a hidden second line and
+   drops out whole, never half-cut. (Sized by its own content, a wrapping row measures too narrow
+   in Chromium and dropped pills that fitted — so it fills the space instead of a spacer.) */
+.ota-metas {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  flex: 1 1 0; min-width: 0; height: 19px; overflow: hidden;
+}
+.ota-pane-head .spacer { display: none; }
+body[data-page="ota"] .ota-pane textarea {
+  flex: 1; min-height: 0; width: 100%; margin: 0; padding: 10px 12px; box-sizing: border-box;
+  border: 0; border-radius: 0; background: var(--panel); color: var(--text); resize: none;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+}
+body[data-page="ota"] .ota-pane textarea:focus { outline: none; border: 0; box-shadow: none; }
+body[data-page="ota"] .ota-pane textarea[readonly] { background: color-mix(in srgb, var(--panel-2) 35%, var(--panel)); }
+body[data-page="ota"] .ota-pane textarea::placeholder { color: var(--muted); }
+
+/* the actions, in the toolbar: the two local steps, a divider, then the round trip */
+.ota-actions { display: flex; align-items: center; gap: 8px; }
+.ota-vrule { width: 1px; height: 22px; margin: 0 2px; background: var(--border); }
+body[data-page="ota"] #ota-send {
+  padding: 0 16px; box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.ota-send-status { font-size: 12.5px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ota-send-status.ok { color: var(--ok); }
+.ota-send-status.bad { color: var(--danger); }
+
+/* not enough width for two columns: one column, in the order the exchange happens */
+@container ota-work (max-width: 780px) {
+  .ota-grid {
+    flex: none; min-height: 0; grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none; grid-auto-rows: 230px;
+    grid-template-areas: "p1" "p2" "p3" "p4";
+  }
+}
+
+/* ---- dialogs ------------------------------------------------------------------- */
+body[data-page="ota"] .ota-dlg {
+  width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; overflow: auto;
+  border: 1px solid var(--frame); border-radius: 10px; background: var(--panel); color: var(--text);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+}
+body[data-page="ota"] .ota-dlg-sm { width: min(430px, calc(100vw - 32px)); }
+body[data-page="ota"] .ota-dlg::backdrop { background: rgba(5, 8, 12, .62); }
+.ota-dlg form { margin: 0; }
+.ota-dlg-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 12px 20px; border-bottom: 1px solid var(--border); }
+body[data-page="ota"] .ota-dlg h2 {
+  margin: 0; font-size: 17px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0;
+}
+.ota-dlg-body { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px 18px; }
+.ota-dlg-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--dim); }
+.ota-dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+body[data-page="ota"] .ota-f { display: flex; flex-direction: column; gap: 6px; margin: 0; font-size: 13px; color: var(--text); }
+.ota-f-l { font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.ota-keys { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: center; }
+.ota-key-n {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--dim); font-size: 11.5px; font-weight: 700;
+}
+.ota-seg { display: inline-flex; align-self: flex-start; border: 1px solid var(--frame); border-radius: 6px; overflow: hidden; }
+body[data-page="ota"] .ota-seg button {
+  width: auto; height: 32px; margin: 0; padding: 0 18px; border: 0; border-radius: 0;
+  background: transparent; color: var(--dim); font-size: 13px; font-weight: 500; cursor: pointer;
+}
+body[data-page="ota"] .ota-seg button + button { border-left: 1px solid var(--frame); }
+body[data-page="ota"] .ota-seg button:hover { background: var(--hover); color: var(--text); }
+body[data-page="ota"] .ota-seg button[aria-checked="true"] { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+
+/* the keys dialog: every key of a profile, one per row, each copyable */
+body[data-page="ota"] .ota-dlg-keys { width: min(640px, calc(100vw - 32px)); }
+.ota-kd-who { font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ota-kd-sec { display: flex; flex-direction: column; gap: 8px; }
+.ota-kd-h { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.ota-kd-when { margin-top: -2px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ota-kd-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ota-kd-row {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 5px 6px 5px 12px; font-size: 13px;
+}
+.ota-kd-row + .ota-kd-row { border-top: 1px solid var(--border); }
+.ota-kd-row:nth-child(even) { background: color-mix(in srgb, var(--panel-2) 55%, var(--panel)); }
+.ota-kd-key {
+  font-family: var(--mono); font-size: 13px; letter-spacing: .02em; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all;
+}
+.ota-kd-empty { padding: 11px 12px; font-size: 13px; color: var(--dim); }
+body[data-page="ota"] .ota-icon-btn.copied,
+body[data-page="ota"] .ota-btn.copied { color: var(--ok); }
+
+/* the panel's keys section: two facts, then View and Refresh side by side */
+.ota-psec-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ota-toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;
+  padding: 9px 16px; border: 1px solid var(--frame); border-radius: 8px;
+  background: var(--panel-2); color: var(--text); font-size: 13px; box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+}
+
+/* ---- a narrow window: the panel folds to its strip and opens over the work ------- */
+@media (max-width: 1000px) {
+  .ota-main { grid-template-columns: var(--strip-w) minmax(0, 1fr); }
+  :root:not([data-ota-panel="folded"]) .ota-panel {
+    position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: var(--panel-w);
+    box-shadow: 10px 0 28px rgba(0, 0, 0, .38);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ota-main { transition: none; }
+  .ota-spin { animation: none; }
+}

@@ -16,6 +16,7 @@
   document.body.appendChild(toast);
   let toastTimer = null;
   const msg = (id, cls, txt) => {
+    if (txt) txt = txt.charAt(0).toUpperCase() + txt.slice(1);   // every message in sentence case
     const m = id && $(id);
     if (m && m.offsetParent !== null) { m.className = cls; m.textContent = txt; return; }
     toast.className = "toast" + (cls ? " " + cls : "") + (txt ? " show" : "");
@@ -23,6 +24,9 @@
     clearTimeout(toastTimer);
     if (txt) toastTimer = setTimeout(() => toast.classList.remove("show"), 4000);
   };
+  const UI = window.RunwayUI;                       // icons, labels, the house confirm (shell.js)
+  const iconBtn = (cls, icon, label) => { const b = UI.setLabel(el("button", cls), icon, label); b.type = "button"; return b; };
+  const withIcon = (cls, icon, text) => UI.setLabel(el("span", cls), icon, text);
   const postJSON = (path, body) => api(path, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -134,7 +138,12 @@
 
   function mapJobPeers(j) {
     (j.peers || []).forEach((p) => peerJob.set(p, j.id));
-    (j.clients || []).forEach((c) => peerJob.set(c.peer, j.id));
+    (j.clients || []).forEach((c) => {
+      peerJob.set(c.peer, j.id);
+      // The server names each connection's device: the page's own records of an old
+      // connection are long gone, which listed one re-dialling device as dozens.
+      if (c.device_id || c.protocol) learnDevice(c);
+    });
   }
   function learnDevice(r) {
     if (!r.peer) return;
@@ -151,11 +160,11 @@
   const isHiddenTesting = (r) => hiddenPeers.has(r.peer) || hiddenPeers.has(deviceKey(r.peer))
     || (!!r.device_id && hiddenPeers.has(r.device_id));
   const protoLabel = (s) => s.identified_as || (s.protocol_mode === "manual" ? s.protocol
-    : (s.status === "running" ? "identifying…" : "unidentified"));
+    : (s.status === "running" ? "Identifying" : "Unidentified"));
   // Human label for a QC verdict/state (used on the tab, summary pill, feed badge).
-  const VERDICT_LABELS = { in_progress: "IN PROGRESS", timeout: "TIMEOUT", pass: "PASS",
-    conditional_pass: "CONDITIONAL", fail: "FAIL" };
-  const verdictLabel = (v) => VERDICT_LABELS[v] || (v ? v.toUpperCase() : "");
+  const VERDICT_LABELS = { in_progress: "In progress", timeout: "Timeout", pass: "Pass",
+    conditional_pass: "Conditional pass", fail: "Fail" };
+  const verdictLabel = (v) => VERDICT_LABELS[v] || (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, " ") : "");
   const fmtIdleLong = (s) => {   // "3m 20s" / "45s"
     s = Math.max(0, Math.floor(s));
     const m = Math.floor(s / 60);
@@ -307,15 +316,20 @@
       } else {
         const r = await api("/api/resume/" + t.id, { method: "POST" }); jobs.set(t.id, { ...jobs.get(t.id), ...r.job });
       }
-      renderAll(); msg(null, "ok", "resumed");
-    } catch (e) { msg(null, "err", "resume failed: " + e.message); }
+      renderAll(); msg(null, "ok", "Resumed");
+    } catch (e) { msg(null, "err", "Could not resume: " + e.message); }
   }
   async function closeTab(t) {
     const isQc = t.mode === "qc";
     const label = isQc ? `#${t.id} (${t.sess.device_id || "port " + t.sess.port})`
                        : `:${t.job.port} (${t.job.codec})`;
-    const note = isQc ? "\n\nThis only removes it from the list — the capture file on disk is kept." : "";
-    if (!window.confirm((tabRunning(t) ? `Stop ${label} and close its tab?` : `Close tab ${label}?`) + note)) return;
+    const running = tabRunning(t);
+    const ok = await UI.confirm({
+      title: running ? "Stop this session?" : "Close this tab?",
+      text: (running ? `${label} stops listening and its tab closes.` : `${label} closes.`)
+        + (isQc ? " The capture file on disk is kept." : ""),
+      action: running ? "Stop and close" : "Close", tone: running ? "danger" : "" });
+    if (!ok) return;
     try {
       if (isQc) {
         if (tabRunning(t)) await api(`/api/qc/${t.id}/stop`, { method: "POST" });
@@ -330,11 +344,11 @@
           catch (e) { if (i >= 20) throw e; await sleep(100); }
         }
       }
-    } catch (e) { msg(null, "err", "close failed: " + e.message); return; }
+    } catch (e) { msg(null, "err", "Could not close: " + e.message); return; }
     if (isQc) { closedQc.add(t.id); sessions.delete(t.id); }
     else { closedJids.add(t.id); jobs.delete(t.id); }
     if (focus === t.key) focus = null;
-    msg(null, "ok", `closed ${label}`);
+    msg(null, "ok", `Closed ${label}`);
     if (!tabList().length && !draftOpen) { openDraft(); return; }
     renderAll();
   }
@@ -346,12 +360,14 @@
     tabList().forEach((t) => {
       const isQc = t.mode === "qc";
       const running = tabRunning(t);
-      const conn = ((jobs.get(tabJobId(t)) || {}).clients || []).filter((c) => c.connected).length;
+      // devices online, not sockets: a device that re-dials holds a new connection each time
+      const conn = new Set(((jobs.get(tabJobId(t)) || {}).clients || [])
+        .filter((c) => c.connected).map((c) => deviceKey(c.peer))).size;
       const live = isQc ? !!(t.sess.connected || conn) : running;
       const tab = el("div", "tcp-tab" + (running ? " on" : " off") + (t.key === focus ? " active" : ""));
       tab.onclick = () => setFocus(t.key);
       tab.append(el("span", "tcp-dot " + (live ? "live" : "dead")));
-      tab.append(el("span", "cap-tab-mode " + (isQc ? "is-qc" : "is-test"), isQc ? "QC" : "TEST"));
+      tab.append(el("span", "cap-tab-mode " + (isQc ? "is-qc" : "is-test"), isQc ? "QC" : "Test"));
       tab.append(el("span", "tcp-tab-port", String(isQc ? t.sess.port : t.job.port)));
       // Tab subtitle = the protocol only. The IMEI does NOT belong here: a QC port can
       // host many devices (which one would the tab name?), and the per-device identity
@@ -359,8 +375,9 @@
       tab.append(el("span", "tcp-tab-sub muted", isQc ? protoLabel(t.sess) : t.job.codec));
       if (isQc && t.sess.verdict) tab.append(el("span", "qc-verdict qc-verdict-" + t.sess.verdict, verdictLabel(t.sess.verdict)));
       else if (conn) tab.append(el("span", "tcp-tab-count", String(conn)));
-      const x = el("button", "tcp-tab-x", "✕");
-      x.title = running ? "stop this session and close the tab" : "close this tab";
+      const x = iconBtn("tcp-tab-x", "x");
+      x.title = running ? "Stop this session and close the tab" : "Close this tab";
+      x.setAttribute("aria-label", x.title);
       x.onclick = (e) => { e.stopPropagation(); closeTab(t); };
       tab.append(x);
       host.appendChild(tab);
@@ -369,15 +386,17 @@
       const tab = el("div", "tcp-tab tcp-tab-draft" + (focus === NEW ? " active" : ""));
       tab.onclick = () => setFocus(NEW);
       tab.append(el("span", "tcp-dot"));
-      tab.append(el("span", "tcp-tab-port", "New"));
-      const x = el("button", "tcp-tab-x", "✕");
-      x.title = "discard this new session";
+      tab.append(el("span", "tcp-tab-port", "New session"));
+      const x = iconBtn("tcp-tab-x", "x");
+      x.title = "Discard this new session";
+      x.setAttribute("aria-label", x.title);
       x.onclick = (e) => { e.stopPropagation(); closeDraft(); };
       tab.append(x);
       host.appendChild(tab);
     }
-    const add = el("button", "tcp-tab-add", "+");
-    add.title = "start a new session";
+    const add = iconBtn("tcp-tab-add", "plus");
+    add.title = "New session";
+    add.setAttribute("aria-label", add.title);
     add.onclick = () => openDraft();
     host.appendChild(add);
   }
@@ -398,19 +417,19 @@
     head.append(el("span", "tcp-dot " + ((isQc ? (t.sess.connected || conn) : running) ? "live" : "dead")));
     const addr = (LOCAL_IP || host_) ? `${LOCAL_IP || host_}:${port}` : `:${port}`;
     const portEl = el("span", "tcp-port", addr);
-    portEl.title = "point devices to this address";
+    portEl.title = "Point devices to this address";
     head.append(portEl);
     head.append(el("span", "tcp-codec-tag", isQc ? protoLabel(t.sess) : t.job.codec));
     const status = isQc ? t.sess.status : t.job.status;
-    head.append(el("span", "tcp-status " + status, status));
+    head.append(el("span", "tcp-status " + status, status ? status.charAt(0).toUpperCase() + status.slice(1) : ""));
     head.append(el("span", "spacer"));
     if (running) {
-      const stop = el("button", "ghost mini danger", "■ Stop");
+      const stop = iconBtn("ghost mini danger", "stop", "Stop");
       stop.onclick = () => stopTab(t);
       head.append(stop);
     } else {
-      const res = el("button", "ghost mini", "▶ Resume");
-      res.title = "resume this session on the same port (does not create a new one)";
+      const res = iconBtn("ghost mini", "play", "Resume");
+      res.title = "Resume this session on the same port";
       res.onclick = () => resumeTab(t);
       head.append(res);
     }
@@ -422,19 +441,21 @@
     const upSecs = running && started ? (Date.now() / 1000 - started)
       : (started && ended ? (ended - started) : null);
     meta.dataset.started = running && started ? started : "";
-    meta.append(el("span", "tcp-up", `▲ ${upSecs == null ? "—" : fmtDur(upSecs)}`));
+    const up = withIcon("tcp-up", "clock", upSecs == null ? "—" : fmtDur(upSecs));
+    up.title = "Running for";
+    meta.append(up);
     if (isQc) {
       meta.append(el("span", "", `${t.sess.packet_count || 0} packets`));
       if (running) {   // live idle timer — a QC session times out after ~10 min of silence
-        const idleSpan = el("span", "cap-idle", "idle —");
+        const idleSpan = el("span", "cap-idle", "Idle —");
         idleSpan.dataset.last = lastRecvMsForJob(tabJobId(t)) || "";
-        idleSpan.title = "time since the last packet (TIMEOUT after 10 min idle)";
+        idleSpan.title = "Since the last packet (Timeout after 10 min idle)";
         meta.append(idleSpan);
       }
-      if (t.sess.operator) meta.append(el("span", "", `operator: ${t.sess.operator}`));
+      if (t.sess.operator) meta.append(el("span", "", `Operator: ${t.sess.operator}`));
       if ((t.sess.prior_sessions || []).length) {
-        const seen = el("span", "", `🔁 seen before ×${t.sess.prior_sessions.length}`);
-        seen.title = "this device id has other QC sessions in the history";
+        const seen = withIcon("", "repeat", `Seen before ×${t.sess.prior_sessions.length}`);
+        seen.title = "This device id has other QC sessions in the history";
         meta.append(seen);
       }
     } else {
@@ -442,18 +463,18 @@
       meta.append(el("span", "", fmtBytes(t.job.bytes)));
       const routes = routesOf(t.job), nRules = Object.keys(routes.devices).length;
       if (routes.all || nRules) {
-        const r = el("span", "cap-fork", "↗ " + [routes.all ? `all → ${routes.all}` : "",
+        const r = withIcon("cap-fork", "relay", [routes.all ? `All → ${routes.all}` : "",
           nRules ? `${nRules} device rule${nRules === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · "));
-        r.title = "raw bytes are forwarded per these rules; each server's replies come back down";
+        r.title = "Raw bytes are forwarded by these rules; each server's replies come back down";
         meta.append(r);
       }
       if (t.job.store) {
-        const s = el("span", "cap-fork", "◉ stored");
-        s.title = "packets and IMU samples are kept in data/telemetry.db (IMU page)";
+        const s = withIcon("cap-fork", "store", "Stored");
+        s.title = "Packets and IMU samples are kept in data/telemetry.db (IMU page)";
         meta.append(s);
       }
-      const edit = el("button", "ghost mini", "⇄ Relay & store");
-      edit.title = "change where each device's data is relayed, and whether it is stored — while the session runs";
+      const edit = iconBtn("ghost mini", "relay", "Relay and store");
+      edit.title = "Where each device's data is relayed, and whether it is stored — changeable while the session runs";
       edit.onclick = () => openRelayDialog(t);
       meta.append(edit);
     }
@@ -476,14 +497,14 @@
     const overlay = el("div", "modal-overlay");
     const modal = el("div", "modal relay-modal");
     const head = el("div", "modal-head");
-    head.append(el("span", "", `Relay & store — :${job.port}`),
-      Object.assign(el("button", "modal-x", "✕"), { onclick: () => overlay.remove() }));
+    const x = iconBtn("modal-x", "x"); x.setAttribute("aria-label", "Close"); x.onclick = () => overlay.remove();
+    head.append(el("span", "", `Relay and store · :${job.port}`), x);
     const body = el("div", "relay-body");
 
     const storeLbl = el("label", "relay-check");
     const storeCb = el("input"); storeCb.type = "checkbox"; storeCb.checked = !!job.store;
     storeLbl.append(storeCb, document.createTextNode(" Store packets and IMU samples"));
-    storeLbl.title = "kept in data/telemetry.db — the IMU page reads it";
+    storeLbl.title = "Kept in data/telemetry.db — the IMU page reads it";
 
     const allIn = el("input", "relay-target"); allIn.value = routes.all || ""; allIn.placeholder = "host:port";
     allIn.spellcheck = false;
@@ -512,7 +533,7 @@
     if (!ids.length) list.append(el("p", "empty", "No devices identified yet."));
 
     const addIn = el("input", "relay-add"); addIn.placeholder = "IMEI"; addIn.spellcheck = false;
-    const addBtn = el("button", "ghost mini", "+ Add device");
+    const addBtn = iconBtn("ghost mini", "plus", "Add device");
     addBtn.onclick = () => {
       const id = addIn.value.trim();
       if (!id || rows.some((r) => r.id === id)) return;
@@ -543,7 +564,7 @@
         if (storeCb.checked !== !!job.store) res = await put(`/api/listen/${job.id}/store`, { store: storeCb.checked });
         jobs.set(res.job.id, { ...(jobs.get(res.job.id) || {}), ...res.job });
         overlay.remove();
-        msg(null, "ok", "relay & store saved — applied to connected devices");
+        msg(null, "ok", "Relay and store saved — applied to connected devices");
         renderAll();
       } catch (e) { err.textContent = e.message; }
     };
@@ -556,11 +577,13 @@
 
   // This device's own link to the next server: state, and bytes each way on hover.
   function relayTag(r) {
-    const label = { up: "↗ relay", connecting: "↗ connecting", down: "↗ relay down" }[r.state] || "↗ relay";
+    const label = { up: "Relay", connecting: "Connecting", down: "Relay down",
+                    idle: "Relay idle" }[r.state] || "Relay";
     const waiting = r.queued > 0 ? ` · ${r.queued.toLocaleString()} queued` : "";
-    const tag = el("span", "cap-relay " + (r.state || "") + (r.queued > 0 ? " queued" : ""), label + waiting);
+    const tag = withIcon("cap-relay " + (r.state || "") + (r.queued > 0 ? " queued" : ""), "relay", label + waiting);
     const age = r.oldest ? Math.max(0, Math.round(Date.now() / 1000 - r.oldest)) : 0;
     tag.title = `${r.target} · ${r.state}` + (r.error ? ` (${r.error})` : "")
+      + (r.state === "idle" ? " — the server closed the quiet link; it reconnects when the device sends" : "")
       + ` · up ${fmtBytes(r.bytes_up)} · down ${fmtBytes(r.bytes_down)}`
       + (r.queued > 0 ? ` · waiting: ${fmtBytes(r.queued_bytes)}, oldest ${fmtDur(age)} ago` : "")
       + (r.dropped ? ` · ${fmtBytes(r.dropped)} dropped past the outbox limit` : "");
@@ -571,7 +594,7 @@
     const host = $("cap-devices");
     host.innerHTML = "";
     const t = focusedTab();
-    if (!t) { host.append(el("p", "empty", "Start a session to see devices here.")); return; }
+    if (!t) { host.append(el("p", "empty", "No session running")); return; }
     const isQc = t.mode === "qc";
     const running = tabRunning(t);
     const j = jobs.get(tabJobId(t));
@@ -580,8 +603,9 @@
     const count = isQc ? (qcDevices(t.sess).length || clients.length) : groups.length;
 
     const headEl = el("div", "tcp-peers-head");
-    const caret = el("button", "tcp-collapse", devicesCollapsed ? "▸" : "▾");
-    caret.title = devicesCollapsed ? "expand the device list" : "collapse the device list";
+    const caret = iconBtn("tcp-collapse", devicesCollapsed ? "chevron-right" : "chevron-down");
+    caret.title = devicesCollapsed ? "Show the devices" : "Hide the devices";
+    caret.setAttribute("aria-label", caret.title);
     const toggle = () => {
       devicesCollapsed = !devicesCollapsed;
       try { localStorage.setItem(DEVCOLL_KEY, devicesCollapsed ? "1" : "0"); } catch (e) { /* ignore */ }
@@ -589,21 +613,21 @@
     };
     caret.onclick = toggle;
     headEl.append(caret);
-    const title = el("span", "tcp-peers-title", `Devices on this port (${count})`
-      + (!isQc && clients.length > count ? ` · ${clients.length} connections` : ""));
+    const title = el("span", "tcp-peers-title", "Devices on this port");
     title.style.cursor = "pointer"; title.title = caret.title; title.onclick = toggle;
-    headEl.append(title);
+    headEl.append(title, el("span", "ui-count", String(count)
+      + (!isQc && clients.length > count ? ` · ${clients.length} connections` : "")));
     headEl.append(el("span", "spacer"));
     if (count && !devicesCollapsed) {   // bulk show/hide in the Raw feed — all/partial/none
       const all = el("button", "ghost mini", "All");
-      all.title = "tick every device (shown in Raw + included in the QC report)";
+      all.title = "Tick every device (shown in Raw, included in the QC report)";
       all.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set()); }
         else { groups.forEach((g) => [g.key, ...g.conns.map((c) => c.peer)].forEach((k) => hiddenPeers.delete(k))); saveHidden(); }
         renderDevices(); renderFeed();
       };
       const none = el("button", "ghost mini", "None");
-      none.title = "untick every device (hidden from Raw + left out of the QC report)";
+      none.title = "Untick every device (hidden from Raw, left out of the QC report)";
       none.onclick = () => {
         if (isQc) { setHiddenQc(t.sess.id, new Set(qcDevices(t.sess).map((d) => d.device_id))); }
         else { groups.forEach((g) => hiddenPeers.add(g.key)); saveHidden(); }
@@ -617,7 +641,7 @@
     if (isQc) { renderQcDeviceRows(t, host, clients, running); return; }
 
     if (!groups.length) {
-      host.append(el("p", "empty", running ? "Waiting for devices to dial in…" : "No devices connected."));
+      host.append(el("p", "empty", running ? "Waiting for devices to dial in" : "No devices connected"));
       return;
     }
     groups.forEach((g) => host.append(testingDeviceRow(t, g, running)));
@@ -654,7 +678,7 @@
     const keys = [g.key, ...g.conns.map((c) => c.peer)];
     const cb = el("input"); cb.type = "checkbox";
     cb.checked = !keys.some((k) => hiddenPeers.has(k));
-    cb.title = "show this device's packets in the feed";
+    cb.title = "Show this device's packets in the feed";
     cb.onchange = () => {
       keys.forEach((k) => (cb.checked ? hiddenPeers.delete(k) : hiddenPeers.add(k)));
       saveHidden(); renderFeed();
@@ -662,7 +686,7 @@
     row.append(cb, el("span", "tcp-dot " + (g.live ? "live" : "dead")));
     const name = el("div", "tcp-device-id");
     name.append(el("span", "mono tcp-client-addr" + (g.live ? "" : " muted"), g.known ? g.key : head.peer));
-    if (g.known) name.append(el("span", "muted tcp-device-peer", g.live ? g.live.peer : `last ${head.peer}`));
+    if (g.known) name.append(el("span", "muted tcp-device-peer", g.live ? g.live.peer : `Last ${head.peer}`));
     row.append(name);
     const meta = el("div", "tcp-peer-meta");
     if (info.protocol) meta.append(el("span", "tcp-codec-tag", info.protocol));
@@ -680,9 +704,9 @@
       const ended = g.conns.filter((c) => !c.connected && c.first && c.last > c.first);
       const avg = ended.length ? ended.reduce((s, c) => s + (c.last - c.first), 0) / ended.length : null;
       const open = openDevices.has(g.key);
-      const btn = el("button", "cap-reconn", `${open ? "▾" : "▸"} ↻ ${g.conns.length} connections`
+      const btn = iconBtn("cap-reconn", open ? "chevron-down" : "chevron-right", `${g.conns.length} connections`
         + (avg != null ? ` · ~${fmtDur(avg)} each` : ""));
-      btn.title = "the device dialled in again on a new connection — list each one";
+      btn.title = "The device dialled in again on a new connection — list each one";
       btn.onclick = () => { if (open) openDevices.delete(g.key); else openDevices.add(g.key); renderDevices(); };
       wrap.append(btn);
       if (open) {
@@ -692,7 +716,7 @@
           const r = el("div", "cap-conn");
           r.append(el("span", "tcp-dot " + (c.connected ? "live" : "dead")),
                    el("span", "mono", c.peer),
-                   el("span", "muted", c.first ? `${clockOf(c.first)} → ${c.connected ? "now" : clockOf(until)}` : "—"),
+                   el("span", "muted", c.first ? `${clockOf(c.first)} → ${c.connected ? "Now" : clockOf(until)}` : "—"),
                    el("span", "muted", c.first ? fmtDur(Math.max(0, until - c.first)) : ""),
                    el("span", "tcp-client-count", String(c.records || 0)));
           list.append(r);
@@ -805,11 +829,11 @@
     if (m) {
       const st = Number(m.dataset.started);
       const up = m.querySelector(".tcp-up");
-      if (st && up) up.textContent = "▲ " + fmtDur(Date.now() / 1000 - st);
+      if (st && up) UI.setLabel(up, "clock", fmtDur(Date.now() / 1000 - st));
       const idleEl = m.querySelector(".cap-idle");
       if (idleEl) {
         const last = Number(idleEl.dataset.last);
-        idleEl.textContent = last ? "idle " + fmtIdleLong(Date.now() / 1000 - last / 1000) : "idle —";
+        idleEl.textContent = last ? "Idle " + fmtIdleLong(Date.now() / 1000 - last / 1000) : "Idle —";
         idleEl.classList.toggle("stale", last && (Date.now() - last) >= 600000);   // >10 min
       }
     }
@@ -825,20 +849,20 @@
     host.innerHTML = "";
     if (!t || t.mode !== "qc") return;
     if (qcDevices(t.sess).length) {
-      const exp = el("button", "ghost mini", "⤓ Report");
-      exp.title = "download the QC report (XLS/CSV): Summary sheet + one sheet per ticked device";
+      const exp = iconBtn("ghost mini", "download", "Report");
+      exp.title = "The QC report (Excel or CSV): a summary sheet and one sheet per ticked device";
       exp.onclick = () => openExport(t.sess);
       host.append(exp);
     }
     if (qcDevices(t.sess).length) {
-      const lot = el("button", "ghost mini", "▤ Lot details");
-      lot.title = "type the bench-only report fields (mobile no, power, COTA/FOTA, sign-off) — they print on the report";
+      const lot = iconBtn("ghost mini", "clipboard", "Lot details");
+      lot.title = "The bench-only report fields (mobile no, power, COTA/FOTA, sign-off) — they print on the report";
       lot.onclick = () => openLot(t.sess);
       host.append(lot);
     }
     if (t.sess.capture_path) {
-      const dl = el("button", "ghost mini", "⤓ Capture");
-      dl.title = "download this session's capture file";
+      const dl = iconBtn("ghost mini", "download", "Capture");
+      dl.title = "This session's capture file";
       dl.onclick = () => window.open(`/api/qc/${t.id}/capture`, "_blank");
       host.append(dl);
     }
@@ -899,17 +923,18 @@
           if (waivable.length) {
             const skip = el("button", "ghost mini",
               waivable.length === miss.length ? "Skip missing" : `Skip ${waivable.length} skippable`);
-            skip.title = "mark the missing skippable items as Skip:\n"
+            skip.title = "Mark the missing skippable items as Skip:\n"
               + waivable.map((c) => c.label).join(", ")
               + (waivable.length === miss.length
-                ? "\nThe device closes as CONDITIONAL PASS and can be printed."
+                ? "\nThe device closes as Conditional pass and can be printed."
                 : "\nThe rest are mandatory and cannot be skipped — the device settles "
-                  + "once they arrive (or as TIMEOUT after going idle).");
-            skip.onclick = () => {
+                  + "once they arrive (or as Timeout after going idle).");
+            skip.onclick = async () => {
               // the reason lands on the report's Deviations section + the audit trail —
               // a Conditional Pass on a QC certificate must be accountable
-              const reason = window.prompt(
-                "Reason for skipping (printed on the report's Deviations):", "");
+              const reason = await UI.prompt({
+                title: "Skip the missing items?", label: "Reason (printed under the report's Deviations)",
+                value: "", action: "Skip" });
               if (reason === null) return;               // cancelled
               setSkipped(sess.id, d.device_id,
                 [...(d.skipped || []), ...waivable.map((c) => c.key)], reason);
@@ -917,12 +942,12 @@
             row.append(skip);
           }
         } else {
-          row.append(el("span", "cap-export-miss muted", "still receiving — not settled yet"));
+          row.append(el("span", "cap-export-miss muted", "Still receiving, not settled yet"));
         }
       }
       host.append(row);
     });
-    if (!sel.length) host.append(el("p", "err", "No devices ticked — tick at least one in the device list."));
+    if (!sel.length) host.append(el("p", "cap-export-warn", "No devices ticked"));
     // print history: every download is archived server-side; show it so a re-print of a
     // since-edited session is a conscious act, not an accident
     const prints = sess.reports || [];
@@ -1085,8 +1110,8 @@
     $("cap-feed-count").textContent = rows.length ? `${rows.length} shown` : "";
     if (!rows.length) {
       host.innerHTML = `<p class="empty">${t
-        ? "No packets yet — waiting for the device to send data."
-        : "Start a session to see packets here."}</p>`;
+        ? "No packets yet"
+        : "No session running"}</p>`;
       return;
     }
     // QC forces raw view in the protocol's format; Testing honours the user's toggles.
@@ -1203,12 +1228,12 @@
     }
     const isRaw = r.message_type === "raw" || r.protocol === "generic_hex";
     if (isRaw) {
-      $("cap-pkt-parsed").textContent = "(raw packet — no protocol matched, nothing parsed)";
+      $("cap-pkt-parsed").textContent = "Raw packet: no protocol matched, nothing parsed";
     } else {
       const parsed = { ...r, io: ioWithoutCan(r.io) }; delete parsed.raw_hex; delete parsed.seq;
       $("cap-pkt-parsed").textContent = JSON.stringify(parsed, null, 2);
     }
-    $("cap-pkt-ascii").textContent = hex ? asciiFull(hex) : "(no raw bytes on this record)";
+    $("cap-pkt-ascii").textContent = hex ? asciiFull(hex) : "No raw bytes on this record";
     $("cap-pkt-hex").textContent = hex ? hexSpaced(hex) : "";
     $("cap-pkt-modal").style.display = "flex";
   }
@@ -1333,14 +1358,9 @@
     btn.addEventListener("mouseleave", hideCovTip);
   }
 
-  // Downlink send button: a paper-plane icon (matches the app's line-icon set) instead of
-  // a text label; its name shows on hold-hover via holdTip.
-  const SEND_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
-    + 'stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-    + '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>';
+  // Downlink send button: the paper-plane icon from the shared set; its name shows on hold-hover.
   function sendButton(onclick) {
-    const b = el("button", "ghost mini cap-send-btn");
-    b.innerHTML = SEND_SVG;
+    const b = iconBtn("ghost mini cap-send-btn", "send");
     b.setAttribute("aria-label", "Send command to the device");
     holdTip(b, "Send command to the device");
     b.onclick = onclick;
@@ -1435,7 +1455,7 @@
         labelCell.addEventListener("mouseenter", () => scheduleCovTip(labelCell, proto, c));
         labelCell.addEventListener("mouseleave", hideCovTip);
         tr.append(labelCell);
-        tr.append(el("td", "cov-req", c.required ? "yes" : "—"));
+        tr.append(el("td", "cov-req", c.required ? "Yes" : "—"));
         tr.append(el("td", "num", c.count ? String(c.count) : ""));
         // (#2) received packet — an inline preview of the actual captured sample (not just
         // a "view" button), so the operator sees at a glance what came in; click for the
@@ -1530,7 +1550,7 @@
     a.href = URL.createObjectURL(new Blob([content], { type: mime }));
     a.download = `runway-capture-log-${stamp}.${ext}`;
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-    $("cap-log-msg").textContent = `saved ${rows.length} records`;
+    $("cap-log-msg").textContent = `Saved ${rows.length} records`;
   }
   $("cap-log").addEventListener("click", openLog);
   $("cap-log-cancel").addEventListener("click", closeLog);
@@ -1544,10 +1564,10 @@
       const s = await api("/api/log/status");
       logRecActive = s.active; logDefaultDir = s.default_dir || "";
       const b = $("cap-rec");
-      b.textContent = s.active ? `■ Stop log (${s.count})` : "● Start log";
+      UI.setLabel(b, s.active ? "stop" : "record", s.active ? `Stop log (${s.count})` : "Start log");
       b.classList.toggle("danger", s.active);
       $("cap-recfile").style.display = s.path ? "" : "none";
-      $("cap-recfile").title = s.path ? "download " + s.path : "";
+      $("cap-recfile").title = s.path ? "Download " + s.path : "";
     } catch (e) { /* ignore */ }
   }
   $("cap-rec").addEventListener("click", () => {
@@ -1816,7 +1836,12 @@
         renderAll();
       } else if (m.type === "conn") {
         const j = jobs.get(m.data.job);
-        if (j) { j.peers = m.data.peers; mapJobPeers(j); renderAll(); }
+        if (j) {
+          j.peers = m.data.peers;
+          const open = new Set(j.peers);
+          (j.clients || []).forEach((c) => { c.connected = open.has(c.peer); });
+          mapJobPeers(j); renderAll();
+        }
       }
     };
   }

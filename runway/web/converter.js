@@ -103,8 +103,8 @@
     const v = model.vehicle || {};
     $("conv-veh").textContent = [v.brand, v.model, v.year].filter(Boolean).join(" ")
       + ` · ${model.signals.length} signals`;
-    $("conv-empty").style.display = "none";
-    $("conv-table-wrap").style.display = "";
+    $("conv-empty").hidden = true;
+    $("conv-table-wrap").hidden = false;
     $("conv-json").disabled = $("conv-dbc").disabled = false;
     renderRows($("conv-search").value);
   }
@@ -121,9 +121,9 @@
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ fmt: "canplus", text: String(reader.result || "") }),
         });
-        msg("ok", "loaded " + file.name);
+        msg("ok", "Loaded " + file.name);
         showModel();
-      } catch (err) { msg("err", "parse failed: " + err.message); }
+      } catch (err) { msg("err", "Could not read the file: " + err.message); }
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -140,14 +140,11 @@
       const blob = new Blob([out.content], { type: out.mime || "text/plain" });
       const a = el("a"); a.href = URL.createObjectURL(blob); a.download = out.filename;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-      msg("ok", "exported " + out.filename);
-    } catch (err) { msg("err", "export failed: " + err.message); }
+      msg("ok", "Exported " + out.filename);
+    } catch (err) { msg("err", "Export failed: " + err.message); }
   }
 
   $("conv-json").addEventListener("click", () => exportAs("json"));
   $("conv-dbc").addEventListener("click", () => exportAs("dbc"));
   $("conv-search").addEventListener("input", () => { if (model) renderRows($("conv-search").value); });
-
-  // icon labels
-  $("conv-upload").innerHTML = "⤒ <span>Upload XML</span>";
 })();

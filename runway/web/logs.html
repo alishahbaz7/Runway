@@ -7,33 +7,33 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="logs">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
       <h1>Logs</h1>
-      <span class="tag">Runtime log — errors &amp; activity (data/runway.log)</span>
+      <span class="tag">Runway's own log: errors and activity (data/runway.log)</span>
     </header>
 
-    <div id="log-bar">
-      <input id="log-search" placeholder="🔍 filter lines…" />
+    <div id="log-bar" class="ui-strip">
+      <input id="log-search" placeholder="Search" />
       <select id="log-source">
-        <option value="activity">Activity (all)</option>
-        <option value="errors">Errors &amp; warnings (kept)</option>
+        <option value="activity">Activity</option>
+        <option value="errors">Errors and warnings (kept)</option>
       </select>
       <select id="log-level">
-        <option value="">all levels</option>
-        <option value="ERROR">errors</option>
-        <option value="WARN">warnings+</option>
+        <option value="">All levels</option>
+        <option value="ERROR">Errors</option>
+        <option value="WARN">Warnings and errors</option>
       </select>
-      <label class="seg"><input type="checkbox" id="log-auto" /> auto-refresh</label>
+      <label class="ui-toggle"><span>Auto-refresh</span><span class="switch"><input type="checkbox" id="log-auto" /><span class="slider"></span></span></label>
       <span class="spacer"></span>
       <span id="log-info" class="muted"></span>
-      <button id="log-refresh" class="ghost">↻ Refresh</button>
-      <button id="log-download" class="ghost">⤓ Download</button>
-      <button id="log-clear" class="ghost danger">🗑 Clear</button>
+      <button id="log-refresh" class="ghost" type="button"><span data-icon="refresh"></span>Refresh</button>
+      <button id="log-download" class="ghost" type="button"><span data-icon="download"></span>Download</button>
+      <button id="log-clear" class="ghost danger" type="button"><span data-icon="trash"></span>Clear</button>
     </div>
 
-    <pre id="log-view" class="empty">Loading…</pre>
+    <pre id="log-view" class="empty">Loading</pre>
   </div>
 
   <script src="shell.js"></script>

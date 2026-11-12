@@ -3,6 +3,7 @@ connection per device, with that server's replies passed back down — losslessl
 outbox — over real sockets."""
 
 import asyncio
+import socket
 from pathlib import Path
 
 import pytest
@@ -319,6 +320,147 @@ async def test_a_device_that_never_identifies_follows_the_all_devices_rule(monke
         await dev.drain()
         assert await _wait(lambda: a.conns and bytes(a.conns[0][0]) == b"\x01\x02\x03 not a protocol")
         dev.close()
+        await _stop(src, task)
+
+
+# --------------------------------------------------------------------------- #
+# Dead connections: a device that vanishes without closing must not stay open
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def fast_sweep(monkeypatch):
+    monkeypatch.setattr(TcpServerSource, "SWEEP_EVERY", 0.05)
+    monkeypatch.setattr(TcpServerSource, "REPLACED_AFTER", 0.2)
+
+
+async def _closed_by_runway(reader, secs=3.0) -> bool:
+    try:
+        while await asyncio.wait_for(reader.read(4096), secs):    # ACKs may come first
+            pass
+        return True
+    except ConnectionError:
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+def _peer(writer) -> str:
+    """How the listener names this device-side connection."""
+    return "127.0.0.1:%d" % writer.get_extra_info("sockname")[1]
+
+
+async def test_an_older_connection_of_a_device_that_dialled_in_again_is_closed(fast_sweep, box):
+    """Seen live: a modem that lost its data session re-dialled from a new address 60 times in
+    40 minutes and never closed the old connections — all 60 stayed open. Once the device is on
+    a newer connection and an older one has gone quiet, Runway closes the older one."""
+    src = TcpServerSource("127.0.0.1", 0, outbox=box)
+    pipe, task, port = await _listener(src)
+    _, other = await asyncio.open_connection("127.0.0.1", port)       # another device, quiet
+    other.write(LOGIN.replace(IMEI.encode(), b"865577071515999"))
+    old_reader, old = await asyncio.open_connection("127.0.0.1", port)
+    old.write(LOGIN)
+    await asyncio.gather(other.drain(), old.drain())
+    assert await _wait(lambda: pipe.records_emitted == 2)
+    _, new = await asyncio.open_connection("127.0.0.1", port)
+    new.write(LOGIN)
+    await new.drain()
+    assert await _closed_by_runway(old_reader)
+    assert await _wait(lambda: sorted(src.peers()) == sorted([_peer(other), _peer(new)]))
+    assert await _wait(lambda: len(pipe._sessions) == 2)              # its session freed too
+    assert pipe.per_peer[_peer(new)]["device_id"] == IMEI             # the page groups by it
+    for w in (other, new):
+        w.close()
+    await _stop(src, task)
+
+
+async def test_a_connection_quiet_for_the_idle_timeout_is_closed(fast_sweep, box):
+    src = TcpServerSource("127.0.0.1", 0, outbox=box, idle_timeout=0.3)
+    _, task, port = await _listener(src)
+    quiet_reader, quiet = await asyncio.open_connection("127.0.0.1", port)
+    quiet.write(LOGIN)
+    await quiet.drain()
+    silent_reader, silent = await asyncio.open_connection("127.0.0.1", port)   # never sends
+    _, busy = await asyncio.open_connection("127.0.0.1", port)
+    busy.write(LOGIN.replace(IMEI.encode(), b"865577071515999"))
+    for _ in range(12):                                   # a device that keeps reporting
+        await asyncio.sleep(0.05)
+        busy.write(b"$")                                  # bytes are what count, not records
+        await busy.drain()
+    assert await _closed_by_runway(quiet_reader, 0.5)
+    assert await _closed_by_runway(silent_reader, 0.5)
+    assert src.peers() == [_peer(busy)]
+    busy.close()
+    await _stop(src, task)
+
+
+async def test_device_connections_have_tcp_keepalive(box):
+    src = TcpServerSource("127.0.0.1", 0, outbox=box)
+    _, task, port = await _listener(src)
+    _, dev = await asyncio.open_connection("127.0.0.1", port)
+    assert await _wait(lambda: src._writers)
+    sock = next(iter(src._writers.values())).get_extra_info("socket")
+    assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+    dev.close()
+    await _stop(src, task)
+
+
+async def test_a_connection_that_sends_nothing_opens_no_link_to_the_server(monkeypatch, box):
+    monkeypatch.setattr(TcpServerSource, "IDENTIFY_WAIT", 0.1)
+    async with NextServer() as nxt:
+        src = TcpServerSource("127.0.0.1", 0, relay=f"127.0.0.1:{nxt.port}", outbox=box)
+        _, task, port = await _listener(src)
+        _, silent = await asyncio.open_connection("127.0.0.1", port)
+        await asyncio.sleep(0.4)
+        assert not nxt.conns and not box.links
+        silent.write(b"\x01\x02\x03 not a protocol")      # its first bytes: routed as before
+        await silent.drain()
+        assert await _wait(lambda: nxt.conns and bytes(nxt.conns[0][0]) == b"\x01\x02\x03 not a protocol")
+        silent.close()
+        await _stop(src, task)
+
+
+async def test_a_quiet_device_is_not_logged_in_again_each_time_the_server_drops_the_link(box):
+    """Seen live: the platform closes a quiet connection after ~2 minutes and Runway dialled
+    straight back with the device's login — a device gone for hours looked like one logging in
+    every 2 minutes. It dials again only when the device sends."""
+    async with NextServer(reply=b"") as nxt:
+        src = TcpServerSource("127.0.0.1", 0, relay=f"127.0.0.1:{nxt.port}", outbox=box)
+        _, task, port = await _listener(src)
+        _, dev = await asyncio.open_connection("127.0.0.1", port)
+        dev.write(LOGIN)
+        await dev.drain()
+        assert await _wait(lambda: nxt.conns and bytes(nxt.conns[0][0]) == LOGIN and box.total == 0)
+        nxt.conns[0][1].close()                           # the platform drops the quiet link
+        assert await _wait(lambda: [s["state"] for s in src.relay_status().values()] == ["idle"])
+        await asyncio.sleep(0.5)                          # several backoffs' worth
+        assert len(nxt.conns) == 1                        # no dial, no repeated login
+        dev.write(IMU)
+        await dev.drain()
+        assert await _wait(lambda: len(nxt.conns) == 2 and bytes(nxt.conns[1][0]) == LOGIN + IMU)
+        dev.close()
+        await _stop(src, task)
+
+
+async def test_an_older_connection_still_sending_after_the_newer_one_left_is_relayed(box):
+    """The device's newer connection ends and takes the shared link down with it; its older,
+    still-live connection sends on — that must reach the server, and the server's reply it."""
+    async with NextServer() as nxt:
+        src = TcpServerSource("127.0.0.1", 0, relay=f"127.0.0.1:{nxt.port}", outbox=box)
+        _, task, port = await _listener(src)
+        a_reader, a = await asyncio.open_connection("127.0.0.1", port)
+        a.write(LOGIN)
+        await a.drain()
+        assert await asyncio.wait_for(a_reader.read(4096), 2) == b"+##Received OK\r\n"
+        b_reader, b = await asyncio.open_connection("127.0.0.1", port)
+        b.write(LOGIN)
+        await b.drain()
+        assert await asyncio.wait_for(b_reader.read(4096), 2) == b"+##Received OK\r\n"
+        b.close()
+        assert await _wait(lambda: not box.links)         # the link drained and ended
+        a.write(IMU)
+        await a.drain()
+        assert await _wait(lambda: len(nxt.conns) == 2 and bytes(nxt.conns[1][0]) == LOGIN + IMU)
+        assert (await asyncio.wait_for(a_reader.read(4096), 2)).startswith(b"+##Received OK")
+        a.close()
         await _stop(src, task)
 
 

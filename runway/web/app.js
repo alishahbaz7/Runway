@@ -3,6 +3,7 @@
   "use strict";
 
   const MAX_ROWS = 500;
+  const MAX_TRAIL = 5000;   // points kept per device trail (the page may stay open for weeks)
   const COLORS = ["#3fb6ff", "#00d18f", "#ffb454", "#ff6b6b", "#b78bff",
                   "#5ad1c8", "#f78fb3", "#9ccc65"];
 
@@ -14,6 +15,7 @@
     selectedSeq: null,
     markers: new Map(),     // id -> L.marker
     trails: new Map(),      // id -> L.polyline
+    paths: new Map(),       // id -> [{t, ll}] in device time: what the trail draws
     colorIdx: 0,
     colorOf: new Map(),
     hl: null,               // map highlight for the clicked packet
@@ -111,6 +113,12 @@
     maxZoom: 19, attribution: "© OpenStreetMap",
   }).addTo(map);
 
+  // The trail runs in device time, not arrival order. A device back from an outage sends its
+  // stored (history) packets in between live ones; joined as they arrived, each drew a line
+  // back to an old position and forward again — a fan. A late point slots into its place and
+  // the marker stays on the newest position. A record without a device time (a login's last
+  // known fix) only places the marker until timed points arrive: the time it was received is
+  // another clock, and in a replay it is "now" — it sorted after every packet.
   function plot(rec) {
     const p = rec.position;
     if (!p || p.latitude == null || p.longitude == null) return;
@@ -119,21 +127,34 @@
     const id = rec.device_id;
     const ll = [p.latitude, p.longitude];
     const color = colorFor(id);
+    const t = Date.parse(rec.event_time);
 
+    let path = state.paths.get(id);
+    if (!path) { path = []; state.paths.set(id, path); }
     let marker = state.markers.get(id);
     if (!marker) {
       marker = L.circleMarker(ll, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
       marker.addTo(map).bindTooltip(id, { permanent: false });
       state.markers.set(id, marker);
-    } else {
-      marker.setLatLng(ll);
     }
+    if (isNaN(t)) {
+      if (!path.length) marker.setLatLng(ll);
+      return;
+    }
+    let i = path.length;
+    while (i > 0 && path[i - 1].t > t) i--;          // live packets: no steps, appended
+    path.splice(i, 0, { t, ll });
+    if (path.length > MAX_TRAIL) path.shift();
+    const newest = i >= path.length - 1;
+    if (newest) marker.setLatLng(ll);
     let trail = state.trails.get(id);
     if (!trail) {
       trail = L.polyline([ll], { color, weight: 2, opacity: 0.7 }).addTo(map);
       state.trails.set(id, trail);
-    } else {
+    } else if (newest && path.length < MAX_TRAIL) {
       trail.addLatLng(ll);
+    } else {
+      trail.setLatLngs(path.map((pt) => pt.ll));
     }
   }
 
@@ -148,6 +169,7 @@
     state.trails.forEach((t) => map.removeLayer(t));
     state.markers.clear();
     state.trails.clear();
+    state.paths.clear();
     if (state.hl) { map.removeLayer(state.hl); state.hl = null; }
   }
 
@@ -220,7 +242,7 @@
       idLine.append(Object.assign(el("span", "dot"), { style: `background:${colorFor(d.device_id)}` }),
                     document.createTextNode(title));
       const meta = el("div", "meta");
-      meta.appendChild(el("span", "live-badge " + (live ? "on" : "idle"), live ? "live" : "idle"));
+      meta.appendChild(el("span", "live-badge " + (live ? "on" : "idle"), live ? "Live" : "Idle"));
       if (src && src !== title) meta.appendChild(el("span", "src-badge", src));
       meta.appendChild(el("span", "", `${d.count} pkts`));
       meta.appendChild(el("span", "muted", fmtTime(d.last_seen)));
@@ -230,7 +252,8 @@
       li.onclick = () => { cb.checked = !cb.checked; cb.onchange(); };  // row toggles too
       ul.appendChild(li);
     }
-    $("stat-devices").textContent = `${state.devices.size} devices`;
+    const nd = state.devices.size;
+    $("stat-devices").textContent = `${nd} device${nd === 1 ? "" : "s"}`;
   }
 
   // ---- Rendering: packet table -------------------------------------------
@@ -255,7 +278,7 @@
       .slice(-MAX_ROWS).reverse();
     tbody.innerHTML = "";
     if (!rows.length) {
-      const tr = el("tr"); const td = el("td", "empty", "Waiting for packets…");
+      const tr = el("tr"); const td = el("td", "empty", "Waiting for packets");
       td.colSpan = cols.length || 1; tr.appendChild(td); tbody.appendChild(tr);
     } else {
       for (const r of rows) {
@@ -269,9 +292,12 @@
     // header pill = TOTAL packets across all devices (matches the device counts);
     // the table itself is only the recent rolling window.
     const total = [...state.devices.values()].reduce((s, d) => s + (d.count || 0), 0);
-    $("stat-packets").textContent = `${total} packets`;
+    $("stat-packets").textContent = `${total} packet${total === 1 ? "" : "s"}`;
     const lbl = $("packets-label");
-    if (lbl) lbl.textContent = `Recent packets · showing ${rows.length}`;
+    if (lbl) {
+      lbl.textContent = "Recent packets ";
+      lbl.appendChild(el("span", "ui-count", String(rows.length)));
+    }
   }
 
   // Column picker popover: pick which signals show as columns (standard + AVL params).
@@ -279,7 +305,7 @@
     const existing = document.getElementById("cols-pop");
     if (existing) { existing.remove(); return; }
     const pop = el("div", "cols-pop"); pop.id = "cols-pop";
-    const search = el("input", "cols-search"); search.placeholder = "filter parameters…";
+    const search = el("input", "cols-search"); search.placeholder = "Search";
     const list = el("div", "cols-list");
     pop.append(search, list);
 
@@ -302,7 +328,7 @@
       const seen = seenAvlCols();
       list.appendChild(el("div", "cols-group", "Device parameters (received)"));
       if (seen.length) seen.forEach(add);
-      else list.appendChild(el("div", "hint", "none received yet"));
+      else list.appendChild(el("div", "hint", "None received yet"));
     }
     build("");
     search.addEventListener("input", () => build(search.value.toLowerCase()));
@@ -394,12 +420,16 @@
   // Ingest controls live elsewhere now; the Dashboard is view-only. Data arrives from the
   // Parser (/api/ingest) or live feeds. "Clear" just empties the live view.
   $("clear-btn").addEventListener("click", async () => {
-    if (!confirm("Clear all captured data?")) return;
+    const ok = await window.RunwayUI.confirm({
+      title: "Clear the dashboard?",
+      text: "Every device and packet shown here is removed. New packets appear as they arrive.",
+      action: "Clear", tone: "danger" });
+    if (!ok) return;
     await api("/api/data", { method: "DELETE" });
     state.packets = []; state.devices.clear(); state.hidden.clear(); state.seenIo.clear();
     state.selectedSeq = null; clearMap();
     renderDevices(); renderRows(); $("detail-body").innerHTML =
-      '<p class="empty">Select a packet to inspect it</p>';
+      '<p class="empty">No packet selected</p>';
   });
 
   $("dev-search").addEventListener("input", renderDevices);
@@ -427,8 +457,10 @@
   }
   function setConn(live) {
     const p = $("stat-conn");
-    p.textContent = live ? "● live" : "offline";
-    p.className = "pill " + (live ? "live" : "dead");
+    // the live feed's link: said only when it is down — the mode chip beside it already says Live
+    p.textContent = live ? "" : "Offline";
+    p.className = "pill dead";
+    p.hidden = live;
   }
 
   // ---- boot --------------------------------------------------------------

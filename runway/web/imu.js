@@ -12,6 +12,9 @@
  *
  * The server thins a long range to about one point per pixel (min / max / mean per bucket,
  * drawn as a band and a line); zoomed in far enough, every sample comes back as-is.
+ *
+ * Speed (km/h, from every packet that reports it) is a chart of its own under the IMU charts in
+ * both layouts — never a second scale on an IMU chart — sharing the time axis and crosshair.
  */
 (() => {
   "use strict";
@@ -43,15 +46,19 @@
   ];
   // Two layouts of the same seven series. Lanes: one chart each, on its own scale. Combined:
   // acceleration's four on one chart and the three rotation rates on another — one shared axis
-  // per chart (one unit), so the lines compare directly.
+  // per chart (one unit), so the lines compare directly. Speed closes both; in Combined it is
+  // half a chart high (``weight``).
+  const SPEED = { label: "Speed", unit: "km/h", group: "spd", keys: ["speed"] };
   const PANELS = {
-    lanes: LANES.map((l) => ({ label: l.label, unit: l.unit, group: l.group, keys: [l.key] })),
+    lanes: [...LANES.map((l) => ({ label: l.label, unit: l.unit, group: l.group, keys: [l.key] })),
+            { ...SPEED, label: "speed" }],
     combined: [
       { label: "Acceleration", unit: "m/s²", group: "acc", keys: ["ax", "ay", "az", "amag"] },
       { label: "Rotation rate", unit: "°/s", group: "ori", keys: ["pitch", "roll", "yaw"] },
+      { ...SPEED, weight: 0.5 },
     ],
   };
-  const labelOf = Object.fromEntries(LANES.map((l) => [l.key, l.label]));
+  const labelOf = { ...Object.fromEntries(LANES.map((l) => [l.key, l.label])), speed: "speed" };
   const PAD_L = 108, PAD_R = 14, EVENT_H = 20, AXIS_H = 26, GROUP_GAP = 12;
   const STORE = "runway.imu";
 
@@ -98,12 +105,13 @@
     const v = (n) => cs.getPropertyValue(n).trim();
     return { surface: v("--panel"), text: v("--text"), muted: v("--muted"), grid: v("--border-subtle"),
              axis: v("--border"), warn: v("--warn"), accent: v("--accent"),
-             acc: v("--imu-acc"), ori: v("--imu-ori"),
+             acc: v("--imu-acc"), ori: v("--imu-ori"), spd: v("--imu-spd"),
              series: [v("--imu-s1"), v("--imu-s2"), v("--imu-s3"), v("--imu-s4")] };
   }
   // Lanes: a lane's colour is its group's (one series per chart). Combined: each line on a chart
   // takes the next categorical slot, in the chart's fixed order — never cycled, never by rank.
   function colorOf(key, k) {
+    if (key === "speed") return k.spd;                 // context, in neutral ink: no hue to confuse
     if (state.layout !== "combined") return LANES.find((l) => l.key === key).group === "acc" ? k.acc : k.ori;
     const p = PANELS.combined.find((pp) => pp.keys.includes(key));
     return k.series[p.keys.indexOf(key)];
@@ -124,10 +132,12 @@
     const top = wrap.getBoundingClientRect().top;
     const avail = Math.max(420, window.innerHeight - top - 18 - 24);   // 24: the timeline scrollbar
     const defs = PANELS[state.layout];
-    const per = (avail - EVENT_H - AXIS_H - GROUP_GAP - 8) / defs.length;
+    const units = defs.reduce((n, p) => n + (p.weight || 1), 0);
+    const gaps = defs.filter((p, i) => i > 0 && defs[i - 1].group !== p.group).length;
+    const per = (avail - EVENT_H - AXIS_H - GROUP_GAP * gaps - 8) / units;
     const panelH = state.layout === "combined" ? Math.max(160, Math.min(420, per))
                                                : Math.max(52, Math.min(120, per));
-    const h = Math.round(EVENT_H + 8 + panelH * defs.length + GROUP_GAP + AXIS_H);
+    const h = Math.round(EVENT_H + 8 + panelH * units + GROUP_GAP * gaps + AXIS_H);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     canvas.style.width = w + "px"; canvas.style.height = h + "px";
@@ -135,8 +145,9 @@
     let y = EVENT_H + 8;
     const panels = defs.map((p, i) => {
       if (i > 0 && defs[i - 1].group !== p.group) y += GROUP_GAP;
-      const panel = { ...p, y0: y, y1: y + panelH };
-      y += panelH;
+      const ph = panelH * (p.weight || 1);
+      const panel = { ...p, y0: y, y1: y + ph };
+      y += ph;
       return panel;
     });
     L = { w, h, x0: PAD_L, x1: w - PAD_R, panels, eventY: 2, axisY: y };
@@ -161,11 +172,12 @@
   function rangeOf(keys) {                // one y-range covering every series on the chart
     let mn = Infinity, mx = -Infinity;
     keys.forEach((key) => {
-      const s = state.data.series[key] || {};
+      const s = seriesOf(key) || {};
       const lo = s.min || s.mean || [], hi = s.max || s.mean || [];
       for (let i = 0; i < lo.length; i++) { if (lo[i] != null && lo[i] < mn) mn = lo[i]; if (hi[i] != null && hi[i] > mx) mx = hi[i]; }
     });
     if (!isFinite(mn)) return [0, 1];
+    if (keys[0] === "speed") return [0, Math.max(10, mx * 1.12)];      // from standstill up
     const pad = Math.max((mx - mn) * 0.12, Math.abs(mx) * 0.002, 0.02);
     return [mn - pad, mx + pad];
   }
@@ -185,6 +197,42 @@
     const floor = bucketed(d) ? bucketWidth(d) : 0;
     return (i) => t[i] - t[i - 1] > 2.5 * Math.max(g[i] || dflt, g[i - 1] || dflt, floor);
   }
+  // Speed comes a packet at a time (every 2-10 s, NR packets in between), or a bucket at a time:
+  // its line breaks past three typical steps, or an empty bucket and a half.
+  function speedBreaks(s) {
+    const t = s.t, dts = [];
+    for (let i = 1; i < t.length; i++) dts.push(t[i] - t[i - 1]);
+    dts.sort((a, b) => a - b);
+    const bar = Math.max(3 * (dts[dts.length >> 1] || 0), s.w ? 1.5 * s.w : 20);
+    return (i) => t[i] - t[i - 1] > bar;
+  }
+  // One series to draw: the IMU axes share the samples' time base; speed has its own.
+  function seriesOf(key) {
+    const d = state.data;
+    if (key === "speed") {
+      const s = d.speed;
+      return s && s.t.length ? { t: s.t, mean: s.mean, min: s.min, max: s.max, w: s.w, brk: speedBreaks(s) } : null;
+    }
+    const s = d.series[key];
+    return s ? { t: d.t, mean: s.mean, min: s.min, max: s.max, brk: breaks(d) } : null;
+  }
+  // The speed line's value at a time: on the segment that crosses it, else the point within
+  // reach (half a bucket) — the crosshair reads the line as drawn.
+  function speedAt(tt) {
+    const s = seriesOf("speed"); if (!s) return null;
+    const t = s.t, n = t.length;
+    let lo = 0, hi = n - 1, j = -1;                    // j: the last point at or before tt
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (t[m] <= tt) { j = m; lo = m + 1; } else hi = m - 1; }
+    if (j >= 0 && j < n - 1 && !s.brk(j + 1)) {
+      return s.mean[j] + (tt - t[j]) / (t[j + 1] - t[j]) * (s.mean[j + 1] - s.mean[j]);
+    }
+    const reach = (s.w || 0) / 2 + 1;
+    if (j >= 0 && tt - t[j] <= reach) return s.mean[j];
+    if (j + 1 < n && t[j + 1] - tt <= reach) return s.mean[j + 1];
+    return null;
+  }
+  const valueAt = (key, i) => (key === "speed" ? speedAt(state.data.t[i])
+    : ((state.data.series[key] || {}).mean || [])[i]);
 
   function draw() {
     if (!L) layout();
@@ -230,11 +278,9 @@
     ctx.fillStyle = k.muted; ctx.textAlign = "right"; ctx.textBaseline = "top";
     ctx.fillText("packets", L.x0 - 10, L.eventY + 2);
 
-    const isBuckets = bucketed(d);
-    const brk = breaks(d);
     const multi = state.layout === "combined";
     L.panels.forEach((p) => {
-      const keys = p.keys.filter((key) => d.series[key]);
+      const keys = p.keys.filter((key) => seriesOf(key));
       if (!keys.length) return;
       const [mn, mx] = rangeOf(keys);
       const yOf = (v) => p.y1 - 6 - (v - mn) / (mx - mn) * (p.y1 - p.y0 - 12);
@@ -244,7 +290,8 @@
       ctx.beginPath(); ctx.moveTo(L.x0, Math.round(p.y1) + 0.5); ctx.lineTo(L.x1, Math.round(p.y1) + 0.5); ctx.stroke();
       ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillStyle = k.muted;
       const span = mx - mn, dp = span < 0.5 ? 3 : span < 5 ? 2 : 1;
-      const fr = multi ? [0.08, 0.29, 0.5, 0.71, 0.92] : [0.15, 0.5, 0.85];
+      const fr = keys[0] === "speed" ? [0, 0.45, 0.9]            // standstill, half, top
+        : multi ? [0.08, 0.29, 0.5, 0.71, 0.92] : [0.15, 0.5, 0.85];
       fr.forEach((f) => {
         const v = mn + (mx - mn) * f, y = Math.round(yOf(v)) + 0.5;
         ctx.strokeStyle = k.grid; ctx.beginPath(); ctx.moveTo(L.x0, y); ctx.lineTo(L.x1, y); ctx.stroke();
@@ -262,8 +309,8 @@
       ctx.save();
       ctx.beginPath(); ctx.rect(L.x0, p.y0, L.x1 - L.x0, p.y1 - p.y0); ctx.clip();
       keys.forEach((key) => {
-        const s = d.series[key], color = colorOf(key, k);
-        if (isBuckets && s.min) {            // min–max band per bucket, a wash of the series hue
+        const s = seriesOf(key), color = colorOf(key, k), t = s.t, brk = s.brk;
+        if (s.min) {                         // bucketed: min–max band per bucket, a wash of the series hue
           ctx.fillStyle = alpha(color, multi ? 0.10 : 0.18);
           let i = 0;
           while (i < t.length) {
@@ -285,7 +332,7 @@
         ctx.stroke();
       });
       ctx.restore();
-      if (multi) panelLegend(p, keys, k);
+      if (multi && keys.length > 1) panelLegend(p, keys, k);   // one series: the chart's name says it
     });
 
     // drag-to-zoom selection
@@ -300,8 +347,8 @@
       ctx.strokeStyle = k.muted; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x, EVENT_H + 4); ctx.lineTo(x, L.axisY); ctx.stroke();
       L.panels.forEach((p) => p.keys.forEach((key) => {
-        const v = (d.series[key] || {}).mean; if (!v || v[i] == null || !p.yOf) return;
-        ctx.beginPath(); ctx.arc(x, p.yOf(v[i]), 4, 0, Math.PI * 2);
+        const v = valueAt(key, i); if (v == null || !p.yOf) return;
+        ctx.beginPath(); ctx.arc(x, p.yOf(v), 4, 0, Math.PI * 2);
         ctx.fillStyle = colorOf(key, k); ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = k.surface; ctx.stroke();
       }));
@@ -352,6 +399,16 @@
       row.append(el("span", "imu-tip-l", ln.label));
       tip.appendChild(row);
     });
+    const sp = speedAt(d.t[i]);
+    if (sp != null) {
+      const s = seriesOf("speed"), j = s.t.findIndex((x) => Math.abs(x - d.t[i]) < 1e-3);
+      const row = el("div", "imu-tip-r");
+      const key = el("span", "imu-key"); key.style.background = k.spd;
+      row.append(key, el("b", "", fmtNum(sp, 1)));
+      if (s.min && j >= 0) row.append(el("span", "muted", ` ${fmtNum(s.min[j], 1)} … ${fmtNum(s.max[j], 1)}`));
+      row.append(el("span", "imu-tip-l", "km/h"));
+      tip.appendChild(row);
+    }
     const tt = d.t[i], near = (d.end - d.start) / (L.x1 - L.x0) * 6;
     (d.events || []).filter((e) => Math.abs(e.t - tt) <= near).slice(0, 3).forEach((e) => {
       tip.appendChild(el("div", "imu-tip-e", (e.history ? "History packet · " : "NR packet · ")
@@ -473,9 +530,30 @@
       + (d ? (bucketed(d) ? ` · ${d.t.length.toLocaleString()} points${d.mode === "minutes" ? " · per minute" : ""}` : " · every sample") : "");
   }
 
-  function showEmpty(text) {
-    $("imu-empty").textContent = text; $("imu-empty").hidden = !text;
+  function showEmpty(text, action) {
+    const box = $("imu-empty"), key = text + (action ? "|" + action.label : "");
+    if (box.dataset.key !== key) {          // following live re-renders every 2 s: keep the button
+      box.dataset.key = key;
+      box.replaceChildren(text);
+      if (action) {
+        const b = el("button", "ghost mini", action.label);
+        b.onclick = action.run;
+        box.append(" ", b);
+      }
+    }
+    box.hidden = !text;
     canvas.style.visibility = text ? "hidden" : "visible";
+  }
+
+  // Following live, the right edge is now: a device quiet for longer than the range leaves the
+  // window empty. Say so, and when its data was, rather than a bare "no samples".
+  function emptyState() {
+    const dev = deviceInfo(), v = state.view;
+    if (!state.live || !dev || !v || dev.last >= v.start) return ["No samples in this range."];
+    const ago = Date.now() / 1000 - dev.last;
+    return [`Nothing from ${dev.device_id} in the last ${fmtSpan(v.end - v.start)} — its newest data `
+      + `is from ${fmtDate(dev.last)} ${fmtTime(dev.last)}, ${fmtSpan(ago)} ago.`,
+      { label: "Show its newest data", run: () => { setLive(false); state.zoom = []; state.view = null; load(); } }];
   }
 
   function render() {
@@ -483,7 +561,7 @@
     $("imu-unzoom").hidden = !state.zoom.length;
     $("imu-range-text").textContent = rangeText(d);
     renderTiles(d);
-    if (!d || !d.samples) { showEmpty("No samples in this range."); syncScroll(); return; }
+    if (!d || !d.samples) { showEmpty(...emptyState()); syncScroll(); return; }
     showEmpty("");
     layout(); draw(); syncScroll();
   }
@@ -505,6 +583,9 @@
     const rot = ex ? [["pitch", ex.pitch_abs], ["roll", ex.roll_abs], ["yaw", ex.yaw_abs]]
       .reduce((a, b) => ((b[1] || 0) > (a[1] || 0) ? b : a)) : null;
     tile("Peak rotation", rot ? fmtNum(rot[1], 2) : "—", rot ? `°/s · ${rot[0]}` : "");
+    const sp = d.speed && d.speed.t.length ? d.speed : null, top = sp ? (sp.max || sp.mean) : [];
+    const ti = top.reduce((b, v, j) => (v > top[b] ? j : b), 0);
+    tile("Top speed", sp ? fmtNum(top[ti], 0) : "—", sp ? `km/h · ${fmtTime(sp.t[ti])}` : "");
     tile("Missing frames", d.missing_frames == null ? "—" : String(d.missing_frames),
          d.gaps && d.gaps.length ? `in ${d.gaps.length} gap${d.gaps.length === 1 ? "" : "s"}` : "",
          d.missing_frames ? "warn" : "");
@@ -522,6 +603,7 @@
     if (state.layout !== "combined") {      // combined charts carry their own legends
       item("imu-key", k.acc, "Acceleration (m/s²)");
       item("imu-key", k.ori, "Rotation rate (°/s, gyro)");
+      item("imu-key", k.spd, "Speed (km/h)");
     }
     item("imu-tick", k.muted, "NR packet");
     item("imu-tick", k.warn, "History packet");
@@ -603,6 +685,7 @@
     const buckets = bucketed(d);
     const cols = ["time"];
     LANES.forEach((ln) => { cols.push(buckets ? `${ln.key}_mean` : ln.key); if (buckets) cols.push(`${ln.key}_min`, `${ln.key}_max`); });
+    cols.push("speed_kph");
     const lines = [cols.join(",")];
     d.t.forEach((t, i) => {
       const row = [new Date(t * 1000).toISOString()];
@@ -611,6 +694,8 @@
         row.push(s.mean ? s.mean[i] : "");
         if (buckets) row.push(s.min ? s.min[i] : "", s.max ? s.max[i] : "");
       });
+      const sp = speedAt(t);
+      row.push(sp == null ? "" : +sp.toFixed(2));
       lines.push(row.join(","));
     });
     const a = el("a");

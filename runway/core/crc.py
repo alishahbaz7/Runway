@@ -37,3 +37,24 @@ def crc16_ibm(data: bytes) -> int:
         for _ in range(8):
             crc = (crc >> 1) ^ 0xA001 if (crc & 1) else (crc >> 1)
     return crc & 0xFFFF
+
+
+# CRC-8/SMBUS (the canonical "CRC8") - used by the MapmyIndia InTouch OTA frame.
+# poly 0x07, init 0x00, no reflection, no final XOR. The OTA checksum is this CRC
+# over the ASCII characters of the dataBody field (the encrypted hex string), rendered
+# as two uppercase hex digits. Verified against two server-accepted packets:
+#   b"BE88...473E" -> 0x49   and   b"5320...AED7" -> 0x47
+# (confirm against more captures if the platform ever rejects a frame on checksum).
+_CRC8_TABLE = []
+for _i in range(256):
+    _c = _i
+    for _ in range(8):
+        _c = ((_c << 1) ^ 0x07) & 0xFF if (_c & 0x80) else (_c << 1) & 0xFF
+    _CRC8_TABLE.append(_c)
+
+
+def crc8(data: bytes) -> int:
+    crc = 0x00
+    for b in data:
+        crc = _CRC8_TABLE[(crc ^ b) & 0xFF]
+    return crc & 0xFF

@@ -4,9 +4,141 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [1.1.26] — Unreleased
+## [1.1.26] — 2026-11-12
 
-Open for the next round of work after v1.1.25.
+### Added
+- **Runway updates itself.** People pin one program, `Runway.exe` — a small launcher — and never
+  reinstall: each start checks the release channel, a newer version is offered once with its notes
+  (*Later* leaves an *Update* chip in the top bar), and *Update* downloads it, refuses it unless its
+  SHA-256 matches, unpacks it beside the running version and restarts into it — the page follows on
+  its own. The offer says how many listeners the restart restarts; nothing installs until someone
+  clicks. The running version is never touched: a failure anywhere leaves it as it was, said only in
+  Settings → Updates. The way back: hold Shift while starting `Runway.exe` and pick an earlier
+  version (three are kept). Releases are published on Runway's GitHub repo, now public; copies read
+  the latest release's `latest.json`. Rehearsed end to end on this machine:
+  an installed 1.1.26 updated itself to a 1.1.27 build from a local channel and came back on it.
+- **Usage reporting**, the same shared server as BluePulse, as app "Runway", from release builds
+  only: the first start asks the person's name once, the Dashboard says "Hello, <name>", and
+  Settings → Usage reporting shows the name, install ID, last sent and *Send now*. Reported: who,
+  this computer, the version, how long Runway ran, the pages opened, errors, update events and
+  Runway's own counts (listeners and QC sessions started, decodes, OTA exchanges, replays, QC
+  reports, devices seen). Never device IMEIs, packets, endpoints, keys or files. Silent: reports
+  queue on disk while offline and never slow anything.
+- **Device OTA — Runway acts as a TCU against the MapmyIndia InTouch OTA cloud.** The mirror of
+  Runway's usual role: instead of landing packets from devices, it dials out to the OTA platform
+  as if it were a device, building `$MMI,type,serial,keyCode,dataBody,checkSum*` sentences,
+  sending them over HTTPS and reading the replies. The crypto is pinned to real traffic —
+  AES‑128‑ECB/PKCS7 for the body (verified both directions against the protocol doc and a live
+  keys response) and CRC‑8 (poly 0x07, over the dataBody hex) for the checksum (two
+  server‑accepted samples). A new `runway/ota/` subsystem keeps the frame/crypto pure and the
+  HTTP transport + key lifecycle separate: the 3 static keys bootstrap the 8 communication keys
+  (`comMap`), which are downloaded on demand (type 1), refreshed when the `expireTimestamp`
+  passes (type 2) or once on a key‑related type‑9, and stored per `(environment, IMEI)`.
+  Validated live against the production platform: it accepted our frame and returned the comMap.
+  The **Device OTA** page, in the house style (BluePulse / InTouch), sentence case throughout:
+  - **Profiles** — a saved device: a name, the environment (Dev / Prod / Custom, each Custom
+    profile with its own endpoint), the IMEI and the static keys, made and edited in one dialog
+    (*Delete* is red and asks first). Set up once, never typed again.
+  - **Tabs**, like Capture: one working session per tab, each on a profile, kept across a reload.
+    A new tab opens on *Choose a profile*; `?env=&imei=` opens a given device.
+  - **A panel that folds**: the tab's profile (identity, environment, endpoint), its **keys** —
+    static and comm, with *View keys* (every key, each copyable, the comm keys' expiry and when
+    they were downloaded) and *Download* / *Refresh* — and the tab's **history** of exchanges, any
+    one reopening in the panes. Folded it is a strip of icons with a key-state dot and a history
+    count; on a narrow window it opens over the work instead of squeezing it.
+  - **Four panes, the request on the left and the response on the right**, readable on top and
+    the wire below, filling the page. *Encode*, *Decode* and *Send* sit in the toolbar with the
+    message type and key, Send showing the HTTP status and round-trip time. Each pane names what
+    it holds: the key used (and the key the cloud chose for its reply), the CRC, the HTTP status,
+    the message type. Too narrow for two columns, the panes stack in the order the exchange runs.
+  - Environments are never red — red is for a fault: Prod is blue, Dev amber, Custom neutral.
+  `runway ota keys|send` exercises the same flow from the CLI.
+- **Speed on the IMU page**, in both layouts: a speed chart under the IMU charts (half height
+  in *Combined*, one more lane in *Lanes*) on the same time axis and crosshair, its value in
+  the tooltip, a *Top speed* tile and a `speed_kph` column in the CSV. It is a chart of its own,
+  not a second scale on the acceleration or rotation chart: km/h against m/s² or °/s on one
+  chart makes lines look related by where their scales happen to meet. Drawn in neutral ink,
+  so it is never confused with a series colour. Speed comes from every stored packet (IMU and
+  NR); long ranges read it from the per-minute summaries, which now carry speed — a v1.1.25
+  database gets the columns, filled from its packets, when it opens.
+
+### Changed
+- **A release is a launcher install.** The zip unpacks to a `Runway` folder: `Runway.exe` (the
+  launcher), `versions\Runway-v<version>\` (the program, now a PyInstaller one-folder build — it
+  starts without unpacking itself to a temp folder) and `data\` beside the launcher, shared by every
+  version. Coming from 1.1.25 or earlier (data beside the old exe): move that `data` folder beside
+  `Runway.exe` before the first start — once; after that, updates keep it in place. The program and
+  the launcher carry Runway's icon. `build_release.py` also writes `latest.json` (the version, the
+  notes from this changelog and the zip's checksum) and `notes.md`.
+- **One look through the whole app — Device OTA's design on every page.** The approved Device
+  OTA page set the bar (BluePulse's language); every page now shares it:
+  - **The frame, as in BluePulse**: the rail carries the brand and "Version 1.1.26" on top, its
+    modules as sentence-case groups (a rule when folded), the active page tinted with an accent
+    bar; it folds to 58 px and is always folded under 1000 px. The top bar holds the page title,
+    its controls, the Live / Demo / Idle chip and the theme button. A page's description is no
+    longer printed beside the title — it is a hold-tip, shown after the pointer rests on the
+    title for 5 s. (The Settings gear left the top bar: *Settings* is in the rail.)
+  - **Sentence case everywhere** — headings, labels, table headers, tiles, pills, buttons, the
+    rail — and no emoji or text arrows on controls: one shared line-icon set, each icon with a
+    word. Every control takes the page font and a row of controls one height.
+  - **One kit**: tone pills (Running / Done / Pass / Live…), outlined buttons with one filled
+    primary, tables as data grids (a header band, rows a shade apart), outlined tiles, notices,
+    session tabs with an accent bar (Capture, Parser and Device OTA alike), and one dialog look.
+  - **Side panes fold** like Device OTA's: Capture's session panel, the Parser's summary and
+    map, the Dashboard's packet detail and the Protocols / Signatures lists fold to a strip and
+    remember it; on a narrow window they open over the page instead of squeezing it.
+  - **The app's own confirm dialog** replaces the browser's (`confirm`/`prompt`) everywhere —
+    Clear, Delete, Save to the repository, Import, closing a session, a skip reason, renaming a
+    Parser tab: a title, one sentence, Cancel focused, red only for what destroys.
+  - The light theme's green, amber, blue and red text are darker shades of the same colours, so
+    pill and status text passes WCAG AA (4.5:1) on every surface; the dark theme's already did.
+  `tests/test_ui.py` keeps it true: the icons every page names exist, nothing forces capitals,
+  no glyph stands in for an icon, no browser dialog, no rule on a bare structural element.
+
+### Fixed
+- **Dialogs opened behind the Dashboard and Parser maps.** Leaflet's layers stacked above every
+  dialog on the page (Settings opened half hidden on the Dashboard); each map now keeps its
+  layers to itself.
+- **The Converter's table sat in two-thirds of the page** — a global rule meant for the
+  Dashboard gave every page's `<main>` a 320 px empty column on the right.
+- **The Dashboard map drew a fan of lines after a device reconnected.** Seen live after a
+  Runway restart: the device sent the packets it had stored meanwhile (history, `H`) in
+  between live ones, and the trail joined points in arrival order — each history packet a line
+  back to where the vehicle had been, the next live packet a line forward again. The trail now
+  runs in device time (a late point slots into place) and the marker stays on the newest
+  position; a record with no device time (a login's last fix) only places the marker until
+  timed points arrive. The Parser's map joins points in time order whatever order its table
+  is sorted in. Each Dashboard trail keeps its latest 5,000 points (it grew without limit).
+- **IMU page: *Follow live* showed an empty chart and no reason.** Following live, the chart
+  ends at the current time, so a device quiet for longer than the range leaves it empty — and
+  the "No samples in this range" message sat *below* the hidden chart (which keeps its height),
+  off screen. The message now sits over the chart, and when following live it names the
+  device's newest data and how long ago it was, with *Show its newest data*. The tooltip said
+  the right edge was the newest sample; it is the current time.
+- **Dead device connections stayed open for ever.** Seen live on a relay listener: a device
+  whose modem kept losing its data session re-dialled from a new address 60 times in 40
+  minutes and never closed the old connections — no close ever arrives from an address that
+  is gone, and Runway never writes to a relayed device's old connection, so neither side
+  noticed. All 60 stayed open (Windows listed them as established), each holding its session
+  in memory. Runway had no idle timeout. A connection is now closed when its device has
+  dialled in again and it has been quiet for 30 s, when it has received nothing for 10
+  minutes, or when TCP keepalive probes (after 2 minutes of quiet) go unanswered.
+- **A device that had gone was logged in to the platform every 2 minutes.** The newest dead
+  connection kept the device's relay link alive; the platform drops a quiet connection after
+  ~2 minutes, and Runway dialled straight back — opening, as every dial does, with the
+  device's login. 188 logins in 5.6 hours from a device that sent nothing. The link now dials
+  again only when there is something to send (shown as *relay idle* meanwhile). A connection
+  that sends nothing at all no longer opens a platform connection either.
+- **Bytes from a device's older connection could wait in the outbox.** When a device's newer
+  connection ended, it took the shared relay link down with it; the older connection, still
+  sending, pushed into the finished link and nothing went up until the next reconnect. It
+  now takes the link over. Rows already sent are also deleted as soon as their 2 s grace is
+  up (it could take up to twice that), so fewer are sent twice when a link breaks.
+- **The Capture device list showed one re-dialling device as 93 devices.** The page named a
+  connection's device only from packets it still held, and the old connections' packets were
+  long gone, so each connection showed up as a separate "device" by IP:port. The server now
+  sends each connection's device and protocol. The tab badge counts devices online, not open
+  connections (it read 60 for one device).
 
 ## [1.1.25] — 2026-11-04
 

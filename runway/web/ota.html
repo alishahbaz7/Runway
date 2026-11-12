@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Device OTA</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="ota.css" />
+  <script>
+    // Apply a folded panel before the first paint, so the page never opens wide and snaps shut.
+    try {
+      var pref = localStorage.getItem("runway.ota.panel");
+      if (pref === "folded" || (pref === null && window.innerWidth < 1000)) {
+        document.documentElement.setAttribute("data-ota-panel", "folded");
+      }
+    } catch (e) { /* private mode */ }
+  </script>
+</head>
+<body data-page="ota">
+  <!-- #rail is injected here by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Device OTA</h1>
+      <span class="tag">Act as a device against the MapmyIndia InTouch OTA cloud</span>
+    </header>
+
+    <!-- one tab per working session, like Capture -->
+    <div id="ota-tabs" class="ota-tabs" role="tablist" aria-label="Sessions"></div>
+
+    <div id="ota-main" class="ota-main">
+      <!-- the active tab's profile: facts, comm keys, history — folds to an icon strip -->
+      <div id="ota-panel" class="ota-panel">
+        <div class="ota-panel-head">
+          <span class="ota-panel-title">Profile</span>
+          <button id="ota-fold" class="ota-icon-btn" type="button" title="Fold the panel" aria-label="Fold the panel"><span data-icon="panel-left"></span></button>
+        </div>
+        <div id="ota-panel-body" class="ota-panel-body"></div>
+        <div id="ota-panel-strip" class="ota-panel-strip"></div>
+      </div>
+
+      <div id="ota-work" class="ota-work">
+        <div id="ota-notice" class="ota-notice" role="status" hidden></div>
+
+        <!-- a tab with no profile yet -->
+        <div id="ota-chooser" class="ota-card ota-chooser" hidden>
+          <div class="ota-card-head">
+            <span class="ota-card-title">Choose a profile</span>
+            <span id="ota-prof-count" class="ota-count"></span>
+            <span class="spacer"></span>
+            <button id="ota-new-profile" class="ota-btn primary" type="button"><span data-icon="plus"></span>New profile</button>
+          </div>
+          <div id="ota-prof-grid" class="ota-prof-grid"></div>
+        </div>
+
+        <!-- the exchange: readable on top, the wire below; Send crosses the network -->
+        <div id="ota-flow" class="ota-flow" hidden>
+          <div class="ota-toolbar">
+            <label class="ota-tool">
+              <span class="ota-tool-l">Message</span>
+              <select id="ota-type"></select>
+            </label>
+            <label class="ota-tool">
+              <span class="ota-tool-l">Key</span>
+              <select id="ota-keycode"></select>
+            </label>
+            <label class="ota-auto" title="Before a message that needs comm keys, download them — or refresh them once they expire">
+              <span>Auto keys</span>
+              <span class="switch"><input type="checkbox" id="ota-auto" checked /><span class="slider"></span></span>
+            </label>
+            <span class="spacer"></span>
+            <span id="ota-send-status" class="ota-send-status" role="status"></span>
+            <div class="ota-actions">
+              <button id="ota-encode" class="ota-btn" type="button" title="Encrypt pane 1 into pane 2 with the selected key"><span data-icon="lock"></span>Encode</button>
+              <button id="ota-decode" class="ota-btn" type="button" title="Decrypt pane 3 into pane 4"><span data-icon="unlock"></span>Decode</button>
+              <span class="ota-vrule"></span>
+              <button id="ota-send" class="ota-btn primary" type="button" title="Send to the cloud (Ctrl+Enter)"><span data-icon="send"></span>Send</button>
+            </div>
+          </div>
+
+          <div class="ota-grid">
+            <div class="ota-pane" style="grid-area: p1">
+              <div class="ota-pane-head">
+                <span class="ota-pane-n">1</span><span class="ota-pane-t">Readable request</span>
+                <span id="ota-m1" class="ota-metas"></span>
+                <span class="spacer"></span>
+                <button id="ota-format" class="ota-btn sm quiet" type="button" title="Indent the JSON"><span data-icon="format"></span>Format</button>
+                <button id="ota-template" class="ota-btn sm quiet" type="button" title="Replace with this message type's template"><span data-icon="template"></span>Template</button>
+              </div>
+              <textarea id="ota-p1" class="mono" spellcheck="false" placeholder="{ }"></textarea>
+            </div>
+
+            <div class="ota-pane" style="grid-area: p2">
+              <div class="ota-pane-head">
+                <span class="ota-pane-n">2</span><span class="ota-pane-t">Encrypted request</span>
+                <span id="ota-m2" class="ota-metas"></span>
+                <span class="spacer"></span>
+                <button id="ota-curl" class="ota-btn sm quiet" type="button" title="Copy as a curl command"><span data-icon="terminal"></span>curl</button>
+                <button id="ota-copy2" class="ota-btn sm quiet" type="button" title="Copy"><span data-icon="copy"></span>Copy</button>
+              </div>
+              <textarea id="ota-p2" class="mono" spellcheck="false" readonly placeholder="$MMI,…*"></textarea>
+            </div>
+
+            <div class="ota-pane" style="grid-area: p3">
+              <div class="ota-pane-head">
+                <span class="ota-pane-n">3</span><span class="ota-pane-t">Encrypted response</span>
+                <span id="ota-m3" class="ota-metas"></span>
+                <span class="spacer"></span>
+                <button id="ota-copy3" class="ota-btn sm quiet" type="button" title="Copy"><span data-icon="copy"></span>Copy</button>
+              </div>
+              <textarea id="ota-p3" class="mono" spellcheck="false" placeholder="$MMI,…*"></textarea>
+            </div>
+
+            <div class="ota-pane" style="grid-area: p4">
+              <div class="ota-pane-head">
+                <span class="ota-pane-n">4</span><span class="ota-pane-t">Decrypted response</span>
+                <span id="ota-m4" class="ota-metas"></span>
+                <span class="spacer"></span>
+                <button id="ota-copy4" class="ota-btn sm quiet" type="button" title="Copy"><span data-icon="copy"></span>Copy</button>
+              </div>
+              <textarea id="ota-p4" class="mono" spellcheck="false" readonly placeholder="{ }"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- new / edit profile -->
+  <dialog id="ota-prof-dlg" class="ota-dlg">
+    <form id="ota-prof-form" method="dialog" novalidate>
+      <div class="ota-dlg-head">
+        <h2 id="pf-title">New profile</h2>
+        <span class="spacer"></span>
+        <button type="button" class="ota-icon-btn" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </div>
+      <div class="ota-dlg-body">
+        <label class="ota-f">
+          <span class="ota-f-l">Name</span>
+          <input id="pf-name" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="ota-f">
+          <span class="ota-f-l">Environment</span>
+          <div id="pf-env" class="ota-seg" role="radiogroup" aria-label="Environment">
+            <button type="button" role="radio" data-env="dev">Dev</button>
+            <button type="button" role="radio" data-env="prod">Prod</button>
+            <button type="button" role="radio" data-env="custom">Custom</button>
+          </div>
+        </div>
+        <label class="ota-f">
+          <span class="ota-f-l">Endpoint</span>
+          <input id="pf-endpoint" class="mono" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="ota-f">
+          <span class="ota-f-l">IMEI</span>
+          <input id="pf-imei" class="mono" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="ota-f">
+          <span class="ota-f-l">Static keys</span>
+          <div class="ota-keys">
+            <span class="ota-key-n">1</span><input id="pf-k1" class="mono" maxlength="32" autocomplete="off" spellcheck="false" placeholder="32 hex" />
+            <span class="ota-key-n">2</span><input id="pf-k2" class="mono" maxlength="32" autocomplete="off" spellcheck="false" placeholder="32 hex" />
+            <span class="ota-key-n">3</span><input id="pf-k3" class="mono" maxlength="32" autocomplete="off" spellcheck="false" placeholder="32 hex" />
+          </div>
+        </div>
+        <div id="pf-error" class="ota-notice bad" hidden></div>
+      </div>
+      <div class="ota-dlg-foot">
+        <button id="pf-delete" type="button" class="ota-btn danger" hidden><span data-icon="trash"></span>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="ota-btn" data-close>Cancel</button>
+        <button id="pf-save" type="submit" class="ota-btn primary">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- all of a profile's keys: the static three and the downloaded communication keys -->
+  <dialog id="ota-keys-dlg" class="ota-dlg ota-dlg-keys">
+    <div class="ota-dlg-head">
+      <h2>Keys</h2>
+      <span id="kd-who" class="ota-kd-who"></span>
+      <span class="spacer"></span>
+      <button type="button" class="ota-icon-btn" data-close aria-label="Close"><span data-icon="x"></span></button>
+    </div>
+    <div class="ota-dlg-body">
+      <div class="ota-kd-sec">
+        <div class="ota-kd-h">Static keys<span id="kd-static-n" class="ota-count"></span></div>
+        <div id="kd-static" class="ota-kd-list"></div>
+      </div>
+      <div class="ota-kd-sec">
+        <div class="ota-kd-h">Communication keys<span id="kd-comm-n" class="ota-count"></span>
+          <span class="spacer"></span><span id="kd-comm-state"></span></div>
+        <div id="kd-comm-when" class="ota-kd-when"></div>
+        <div id="kd-comm" class="ota-kd-list"></div>
+      </div>
+      <div id="kd-error" class="ota-notice bad" hidden></div>
+    </div>
+    <div class="ota-dlg-foot">
+      <button id="kd-copy-all" type="button" class="ota-btn"><span data-icon="copy"></span>Copy all</button>
+      <span class="spacer"></span>
+      <button type="button" class="ota-btn" data-close>Close</button>
+      <button id="kd-refresh" type="button" class="ota-btn primary"><span data-icon="refresh"></span>Refresh keys</button>
+    </div>
+  </dialog>
+
+  <!-- the house confirm: one sentence, Cancel focused, the action in red -->
+  <dialog id="ota-confirm" class="ota-dlg ota-dlg-sm">
+    <div class="ota-dlg-head"><h2 id="oc-title">Delete?</h2></div>
+    <div class="ota-dlg-body"><p id="oc-text" class="ota-dlg-text"></p></div>
+    <div class="ota-dlg-foot">
+      <span class="spacer"></span>
+      <button id="oc-cancel" type="button" class="ota-btn">Cancel</button>
+      <button id="oc-ok" type="button" class="ota-btn danger-fill">Delete</button>
+    </div>
+  </dialog>
+
+  <div id="ota-toast" class="ota-toast" role="status" hidden></div>
+
+  <script src="common.js"></script>
+  <script src="shell.js"></script>
+  <script src="ota.js"></script>
+</body>
+</html>

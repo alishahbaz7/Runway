@@ -7,129 +7,129 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="capture">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
       <h1>Capture</h1>
-      <span class="tag">One TCP server, browser-style tabs — each tab is a Testing (raw) or QC (validated) session</span>
+      <span class="tag">One TCP server, one tab per session — each a Testing (raw) or QC (validated) session</span>
     </header>
 
-    <!-- browser-style tab strip: one tab per session (QC or Testing); "+" opens a new draft -->
+    <!-- session tabs: one per session (QC or Testing); the dashed + opens a new one -->
     <div id="cap-tabs"></div>
 
-    <main id="cap-main">
-      <!-- LEFT: the "New session" config form (draft tab) OR the focused session + devices -->
-      <section id="cap-devices-pane">
-        <!-- draft config form — shown only while the "New" tab is focused -->
-        <div id="cap-config" style="display:none">
-          <span class="addbar-label">New session</span>
-          <!-- per-tab mode: Testing = raw inspection (any protocol); QC = validated per the
-               config profile. The choice is fixed when the session starts. -->
-          <span class="tcp-seg cap-mode-seg" title="Testing = raw packet inspection · QC = validated qualification">
-            <button id="cap-mode-qc" class="seg">QC</button><button id="cap-mode-test" class="seg on">Testing</button>
-          </span>
-          <label class="tcp-fld">Port
-            <input id="cap-port" type="number" min="1" max="65535" value="5050" />
-          </label>
-          <label class="tcp-fld">IP
-            <input id="cap-host" type="text" value="0.0.0.0" title="This machine's IP (auto-detected). 0.0.0.0 = all interfaces / reachable on the LAN; 127.0.0.1 = local only" />
-          </label>
-          <!-- Testing: pick the codec directly (or Auto / Generic-raw) -->
-          <label class="tcp-fld" id="cap-test-proto">Protocol
-            <select id="cap-codec"></select>
-          </label>
-          <!-- Testing: fork the stream — raw bytes on to the next server, and/or keep it here.
-               Either one makes the session restart by itself with the server. -->
-          <label class="tcp-fld" id="cap-relay-fld" title="Next server (host:port). Each device gets its own connection to it; its bytes go up exactly as received, and the server's ACKs and commands come back down. Runway sends no ACK of its own while relaying.">Relay to
-            <input id="cap-relay" type="text" placeholder="host:port" spellcheck="false" autocomplete="off" />
-          </label>
-          <label class="tcp-fld cap-check-fld" id="cap-store-fld" title="Keep every packet and IMU sample in data/telemetry.db — the IMU page reads it.">Store
-            <input id="cap-store" type="checkbox" />
-          </label>
-          <!-- QC: auto-detect or manual protocol, plus operator -->
-          <label class="tcp-fld" id="cap-qc-mode-fld" style="display:none">Protocol
-            <select id="cap-qc-mode">
-              <option value="auto">Auto-detect</option>
-              <option value="manual">Manual selection</option>
-            </select>
-          </label>
-          <label class="tcp-fld" id="cap-qc-proto-fld" style="display:none">Select protocol
-            <select id="cap-qc-protocol"></select>
-          </label>
-          <label class="tcp-fld" id="cap-qc-operator-fld" style="display:none">Operator
-            <input id="cap-operator" type="text" placeholder="optional" />
-          </label>
-          <button id="cap-start">▶ Start</button>
-          <span id="cap-localip" class="tcp-localip"></span>
+    <main id="cap-main" class="ui-split">
+      <!-- the session panel: the new-session form, or the focused session and its devices -->
+      <div id="cap-devices-pane" data-fold="capture-session" data-fold-title="Session">
+        <div class="pane-head">
+          <span class="pane-title">Session</span>
+          <span class="spacer"></span>
+          <button class="ui-icon-btn" type="button" data-fold-toggle></button>
         </div>
-        <div id="cap-session"></div>
-        <div id="cap-devices"><p class="empty">Start a session to see devices here.</p></div>
-      </section>
+        <div class="cap-pane-body">
+          <!-- the new-session form — shown only while the New tab is focused -->
+          <div id="cap-config" style="display:none">
+            <!-- Testing = raw inspection (any protocol); QC = validated against the protocol's
+                 profile. The choice is fixed when the session starts. -->
+            <span class="tcp-seg cap-mode-seg" data-tip="Testing: raw packets from any protocol. QC: each device validated against its protocol's checklist.">
+              <button id="cap-mode-qc" class="seg" type="button">QC</button><button id="cap-mode-test" class="seg on" type="button">Testing</button>
+            </span>
+            <label class="tcp-fld">Port
+              <input id="cap-port" type="number" min="1" max="65535" value="5050" />
+            </label>
+            <label class="tcp-fld" data-tip="This machine's address (found automatically). 0.0.0.0 listens on every interface, reachable on the LAN; 127.0.0.1 is this machine only.">IP
+              <input id="cap-host" type="text" value="0.0.0.0" spellcheck="false" />
+            </label>
+            <!-- Testing: pick the codec directly (or Auto / Generic-raw) -->
+            <label class="tcp-fld" id="cap-test-proto">Protocol
+              <select id="cap-codec"></select>
+            </label>
+            <!-- Testing: fork the stream — raw bytes on to the next server, and/or keep it here.
+                 Either one makes the session restart by itself with the server. -->
+            <label class="tcp-fld" id="cap-relay-fld" data-tip="The next server. Each device gets its own connection to it; its bytes go up exactly as received and the server's ACKs and commands come back down. Runway sends no ACK of its own while relaying.">Relay to
+              <input id="cap-relay" type="text" placeholder="host:port" spellcheck="false" autocomplete="off" />
+            </label>
+            <label class="tcp-fld cap-check-fld" id="cap-store-fld" data-tip="Keep every packet and IMU sample in data/telemetry.db — the IMU and Archive pages read it.">
+              <span>Store packets</span>
+              <span class="switch"><input id="cap-store" type="checkbox" /><span class="slider"></span></span>
+            </label>
+            <!-- QC: auto-detect or manual protocol, plus operator -->
+            <label class="tcp-fld" id="cap-qc-mode-fld" style="display:none">Protocol
+              <select id="cap-qc-mode">
+                <option value="auto">Auto-detect</option>
+                <option value="manual">Choose one</option>
+              </select>
+            </label>
+            <label class="tcp-fld" id="cap-qc-proto-fld" style="display:none">Select protocol
+              <select id="cap-qc-protocol"></select>
+            </label>
+            <label class="tcp-fld" id="cap-qc-operator-fld" style="display:none">Operator
+              <input id="cap-operator" type="text" />
+            </label>
+            <button id="cap-start" type="button"><span data-icon="play"></span>Start</button>
+            <span id="cap-localip" class="tcp-localip"></span>
+          </div>
+          <div id="cap-session"></div>
+          <div id="cap-devices"><p class="empty">No session running</p></div>
+        </div>
+      </div>
 
-      <!-- RIGHT: live packet feed for the focused session (RAW bytes or Parsed fields) -->
-      <section id="cap-feed-pane">
+      <!-- the focused session's packets: raw bytes or parsed fields (Testing), or the QC summary -->
+      <div id="cap-feed-pane">
         <div class="tcp-feed-head">
           <h2 class="tcp-h">Live packets <span id="cap-feed-for" class="muted"></span></h2>
-          <!-- QC-only: verdict + coverage pill for the SELECTED device (e.g. "IN PROGRESS · 2/13")
-               — click it as a shortcut into the Summary view below -->
-          <button id="cap-qc-status" class="qc-summary" title="QC status for the selected device — click to open Summary" style="display:none"></button>
-          <!-- QC-only: Summary (per-device coverage & details, default) | Raw (packet stream, multi-device) -->
-          <span class="tcp-seg" id="cap-qc-viewseg" style="display:none" title="Summary = per-device coverage & details · Raw = packet stream">
-            <button id="cap-qc-view-summary" class="seg on">Summary</button><button id="cap-qc-view-raw" class="seg">Raw</button>
+          <!-- QC: verdict and coverage for the selected device — click for its Summary -->
+          <button id="cap-qc-status" class="qc-summary" type="button" title="QC status of the selected device — open its Summary" style="display:none"></button>
+          <!-- QC: Summary (per-device coverage and details) | Raw (the packet stream) -->
+          <span class="tcp-seg" id="cap-qc-viewseg" style="display:none">
+            <button id="cap-qc-view-summary" class="seg on" type="button">Summary</button><button id="cap-qc-view-raw" class="seg" type="button">Raw</button>
           </span>
-          <!-- Testing-only: RAW/Parsed + HEX/ASCII (QC renders per the protocol config) -->
-          <span class="tcp-seg" id="cap-view-seg" title="show packets as raw bytes or decoded fields">
-            <button id="cap-view-raw" class="seg on">RAW</button><button id="cap-view-parsed" class="seg">Parsed</button>
+          <!-- Testing: Raw / Parsed, and Hex / ASCII for raw bytes -->
+          <span class="tcp-seg" id="cap-view-seg">
+            <button id="cap-view-raw" class="seg on" type="button">Raw</button><button id="cap-view-parsed" class="seg" type="button">Parsed</button>
           </span>
-          <span class="tcp-seg" id="cap-rawfmt-seg" title="how to show raw packet bytes">
-            <button id="cap-fmt-hex" class="seg on">HEX</button><button id="cap-fmt-ascii" class="seg">ASCII</button>
+          <span class="tcp-seg" id="cap-rawfmt-seg">
+            <button id="cap-fmt-hex" class="seg on" type="button">Hex</button><button id="cap-fmt-ascii" class="seg" type="button">ASCII</button>
           </span>
           <span class="spacer"></span>
           <span id="cap-feed-count" class="muted"></span>
-          <!-- colour-code legend behind an ⓘ button (saves toolbar space) -->
+          <!-- the colour key behind an (i) button -->
           <span class="tcp-legend-wrap">
-            <button id="cap-legend-btn" class="ghost mini" title="what the packet timestamp colours mean" aria-label="packet colour legend">ⓘ</button>
+            <button id="cap-legend-btn" class="ui-icon-btn" type="button" title="What the time colours mean" aria-label="Time colours"><span data-icon="info"></span></button>
             <div id="cap-legend" class="tcp-legend-pop" hidden>
-              <span class="tcp-legend-title">Timestamp colours</span>
+              <span class="tcp-legend-title">Time colours</span>
               <span class="pk-leg pk-live"><i class="pk-dot"></i>Live</span>
               <span class="pk-leg pk-history"><i class="pk-dot"></i>History</span>
               <span class="pk-leg pk-alarm"><i class="pk-dot"></i>Alarm</span>
               <span class="pk-leg pk-unknown"><i class="pk-dot"></i>Unknown</span>
             </div>
           </span>
-          <!-- QC-only actions -->
+          <!-- QC actions -->
           <span id="cap-qc-actions"></span>
-          <!-- Testing-only actions -->
+          <!-- Testing actions -->
           <span id="cap-test-actions">
-            <button id="cap-log" class="ghost mini" title="save the packets buffered so far (one-time)">⤓ Download</button>
-            <button id="cap-rec" class="ghost mini" title="continuously log every new packet to a file on the server">● Start log</button>
-            <button id="cap-recfile" class="ghost mini" style="display:none" title="download the current/last server log file">⤓ log file</button>
+            <button id="cap-log" class="ghost mini" type="button" title="The packets held so far, as a file"><span data-icon="download"></span>Download</button>
+            <button id="cap-rec" class="ghost mini" type="button" title="Write every new packet to a file on the server"><span data-icon="record"></span>Start log</button>
+            <button id="cap-recfile" class="ghost mini" type="button" style="display:none"><span data-icon="file"></span>Log file</button>
           </span>
-          <button id="cap-feed-clear" class="ghost mini danger">Clear</button>
+          <button id="cap-feed-clear" class="ghost mini danger" type="button"><span data-icon="trash"></span>Clear</button>
         </div>
-        <div id="cap-feed"><p class="empty">Decoded packets appear here as devices send data.</p></div>
-        <!-- QC Summary view: inline (not a popup) so it lives right on the Live Packets page;
-             shows the device selected in the left list (identified by its Serial badge +
-             IMEI in Device details — no duplicate session/port/verdict header, all of that
-             already lives on the tab, session strip and status pill), and updates live. -->
+        <div id="cap-feed"><p class="empty">No packets yet</p></div>
+        <!-- QC Summary: inline, for the device selected in the list; updates live -->
         <div id="cap-qc-summary-panel" style="display:none">
           <div id="cap-qcsum-body"></div>
         </div>
-      </section>
+      </div>
     </main>
   </div>
 
-  <!-- send-command popup (downlink: utility -> device) -->
+  <!-- send a command to a device (downlink) -->
   <div id="cap-send-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <h3>Send to <span id="cap-send-peer" class="mono"></span></h3>
-      <!-- shown only when several devices are connected on this port: tick who receives
-           the command (the device the ✈ was clicked on is ticked by default) -->
+      <!-- several devices on this port: tick who receives it (the clicked one is ticked) -->
       <div id="cap-send-recips" class="cap-send-recips" style="display:none"></div>
-      <!-- the protocol's known command catalogue (from data/protocols/<proto>.json
-           ota_commands): pick the command TYPE first (SET/GET/CLR), then a command from
-           the list filtered to those supporting that type — some support all three,
-           some only a subset. The chosen string prefills the editable value below. -->
+      <!-- the protocol's command catalogue: the type first (SET/GET/CLR), then a command of that
+           type; the chosen string fills the editable value below -->
       <label class="tcp-fld" id="cap-send-act-fld" style="display:none">Command type
         <select id="cap-send-act"></select>
       </label>
@@ -137,30 +137,29 @@
         <select id="cap-send-cmd"></select>
       </label>
       <p id="cap-send-cmd-hint" class="muted cap-send-hint" style="display:none"></p>
-      <!-- Mode only matters without a catalogue command (custom text / raw hex) — the
-           catalogue's format is already defined for the device type, so it hides. -->
+      <!-- Mode matters only without a catalogue command (custom text or raw hex) -->
       <label class="tcp-fld" id="cap-send-mode-fld">Mode
         <select id="cap-send-mode">
-          <option value="text">Text (built via codec)</option>
+          <option value="text">Text (built by the codec)</option>
           <option value="hex">Raw hex</option>
         </select>
       </label>
-      <textarea id="cap-send-value" rows="3" placeholder="e.g. getinfo   — or hex bytes if Raw hex"></textarea>
+      <textarea id="cap-send-value" rows="3" spellcheck="false" placeholder="getinfo"></textarea>
       <div class="tcp-modal-actions">
         <span id="cap-send-msg"></span>
         <span class="spacer"></span>
-        <button id="cap-send-cancel" class="ghost">Cancel</button>
-        <button id="cap-send-go">Send</button>
+        <button id="cap-send-cancel" class="ghost" type="button">Cancel</button>
+        <button id="cap-send-go" type="button"><span data-icon="send"></span>Send</button>
       </div>
     </div>
   </div>
 
-  <!-- full packet view -->
+  <!-- one packet in full -->
   <div id="cap-pkt-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card tcp-pkt-card">
       <div class="tcp-pkt-head">
         <h3>Packet</h3><span class="spacer"></span>
-        <button id="cap-pkt-close" class="ghost mini danger">✕ Close</button>
+        <button id="cap-pkt-close" class="ui-icon-btn" type="button" aria-label="Close"><span data-icon="x"></span></button>
       </div>
       <div id="cap-pkt-meta" class="muted"></div>
       <!-- CAN-carrying protocols only (Zenithra Ax1 sCAN): the bus frames as a table, ahead
@@ -177,123 +176,111 @@
       <pre id="cap-pkt-parsed" class="json"></pre>
       <h4 class="tcp-pkt-h">ASCII</h4>
       <pre id="cap-pkt-ascii" class="json"></pre>
-      <h4 class="tcp-pkt-h">HEX</h4>
+      <h4 class="tcp-pkt-h">Hex</h4>
       <pre id="cap-pkt-hex" class="json"></pre>
     </div>
   </div>
 
-  <!-- QC report export: Sheet 1 = lot Summary, then one sheet per device named by its
-       IMEI with the Summary view's packet detail. The devices INCLUDED are the ones
-       ticked in "Devices on this port" (same tick as the Raw-feed filter). -->
+  <!-- QC report: sheet 1 is the lot summary, then one sheet per ticked device, named by IMEI -->
   <div id="cap-export-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <div class="tcp-pkt-head">
-        <h3>Download QC report</h3><span class="spacer"></span>
-        <button id="cap-export-close" class="ghost mini danger">✕</button>
+        <h3 data-tip="Sheet 1 is the lot summary, one row per device; each device then gets its own sheet, named by its IMEI, with its packet coverage and the last raw packet of each item. The devices ticked in the session panel are the ones included.">Download QC report</h3>
+        <span class="spacer"></span>
+        <button id="cap-export-close" class="ui-icon-btn" type="button" aria-label="Close"><span data-icon="x"></span></button>
       </div>
-      <p class="muted tcp-log-note">Sheet 1 is the lot <b>Summary</b> (one row per device);
-        each device below gets its own sheet named by <b>IMEI</b> with its packet coverage and
-        the last raw packet received per item. Tick/untick devices in
-        <b>Devices on this port</b> to change what's included.</p>
-      <!-- completion gate: an IN PROGRESS device blocks printing until its missing
-           required items are skipped (-> Conditional Pass) or the test settles -->
-      <p id="cap-export-warn" class="cap-export-warn" style="display:none"><b>QC is not
-        completed</b> — required items are still missing on the highlighted devices. Mark
-        them as <b>Skip</b> (the device closes as <b>Conditional Pass</b>) or untick the
-        device; only completed devices can be printed.</p>
+      <!-- completion gate: an in-progress device blocks printing until its missing required
+           items are skipped (→ Conditional Pass) or the test settles -->
+      <p id="cap-export-warn" class="cap-export-warn" style="display:none"><b>QC is not complete</b> on the
+        highlighted devices: required items are still missing. Skip them (the device closes as
+        Conditional Pass) or untick the device.</p>
       <div id="cap-export-devs" class="cap-export-devs"></div>
       <label class="tcp-fld">Format
         <select id="cap-export-format">
           <option value="xlsx">Excel workbook (.xlsx)</option>
-          <option value="csv">CSV (.zip — one file per sheet)</option>
+          <option value="csv">CSV (.zip, one file per sheet)</option>
         </select>
       </label>
       <div class="tcp-modal-actions">
         <span id="cap-export-msg" class="muted"></span><span class="spacer"></span>
-        <button id="cap-export-cancel" class="ghost">Cancel</button>
-        <button id="cap-export-go">⤓ Download</button>
+        <button id="cap-export-cancel" class="ghost" type="button">Cancel</button>
+        <button id="cap-export-go" type="button"><span data-icon="download"></span>Download</button>
       </div>
     </div>
   </div>
 
-  <!-- Lot details: the bench-only report fields (manual columns + sign-off) typed here
-       instead of into the Excel afterwards — the exported report is the complete
-       deliverable. Saved on the server with the session. -->
+  <!-- Lot details: the bench-only report fields (manual columns and sign-off), typed once here
+       so every printed report carries them. Saved on the server with the session. -->
   <div id="cap-lot-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card tcp-pkt-card">
       <div class="tcp-pkt-head">
-        <h3>Lot details</h3><span class="spacer"></span>
-        <button id="cap-lot-close" class="ghost mini danger">✕</button>
+        <h3 data-tip="These fill the report's manual columns and its sign-off block, so every print carries them. A field left blank stays blank on the sheet.">Lot details</h3>
+        <span class="spacer"></span>
+        <button id="cap-lot-close" class="ui-icon-btn" type="button" aria-label="Close"><span data-icon="x"></span></button>
       </div>
-      <p class="muted tcp-log-note">These values fill the report's manual columns and its
-        sign-off block — type them once here and every print carries them. Anything left
-        blank stays a blank placeholder on the sheet.</p>
-      <h4 class="tcp-pkt-h">Lot / sign-off</h4>
+      <h4 class="tcp-pkt-h">Lot and sign-off</h4>
       <div id="cap-lot-sess" class="cap-lot-grid"></div>
       <h4 class="tcp-pkt-h">Device&nbsp; <select id="cap-lot-dev" class="cap-lot-devsel"></select></h4>
       <div id="cap-lot-fields" class="cap-lot-grid"></div>
       <div class="tcp-modal-actions">
         <span id="cap-lot-msg" class="muted"></span><span class="spacer"></span>
-        <button id="cap-lot-cancel" class="ghost">Close</button>
-        <button id="cap-lot-save">Save</button>
+        <button id="cap-lot-cancel" class="ghost" type="button">Close</button>
+        <button id="cap-lot-save" type="button">Save</button>
       </div>
     </div>
   </div>
 
-  <!-- save log (Testing) -->
+  <!-- download the packets held so far (Testing) -->
   <div id="cap-log-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <div class="tcp-pkt-head">
         <h3>Download packets</h3><span class="spacer"></span>
-        <button id="cap-log-close" class="ghost mini danger">✕</button>
+        <button id="cap-log-close" class="ui-icon-btn" type="button" aria-label="Close"><span data-icon="x"></span></button>
       </div>
-      <label class="tcp-fld">Format
+      <label class="tcp-fld" data-tip="One line per packet: timestamp | client | raw data">Format
         <select id="cap-log-format"><option value="txt">TXT</option><option value="csv">CSV</option></select>
       </label>
       <label class="tcp-fld">Devices
         <select id="cap-log-scope">
-          <option value="all">All devices (every session)</option>
-          <option value="selected">Selected (checked) devices on this session</option>
+          <option value="all">All devices, every session</option>
+          <option value="selected">The ticked devices of this session</option>
         </select>
       </label>
       <label class="tcp-fld">Raw as
-        <select id="cap-log-raw"><option value="ascii">ASCII</option><option value="hex">HEX</option></select>
+        <select id="cap-log-raw"><option value="ascii">ASCII</option><option value="hex">Hex</option></select>
       </label>
-      <p class="muted tcp-log-note">Format: <code>timestamp | client | raw data</code></p>
       <div class="tcp-modal-actions">
         <span id="cap-log-msg" class="muted"></span><span class="spacer"></span>
-        <button id="cap-log-cancel" class="ghost">Cancel</button>
-        <button id="cap-log-go">Download</button>
+        <button id="cap-log-cancel" class="ghost" type="button">Cancel</button>
+        <button id="cap-log-go" type="button"><span data-icon="download"></span>Download</button>
       </div>
     </div>
   </div>
 
-  <!-- start continuous logging (Testing) -->
+  <!-- write every new packet to a file on the server (Testing) -->
   <div id="cap-rec-modal" class="tcp-modal" style="display:none">
     <div class="tcp-modal-card">
       <div class="tcp-pkt-head">
-        <h3>Start logging</h3><span class="spacer"></span>
-        <button id="cap-rec-close" class="ghost mini danger">✕</button>
+        <h3 data-tip="Every new packet is written to a file on the server, flushed to disk per packet, until you stop. One line per packet: timestamp | client | raw.">Start logging</h3>
+        <span class="spacer"></span>
+        <button id="cap-rec-close" class="ui-icon-btn" type="button" aria-label="Close"><span data-icon="x"></span></button>
       </div>
-      <p class="muted tcp-log-note">Continuously writes <b>every new packet</b> to a file on the
-        server (flushed per packet, fsync'd to disk) until you stop. Format:
-        <code>timestamp | client | raw</code></p>
       <label class="tcp-fld">Folder
-        <input id="cap-rec-dir" type="text" placeholder="server data/logs (default)" />
+        <input id="cap-rec-dir" type="text" placeholder="data/logs" spellcheck="false" />
       </label>
       <label class="tcp-fld">File name
-        <input id="cap-rec-name" type="text" placeholder="auto (timestamped)" />
+        <input id="cap-rec-name" type="text" placeholder="Timestamped" spellcheck="false" />
       </label>
       <label class="tcp-fld">Format
         <select id="cap-rec-format"><option value="txt">TXT</option><option value="csv">CSV</option></select>
       </label>
       <label class="tcp-fld">Raw as
-        <select id="cap-rec-raw"><option value="ascii">ASCII</option><option value="hex">HEX</option></select>
+        <select id="cap-rec-raw"><option value="ascii">ASCII</option><option value="hex">Hex</option></select>
       </label>
       <div class="tcp-modal-actions">
         <span id="cap-rec-msg" class="muted"></span><span class="spacer"></span>
-        <button id="cap-rec-cancel" class="ghost">Cancel</button>
-        <button id="cap-rec-go">Start</button>
+        <button id="cap-rec-cancel" class="ghost" type="button">Cancel</button>
+        <button id="cap-rec-go" type="button"><span data-icon="record"></span>Start</button>
       </div>
     </div>
   </div>

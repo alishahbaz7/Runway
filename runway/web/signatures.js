@@ -20,19 +20,9 @@
   }
   const fmtTime = (m) => (m ? new Date(m * 1000).toLocaleString() : "");
 
-  // Inline stroke icons (no external libs — CSP-safe).
-  const SVG = (p) => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"`
-    + ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
-  const ICON = {
-    trash: SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
-      + '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'
-      + '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'),
-    download: SVG('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/>'
-      + '<line x1="12" y1="15" x2="12" y2="3"/>'),
-    upload: SVG('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/>'
-      + '<line x1="12" y1="3" x2="12" y2="15"/>'),
-    x: SVG('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
-  };
+  // the one icon map every page shares (shell.js)
+  const ICON = window.RunwayUI.icons;
+  const EMPTY_VIEW = '<p class="empty">No signature selected</p>';
 
   let allSigs = [];        // cached repository listing (for search)
   let selected = null;     // name of the saved file being previewed
@@ -44,6 +34,7 @@
   // ---- repository list (left) -------------------------------------------
   async function refresh() {
     try { allSigs = await api("/api/signatures"); } catch (e) { allSigs = []; }
+    $("sig-count").textContent = allSigs.length ? String(allSigs.length) : "";
     renderList($("sig-search").value || "");
   }
   function renderList(q) {
@@ -57,10 +48,12 @@
       const body = el("div", "sig-body");
       body.append(el("div", "sig-name-row", s.name));
       body.append(el("div", "meta",
-        `${s.keys} keys · ${s.fields} fields${s.valid ? "" : " · ⚠ invalid"} · ${fmtTime(s.modified)}`));
-      const del = el("button", "ghost mini icon-only");
+        `${s.keys} keys · ${s.fields} fields${s.valid ? "" : " · Invalid"} · ${fmtTime(s.modified)}`));
+      const del = el("button", "ui-icon-btn");
+      del.type = "button";
       del.innerHTML = ICON.trash;
-      del.title = "delete";
+      del.title = "Delete";
+      del.setAttribute("aria-label", "Delete " + s.name);
       del.onclick = (e) => { e.stopPropagation(); removeSig(s.name); };
       li.append(body, del);
       li.onclick = () => viewSaved(s.name);
@@ -89,7 +82,7 @@
         tr.append(
           el("td", "", f.fieldName), el("td", "num", f.startingBit), el("td", "num", f.size),
           el("td", "num", f.multiplier), el("td", "num", f.offset),
-          el("td", "", f.signed ? "yes" : "no"), el("td", "num", f.reverse),
+          el("td", "", f.signed ? "Yes" : "No"), el("td", "num", f.reverse),
         );
         tb.appendChild(tr);
       });
@@ -108,7 +101,7 @@
   }
   function clearPreview() {
     pending = null; selected = null; currentName = null; currentContent = null;
-    $("sig-view-head").innerHTML = '<p class="empty">Upload or select a signature to preview it</p>';
+    $("sig-view-head").innerHTML = EMPTY_VIEW;
     $("sig-view-body").innerHTML = "";
     setActions();
     renderList($("sig-search").value || "");
@@ -128,9 +121,9 @@
   async function bindPanel(name, content) {
     const wrap = el("div", "sig-bind");
     if (!isCanKeyed(content)) {
-      wrap.append(el("span", "muted",
-        "AVL-parameter signature — applied from the Parser's Signature control. "
-        + "Only CAN-id keyed signatures bind to a device."));
+      const kind = el("span", "ui-pill muted", "AVL parameter signature");
+      kind.dataset.tip = "Applied from the Parser's Signature control. Only a signature keyed by CAN id binds to a device.";
+      wrap.append(kind);
       return wrap;
     }
     let data = { bindings: {} };
@@ -138,10 +131,11 @@
     const bound = Object.entries(data.bindings || {}).filter(([, v]) => v === name).map(([k]) => k);
     wrap.append(el("span", "addbar-label", "Decode CAN for device"));
     const input = el("input", "conv-in");
-    input.placeholder = "IMEI, or * for any device";
+    input.placeholder = "IMEI, IMEI or *";
     input.value = bound.join(", ");
-    input.title = "Comma-separated device IMEIs. '*' binds every device that has no binding of its own.";
+    input.title = "Device IMEIs, separated by commas. * binds every device that has no binding of its own.";
     const btn = el("button", "ghost", "Bind");
+    btn.type = "button";
     const msg = el("span", "muted");
     btn.onclick = async () => {
       const wanted = input.value.split(",").map((x) => x.trim()).filter(Boolean);
@@ -155,10 +149,8 @@
           body: JSON.stringify({ bindings: cur }),
         });
         msg.className = "ok";
-        msg.textContent = wanted.length
-          ? `bound to ${wanted.join(", ")} — takes effect on the next packet`
-          : "unbound";
-      } catch (e) { msg.className = "err"; msg.textContent = "failed: " + e.message; }
+        msg.textContent = wanted.length ? `Bound to ${wanted.join(", ")} from the next packet` : "Unbound";
+      } catch (e) { msg.className = "err"; msg.textContent = "Could not bind: " + e.message; }
     };
     wrap.append(input, btn, msg);
     return wrap;
@@ -187,7 +179,8 @@
     renderList($("sig-search").value || "");
     const title = el("h2", "", currentName);
     const spacer = el("span", "spacer");
-    const banner = el("span", "sig-banner", "Unsaved — press Save to add to the repository");
+    const banner = el("span", "sig-banner", "Unsaved");
+    banner.dataset.tip = "Save adds it to the repository";
     renderFields(pending.content, [title, spacer, banner]);
   }
 
@@ -207,7 +200,7 @@
     reader.onload = () => {
       let content;
       try { content = JSON.parse(String(reader.result || "")); }
-      catch (err) { msg("err", "not valid JSON: " + err.message); return; }
+      catch (err) { msg("err", "Not valid JSON: " + err.message); return; }
       pending = { content };
       $("sig-file-name").textContent = f.name;
       if (!$("sig-name").value) $("sig-name").value = f.name.replace(/\.json$/i, "");
@@ -220,41 +213,40 @@
 
   $("sig-save").addEventListener("click", async () => {
     const name = $("sig-name").value.trim();
-    if (!name) { msg("err", "enter a name"); return; }
-    if (!pending) { msg("err", "choose a file first"); return; }
-    if (!window.confirm(`Save signature “${name}” to the repository?`)) return;
+    if (!name) { msg("err", "Enter a name"); return; }
+    if (!pending) { msg("err", "Choose a file first"); return; }
+    const ok = await window.RunwayUI.confirm({
+      title: "Save to the repository?",
+      text: `“${name}” is written to the signature repository.`, action: "Save" });
+    if (!ok) return;
     try {
       await api("/api/signatures", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, content: pending.content }),
       });
-      msg("ok", "saved");
+      msg("ok", "Saved");
       $("sig-name").value = ""; $("sig-file-name").textContent = "";
       pending = null;
       await refresh();
       viewSaved(/\.json$/i.test(name) ? name : name + ".json");
-    } catch (e) { msg("err", "save failed: " + e.message); }
+    } catch (e) { msg("err", "Save failed: " + e.message); }
   });
 
   async function removeSig(name) {
-    if (!window.confirm(`Delete signature “${name}”?\n\n`
-        + "This permanently removes it from the repository and cannot be undone.")) return;
+    const ok = await window.RunwayUI.confirm({
+      title: "Delete this signature?",
+      text: `“${name}” is removed from the repository for good.`, action: "Delete", tone: "danger" });
+    if (!ok) return;
     try { await api("/api/signatures/" + encodeURIComponent(name), { method: "DELETE" }); }
     catch (e) { /* ignore */ }
     if (selected === name) {
       selected = null; currentName = null; currentContent = null;
-      $("sig-view-head").innerHTML = '<p class="empty">Upload or select a signature to preview it</p>';
+      $("sig-view-head").innerHTML = EMPTY_VIEW;
       $("sig-view-body").innerHTML = "";
       setActions();
     }
     await refresh();
   }
-
-  // icon labels
-  $("sig-upload").innerHTML = ICON.upload + "<span>Choose file</span>";
-  $("sig-download").innerHTML = ICON.download + "<span>Download</span>";
-  $("sig-delete").innerHTML = ICON.trash + "<span>Delete</span>";
-  $("sig-clear").innerHTML = ICON.x + "<span>Clear</span>";
 
   // band actions (next to Save)
   $("sig-download").addEventListener("click", () => { if (currentContent) download(currentName, currentContent); });
