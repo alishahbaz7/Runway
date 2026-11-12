@@ -71,11 +71,13 @@ INSTALL
   Runway.exe to the taskbar or Start: it is the one program to start.
 
 RUN IT
-  1. Start Runway.exe. A console window opens (version banner + logs) and your
-     browser opens the dashboard at  http://127.0.0.1:8080
+  1. Start Runway.exe. Runway opens in its own window, and its icon appears by
+     the clock (it also answers at  http://127.0.0.1:8080  in any browser).
        - If Windows SmartScreen warns (unsigned):  More info -> Run anyway.
   2. The first start asks your name once.
-  3. To stop: close the console window.
+  3. Closing the window leaves Runway running — listeners and relays keep going.
+     Open it again from Runway.exe or the icon by the clock.
+  4. To stop Runway: right-click the icon by the clock -> Quit Runway.
 
 UPDATES
   Runway checks for a newer version each time it starts and offers it; Update
