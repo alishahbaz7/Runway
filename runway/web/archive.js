@@ -28,6 +28,8 @@
     : n >= 1e3 ? (n / 1e3).toFixed(1) + " KB" : n + " B");
   const fmtDay = (d) => d.split("-").reverse().join("-");            // YYYY-MM-DD -> DD-MM-YYYY
   const RATES = [[0, "As fast as possible"], [200, "200 packets/s"], [50, "50 packets/s"], [10, "10 packets/s"]];
+  const STATUS = { running: "Running", done: "Done", error: "Error", stopped: "Stopped" };
+  const UI = window.RunwayUI;
 
   let days = [], replays = [], timer = null;
 
@@ -50,12 +52,13 @@
       const tr = body.insertRow();
       tr.append(el("td", "mono", d.device_id), el("td", "mono", fmtDay(d.day)),
                 el("td", "num", fmtBytes(d.bytes)),
-                el("td", "muted", d.compressed ? "gzipped" : "today · open"));
+                el("td", "muted", d.compressed ? "Gzipped" : "Today · open"));
       const act = el("td", "arch-act");
-      const dl = el("a", "ghost mini btn-link", "⤓ Download");
+      const dl = UI.setLabel(el("a", "btn-link"), "download", "Download");
       dl.href = `/api/archive/${encodeURIComponent(d.device_id)}/${d.day}`;
       dl.setAttribute("download", d.file);
-      const rp = el("button", "ghost mini", "⇪ Replay");
+      const rp = UI.setLabel(el("button", "ghost mini"), "replay", "Replay");
+      rp.type = "button";
       rp.onclick = () => openReplay(d);
       act.append(dl, rp);
       tr.append(act);
@@ -142,14 +145,15 @@
       const prog = el("td", "arch-prog");
       const bar = el("div", "arch-bar"); const fill = el("div", "arch-fill " + r.status);
       fill.style.width = (r.total ? pct : 0) + "%"; bar.append(fill);
-      prog.append(bar, el("span", "mono", r.total == null ? "reading…"
+      prog.append(bar, el("span", "mono", r.total == null ? "Reading"
         : `${r.sent.toLocaleString()} / ${r.total.toLocaleString()}`));
       const status = el("td", "", "");
-      status.append(el("span", "arch-pill " + r.status, r.status));
+      status.append(el("span", "arch-pill " + r.status, STATUS[r.status] || r.status));
       if (r.error) status.title = r.error;
       const act = el("td", "arch-act");
       if (r.status === "running") {
-        const stop = el("button", "ghost mini danger", "■ Stop");
+        const stop = UI.setLabel(el("button", "ghost mini danger"), "stop", "Stop");
+        stop.type = "button";
         stop.onclick = async () => { try { await api(`/api/archive/replays/${r.id}/stop`, { method: "POST" }); } catch (e) { /* gone */ } loadReplays(); };
         act.append(stop);
       }
@@ -173,8 +177,9 @@
     const overlay = el("div", "modal-overlay");
     const modal = el("div", "modal relay-modal");
     const head = el("div", "modal-head");
-    head.append(el("span", "", "Replay to platform"),
-      Object.assign(el("button", "modal-x", "✕"), { onclick: () => overlay.remove() }));
+    const x = el("button", "modal-x"); x.type = "button"; x.innerHTML = UI.icons.x;
+    x.setAttribute("aria-label", "Close"); x.onclick = () => overlay.remove();
+    head.append(el("span", "", "Replay to platform"), x);
     const body = el("div", "relay-body");
     body.append(el("div", "arch-what", `${d.device_id} · ${fmtDay(d.day)} · ${fmtBytes(d.bytes)}`));
     const tIn = el("input", "relay-target"); tIn.placeholder = "host:port"; tIn.value = target; tIn.spellcheck = false;
@@ -189,7 +194,8 @@
         + "Packets the platform already has arrive again."), err);
     const foot = el("div", "modal-foot");
     const cancel = el("button", "ghost", "Cancel"); cancel.onclick = () => overlay.remove();
-    const go = el("button", "", "⇪ Start replay");
+    const go = UI.setLabel(el("button", ""), "replay", "Start replay");
+    go.type = "button";
     go.onclick = async () => {
       if (!tIn.value.trim()) { err.textContent = "Enter the platform's host:port"; tIn.focus(); return; }
       go.disabled = true;

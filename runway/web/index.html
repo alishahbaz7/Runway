@@ -3,57 +3,62 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runway · Live Dashboard</title>
+  <title>Runway · Dashboard</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="dashboard">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
   <header>
     <h1>Dashboard</h1>
-    <span class="tag">Live view — devices from the Parser and live feeds</span>
+    <span class="tag">Every device and packet from the Parser and the live feeds, on one map</span>
     <span class="spacer"></span>
     <span class="pill" id="stat-devices">0 devices</span>
     <span class="pill" id="stat-packets">0 packets</span>
-    <span class="pill dead" id="stat-conn">connecting…</span>
+    <span class="pill muted" id="stat-conn">Connecting</span>
   </header>
 
-  <main>
-    <!-- CENTER: big map on top, devices + packet table along the bottom ---- -->
-    <section id="center">
+  <main id="dash-main" class="ui-split">
+    <!-- the map on top, devices and the packet table along the bottom -->
+    <div id="center">
+      <div id="dash-hello" class="dash-hello" hidden></div>
       <div id="map"></div>
       <div id="bottom">
-        <aside id="sidebar">
+        <div id="sidebar">
           <div class="dev-head">
             <h2>Devices</h2>
-            <button id="clear-btn" class="ghost mini">🗑 Clear</button>
+            <button id="clear-btn" class="ghost mini danger" type="button"><span data-icon="trash"></span>Clear</button>
           </div>
-          <input id="dev-search" placeholder="filter devices…" />
+          <input id="dev-search" placeholder="Search" />
           <ul id="devices"><li class="empty">No devices yet</li></ul>
-        </aside>
+        </div>
 
         <div id="packets">
           <div class="packets-bar">
             <span id="packets-label">Recent packets</span>
             <span class="spacer"></span>
-            <button id="cols-btn" class="ghost mini">⚙ Columns</button>
+            <button id="cols-btn" class="ghost mini" type="button"><span data-icon="columns"></span>Columns</button>
           </div>
           <div class="packets-scroll">
             <table>
               <thead id="packet-head"></thead>
-              <tbody id="packet-rows"><tr><td class="empty">Waiting for packets…</td></tr></tbody>
+              <tbody id="packet-rows"><tr><td class="empty">Waiting for packets</td></tr></tbody>
             </table>
           </div>
         </div>
       </div>
-    </section>
+    </div>
 
-    <!-- RIGHT: packet detail ---------------------------------------------- -->
-    <aside id="detail">
-      <h2>Packet detail</h2>
-      <div id="detail-body"><p class="empty">Select a packet to inspect it</p></div>
-    </aside>
+    <!-- the selected packet, in a pane that folds away -->
+    <div id="detail" data-fold="dash-detail" data-fold-side="right" data-fold-title="Packet detail">
+      <div class="pane-head">
+        <span class="pane-title">Packet detail</span>
+        <span class="spacer"></span>
+        <button class="ui-icon-btn" type="button" data-fold-toggle></button>
+      </div>
+      <div id="detail-body"><p class="empty">No packet selected</p></div>
+    </div>
   </main>
   </div>
 

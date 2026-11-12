@@ -7,15 +7,15 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="imu">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
       <h1>IMU</h1>
       <span class="tag">6-axis samples kept by listeners with Store on</span>
     </header>
 
-    <!-- one row of filters above everything it scopes: device, range, follow -->
-    <div id="imu-bar">
+    <!-- one row of filters above everything it scopes: device, range, layout, follow -->
+    <div id="imu-bar" class="ui-strip">
       <label class="imu-fld">Device
         <select id="imu-device"></select>
       </label>
@@ -32,42 +32,42 @@
           <option value="0">All</option>
         </select>
       </label>
-      <span class="tcp-seg" id="imu-layout" title="Lanes: one chart per value, each on its own scale · Combined: ax, ay, az and |a| on one chart, pitch, roll and yaw on another">
-        <button class="seg on" data-layout="lanes">Lanes</button><button class="seg" data-layout="combined">Combined</button>
+      <span class="tcp-seg" id="imu-layout" data-tip="Lanes: one chart per value, each on its own scale. Combined: ax, ay, az and |a| on one chart; pitch, roll and yaw on another.">
+        <button class="seg on" type="button" data-layout="lanes">Lanes</button><button class="seg" type="button" data-layout="combined">Combined</button>
       </span>
-      <label class="imu-follow" title="Keep the right edge at the newest sample and redraw every 2 s">
-        <input type="checkbox" id="imu-live" /> Follow live
+      <label class="imu-follow" data-tip="Keep the right edge at the current time and redraw every 2 s. A device that has gone quiet shows as empty space on the right.">
+        <span>Follow live</span><span class="switch"><input type="checkbox" id="imu-live" /><span class="slider"></span></span>
       </label>
-      <button id="imu-unzoom" class="ghost mini" hidden>⟲ Reset zoom</button>
+      <button id="imu-unzoom" class="ghost mini" type="button" hidden><span data-icon="zoom-out"></span>Reset zoom</button>
       <span class="spacer"></span>
       <span id="imu-range-text" class="muted mono"></span>
       <span class="imu-timing-wrap">
-        <button id="imu-timing-btn" class="ghost mini" title="How each sample's time is worked out from its packet">Sample timing ▾</button>
+        <button id="imu-timing-btn" class="ghost mini" type="button" data-tip="How each sample's time is worked out from its packet"><span data-icon="clock"></span>Sample timing</button>
         <div id="imu-timing" class="imu-pop" hidden>
           <div id="imu-timing-now" class="imu-timing-now"></div>
-          <span class="imu-pop-h" title="The device's SET IMUPKT:1,&lt;ignOnSec&gt;,&lt;ignOffSec&gt; — default 1,10,2. A packet's 20 samples are spread over its interval.">IMU packet every</span>
+          <span class="imu-pop-h" data-tip="The device's SET IMUPKT:1,&lt;ignOnSec&gt;,&lt;ignOffSec&gt; — default 1,10,2. A packet's 20 samples are spread over its interval.">IMU packet every</span>
           <div class="imu-pop-pair">
-            <label class="imu-fld">Ignition ON (s)
+            <label class="imu-fld">Ignition on (s)
               <input id="imu-on" type="number" min="2" max="3600" step="1" />
             </label>
-            <label class="imu-fld">Ignition OFF (s)
+            <label class="imu-fld">Ignition off (s)
               <input id="imu-off" type="number" min="2" max="3600" step="1" />
             </label>
           </div>
-          <label class="imu-follow" title="Use the spacing of the packets themselves when there are enough in range; the values above fill in otherwise">
+          <label class="imu-follow" data-tip="Use the spacing of the packets themselves when there are enough in range; the values above fill in otherwise.">
             <input id="imu-measure" type="checkbox" /> Measure from the packets
           </label>
           <label class="imu-fld">Packet time marks
             <select id="imu-anchor">
-              <option value="last">the last sample</option>
-              <option value="first">the first sample</option>
+              <option value="last">The last sample</option>
+              <option value="first">The first sample</option>
             </select>
           </label>
           <div id="imu-timing-err" class="relay-err"></div>
-          <button id="imu-timing-save">Save</button>
+          <button id="imu-timing-save" type="button">Save</button>
         </div>
       </span>
-      <button id="imu-csv" class="ghost mini" title="Download what is on screen as CSV">⤓ CSV</button>
+      <button id="imu-csv" class="ghost mini" type="button" title="What is on screen, as CSV"><span data-icon="download"></span>CSV</button>
     </div>
 
     <div id="imu-notice" class="imu-notice" hidden></div>

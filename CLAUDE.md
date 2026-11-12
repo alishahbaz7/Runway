@@ -89,7 +89,12 @@ it. The queue is capped (2 GB, oldest dropped and counted). Rules change while r
 device via `Source.identified()` *before* that record's ACK, because the route decides who ACKs:
 Runway ACKs only devices it does not relay — never ACK on a relayed device's server's behalf.
 The pipeline frees a connection's session/codec on `RawFrame.closed` (a listener runs for weeks
-and devices re-dial from a new source port every time). `store` adds the `STORE_SINKS` —
+and devices re-dial from a new source port every time). A cellular device that loses its data
+session never closes the old connection, so the listener closes dead ones itself
+(`close_dead`, every 15 s): an older connection of a device that has dialled in again once it is
+quiet for 30 s, any connection silent for `idle_timeout` (10 min), plus TCP keepalive. A link
+whose server dropped it with nothing queued waits (`idle`) until the device sends — every dial
+opens with the device's login, so never dial just to stay connected. `store` adds the `STORE_SINKS` —
 `telemetry_store` (`data/telemetry.db`, separate from `runway.db`; what the IMU page reads) and
 `archive_store` (`storage/archive.py`: the packets exactly as received, one gzipped file per
 device per day — the long-term record and the source for *Replay to platform*; decode from it
@@ -131,3 +136,22 @@ wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static
   also requires the CHANGELOG's newest section and the `v<x.y.z>` branch name to match.
 - **Tests build packets with the real crc helpers** rather than hardcoding captures, so codec tests
   validate framing + field parsing end-to-end. New codecs should ship sample-based tests the same way.
+- **Usage reporting and self-update** (the `app-control` / `app-updates` skills, as in BluePulse).
+  `runway/install.py` is the one place that knows how this copy runs: `CHANNEL` (release = frozen),
+  the launcher layout (`<install>\Runway.exe`, `versions\Runway-v<x>\`, `data\` in the install root —
+  `db.DATA_DIR` follows it). `runway/usage.py` + `usage_client.py` (the skill's client, unmodified)
+  report to the shared Supabase server — counts only, never IMEIs/packets/endpoints/keys; add a
+  counter with `usage.count("camelCaseName")`. `runway/update/` checks the GitHub releases of this (public)
+  repo (`config.py`), installs beside, restarts through the launcher (`--wait-port`, a marker in
+  `data/update.json`). Both are off in a run from source unless pointed at a test server
+  (`RUNWAY_USAGE_URL`, `RUNWAY_UPDATE_MANIFEST_URL`). Page side: `web/appctl.js`, loaded by the
+  shell. Packaging and publishing: `packaging/README.md`.
+- **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse is the
+  bar). `shell.js` builds the rail + top bar around each page's `#content` and exposes
+  `window.RunwayUI` — the one icon map (`icons`, `icon()`, `<span data-icon>` painted on load;
+  a `<template>`'s clones need `paint()`), `setLabel` (icon + word), `foldable` (side panes,
+  `data-fold`), `confirm` / `prompt` (never the browser's), and 5 s hold-tips (`data-tip`).
+  `style.css` holds the tokens (`--dim --frame --accent-soft`, the `--*-ink` tones) and the kit;
+  `ota.css` only Device OTA's own parts. Sentence case, no emoji on controls, no rule on a bare
+  `main`/`aside`/`section`/`header`/`nav` — `tests/test_ui.py` fails otherwise. Verify UI changes
+  driven and populated in headless Edge, never from an empty page.

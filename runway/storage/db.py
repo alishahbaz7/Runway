@@ -20,19 +20,17 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import sys
 import threading
 import time
 from typing import Any, Optional
 
-# Writable state lives under data/ (data/runway.db, data/uploads, data/logs).
-# When frozen (PyInstaller .exe) the source tree is a read-only temp extraction, so keep
-# data next to the executable instead; otherwise use the repo root. RUNWAY_DATA_DIR
-# overrides everything (tests point it at a temp dir; ops can relocate state).
-if getattr(sys, "frozen", False):
-    _BASE_DIR = os.path.dirname(sys.executable)
-else:
-    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Writable state lives under data/ (data/runway.db, data/uploads, data/logs). A release installed
+# by the launcher keeps it in the install folder, shared by every version; a copy unzipped by hand
+# keeps it beside the program; a run from source uses the repo root (runway/install.py).
+# RUNWAY_DATA_DIR overrides everything (tests point it at a temp dir; ops can relocate state).
+from .. import install as _install
+
+_BASE_DIR = _install.base_dir()
 DATA_DIR = os.environ.get("RUNWAY_DATA_DIR") or os.path.join(_BASE_DIR, "data")
 DEFAULT_DB_PATH = os.path.join(DATA_DIR, "runway.db")
 

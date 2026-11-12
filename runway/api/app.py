@@ -51,6 +51,9 @@ from ..qc import report as qc_report_builder
 from ..qc.session import UNKNOWN_DEVICE_IDS, QcCaptureSink
 from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, packet_log, store
+from .. import usage as usage_mod
+from ..usage import count as usage_count, page_of
+from . import appctl
 
 log = logging.getLogger("runway.api")
 
@@ -254,33 +257,49 @@ async def lifespan(_: FastAPI):
     # this session (Parser ingest or live feeds) — we do NOT replay the persisted registry
     # into the live store, so a restart is a clean slate.
     log.info("Runway API ready (codecs: %s) — live view starts empty", sorted(registry.CODECS))
+    # usage reporting and the update check — both in the background, release builds only
+    appctl.start(running_listeners=_running_listeners)
     yield
     housekeeping.cancel()
     for task in [*_tasks.values(), *_replay_tasks.values()]:
         task.cancel()
+    appctl.stop()
 
 
 app = FastAPI(title="Runway", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+app.include_router(appctl.router)
+
+
+def _running_listeners() -> int:
+    """Listeners and QC sessions running now — an update's restart restarts each of them."""
+    return sum(1 for jid in _tasks if _jobs.get(jid, {}).get("kind") in ("listen", "qc"))
 
 
 @app.middleware("http")
 async def _revalidate_static(request, call_next):
     """Force the browser to revalidate static assets so UI edits show on a normal reload
-    (no more stale cached HTML/JS/CSS). API/WS responses are left untouched."""
+    (no more stale cached HTML/JS/CSS). API/WS responses are left untouched. A page opened is
+    counted for usage reporting (by its name; never what is on it)."""
     response = await call_next(request)
     path = request.url.path
     if not path.startswith("/api") and not path.startswith("/ws"):
         response.headers["Cache-Control"] = "no-cache"
+        if request.method == "GET" and response.status_code < 400:
+            page = page_of(path)
+            if page:
+                usage_mod.usage.page(page)
     return response
 
 
 @app.exception_handler(Exception)
 async def _log_unhandled(request, exc):
-    """Last-resort handler: log the full traceback to runway.log, return a clean 500."""
+    """Last-resort handler: log the full traceback to runway.log, count it for usage reporting,
+    return a clean 500."""
     log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    usage_mod.usage.record_error(exc)
     return JSONResponse(status_code=500,
                         content={"ok": False, "error": "internal error — see Diagnostics → Logs"})
 
@@ -573,6 +592,8 @@ def _job_view(jid: str) -> dict:
             {"peer": p, "records": per.get(p, {}).get("records", 0),
              "bytes": per.get(p, {}).get("bytes", 0), "first": per.get(p, {}).get("first", 0),
              "last": per.get(p, {}).get("last", 0),
+             "device_id": per.get(p, {}).get("device_id", ""),
+             "protocol": per.get(p, {}).get("protocol", ""),
              "connected": p in connected, "relay": links.get(p)}
             for p in sorted(set(per) | connected) if p and p != "?"
         ]
@@ -795,6 +816,7 @@ async def parse(body: ParseBody):
     raw = _input_bytes(body.hex)
     if not raw:
         raise HTTPException(400, "no bytes to parse")
+    usage_count("parserDecodes")
     transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
     name, walk = _explain_walk(raw, transport, body.protocol, _looks_hex(body.hex),
                                body.signature)
@@ -820,6 +842,7 @@ async def parse_stream(body: ParseBody):
     raw = _input_bytes(body.hex)
     if not raw:
         raise HTTPException(400, "no bytes to parse")
+    usage_count("parserDecodes")
     transport = body.transport if body.transport in ("tcp", "udp") else "tcp"
     protocol, walk = _explain_walk(raw, transport, body.protocol, _looks_hex(body.hex),
                                    body.signature)
@@ -1066,6 +1089,7 @@ async def archive_replay(body: ArchiveReplayBody):
     from ..sources.tcp_server import parse_hostport
     from ..storage.archive import archive
 
+    usage_count("replaysStarted")
     try:
         host, port = parse_hostport(body.target)
     except ValueError as exc:
@@ -1730,6 +1754,7 @@ async def listen(body: ListenBody):
     registry.load_plugins()
     if body.codec != "auto" and body.codec not in registry.CODECS:
         raise HTTPException(400, f"unknown codec '{body.codec}'")
+    usage_count("listenersStarted")
     relay = _check_relay(body)
 
     jid = _new_job("listen", codec=body.codec, host=body.host, port=body.port,
@@ -2221,6 +2246,7 @@ def _qc_spawn(qc_id: int, host: str, port: int, codec: str, initial_count: int =
 @app.post("/api/qc/start")
 async def qc_start(body: QcStartBody):
     registry.load_plugins()
+    usage_count("qcSessionsStarted")
     codec = body.protocol if body.protocol_mode == "manual" else "auto"
     if body.protocol_mode == "manual" and codec not in registry.CODECS:
         raise HTTPException(400, f"unknown codec '{codec}'")
@@ -2453,6 +2479,7 @@ async def qc_export(qc_id: int, fmt: str = "xlsx", devices: str = ""):
     """
     if fmt not in ("xlsx", "csv"):
         raise HTTPException(400, "fmt must be xlsx or csv")
+    usage_count("qcReportsExported")
     view = _qc_view(qc_id)
     all_devs = view.get("devices") or []
     if not all_devs:
@@ -2624,6 +2651,239 @@ async def ws(socket: WebSocket):
         pass
     finally:
         hub.unsubscribe(q)
+
+
+# --------------------------------------------------------------------------- #
+# InTouch OTA — Runway acts as a device against the MMI OTA cloud
+# --------------------------------------------------------------------------- #
+from ..ota import ENVIRONMENTS as OTA_ENVIRONMENTS   # noqa: E402
+from ..ota import DeviceKeys, OtaSession, protocol as ota_protocol   # noqa: E402
+
+OTA_KEY = "ota_v1"       # one settings blob: selected env, custom URL, per-env device keys
+
+
+def _ota_state() -> dict:
+    return db.get_setting(OTA_KEY, {}) or {}
+
+
+OTA_ENV_NAMES = ("dev", "prod", "custom")
+
+
+def _ota_base_url(env: str, dk: Optional[DeviceKeys] = None) -> str:
+    """The endpoint a profile talks to: the preset for dev/prod; for custom, the profile's own
+    URL (falling back to the last custom URL saved, for profiles made before they carried one)."""
+    if env == "custom":
+        own = (dk.endpoint if dk else "").strip()
+        return own or (_ota_state().get("custom_url") or "").strip()
+    return OTA_ENVIRONMENTS.get(env, "")
+
+
+def _ota_load_device(env: str, imei: str) -> DeviceKeys:
+    d = ((_ota_state().get("devices") or {}).get(env) or {}).get(imei)
+    return DeviceKeys.from_dict(d) if d else DeviceKeys(imei=imei)
+
+
+def _ota_store_device(env: str, dk: DeviceKeys) -> None:
+    st = _ota_state()
+    st.setdefault("devices", {}).setdefault(env, {})[dk.imei] = dk.to_dict()
+    db.set_setting(OTA_KEY, st)
+
+
+def _ota_device_summary(env: str, imei: str, dk: DeviceKeys) -> dict:
+    return {
+        "env": env, "imei": imei,
+        "name": dk.name,
+        "endpoint": _ota_base_url(env, dk),
+        "static_count": len(dk.static_keys),
+        "has_comm": dk.has_comm_keys(),
+        "comm_count": len(dk.comm_map),
+        "expire_ts": dk.expire_ts,
+        "expired": dk.is_expired() if dk.has_comm_keys() else None,
+        "fetched_ms": dk.fetched_ms,
+    }
+
+
+@app.get("/api/ota/config")
+async def ota_config():
+    """Environment presets, the saved custom URL, and the message-type / body catalogs."""
+    st = _ota_state()
+    return {
+        "environments": OTA_ENVIRONMENTS,
+        "custom_url": st.get("custom_url", ""),
+        "selected_env": st.get("selected_env", "dev"),
+        "message_types": ota_protocol.MESSAGE_TYPES,
+        "body_templates": ota_protocol.BODY_TEMPLATES,
+    }
+
+
+@app.put("/api/ota/config")
+async def ota_set_config(body: dict):
+    st = _ota_state()
+    if "selected_env" in body:
+        st["selected_env"] = str(body["selected_env"])
+    if "custom_url" in body:
+        st["custom_url"] = str(body["custom_url"] or "").strip()
+    db.set_setting(OTA_KEY, st)
+    return {"saved": True, "selected_env": st.get("selected_env"), "custom_url": st.get("custom_url", "")}
+
+
+@app.get("/api/ota/devices")
+async def ota_devices(env: str = "dev"):
+    devs = (_ota_state().get("devices") or {}).get(env) or {}
+    return {"env": env,
+            "devices": [_ota_device_summary(env, imei, DeviceKeys.from_dict(d))
+                        for imei, d in sorted(devs.items())]}
+
+
+@app.get("/api/ota/profiles")
+async def ota_profiles():
+    """Every saved device profile, across environments — what a new tab chooses from."""
+    out = []
+    for env, devs in sorted(((_ota_state().get("devices") or {}).items())):
+        for imei, d in sorted((devs or {}).items()):
+            out.append(_ota_device_summary(env, imei, DeviceKeys.from_dict(d)))
+    return {"profiles": out}
+
+
+@app.get("/api/ota/devices/{imei}")
+async def ota_device(imei: str, env: str = "dev"):
+    dk = _ota_load_device(env, imei)
+    out = dk.to_dict()
+    out["summary"] = _ota_device_summary(env, imei, dk)
+    return out
+
+
+@app.put("/api/ota/devices/{imei}")
+async def ota_save_device(imei: str, body: dict):
+    """Create or update a profile. Its comm keys (if downloaded) are kept."""
+    env = str(body.get("env", "dev"))
+    if env not in OTA_ENV_NAMES:
+        raise HTTPException(400, f"environment must be one of {', '.join(OTA_ENV_NAMES)}")
+    imei = imei.strip()
+    if not imei:
+        raise HTTPException(400, "IMEI is required")
+    statics = [str(k).strip() for k in (body.get("static_keys") or []) if str(k).strip()]
+    for k in statics:
+        try:
+            bytes.fromhex(k)
+        except ValueError:
+            raise HTTPException(400, f"static key is not hex: {k!r}")
+        if len(k) != 32:
+            raise HTTPException(400, f"static key must be 16 bytes (32 hex chars): {k!r}")
+    dk = _ota_load_device(env, imei)
+    dk.static_keys = statics
+    if "name" in body:
+        dk.name = str(body.get("name") or "").strip()
+    if "endpoint" in body:
+        dk.endpoint = str(body.get("endpoint") or "").strip() if env == "custom" else ""
+    _ota_store_device(env, dk)
+    return {"saved": True, "summary": _ota_device_summary(env, imei, dk)}
+
+
+@app.delete("/api/ota/devices/{imei}")
+async def ota_delete_device(imei: str, env: str = "dev"):
+    st = _ota_state()
+    ((st.get("devices") or {}).get(env) or {}).pop(imei, None)
+    db.set_setting(OTA_KEY, st)
+    return {"deleted": True}
+
+
+def _ota_resolve_key(dk: DeviceKeys, source: str, code: int) -> str:
+    try:
+        return dk.key_for(source, code)
+    except KeyError as exc:
+        hint = ("save the device's 3 static keys first"
+                if source == "static" else "download comm keys first (send a type 1)")
+        raise HTTPException(400, f"{exc} — {hint}")
+
+
+@app.post("/api/ota/encode")
+async def ota_encode(body: dict):
+    """Pane 1 -> pane 2: encrypt a readable body and frame it (no network)."""
+    env = str(body.get("env", "dev"))
+    imei = str(body.get("imei", "")).strip()
+    mtype = int(body.get("message_type", 3))
+    code = int(body.get("key_code", 1))
+    readable = body.get("readable")
+    if readable is None:
+        raise HTTPException(400, "readable body is required")
+    if not isinstance(readable, str):
+        readable = json.dumps(readable)
+    source = str(body.get("key_source") or ota_protocol.key_source(mtype))
+    dk = _ota_load_device(env, imei)
+    key_hex = _ota_resolve_key(dk, source, code)
+    s = ota_protocol.build_sentence(mtype, imei, code, readable, key_hex)
+    return {"encrypted_request": s.render(), "data_body": s.data_body,
+            "checksum": s.check_sum, "key_source": source, "key_code": code}
+
+
+@app.post("/api/ota/decode")
+async def ota_decode(body: dict):
+    """Pane 3 -> pane 4: decrypt a sentence (or a raw dataBody) back to readable text."""
+    env = str(body.get("env", "dev"))
+    imei = str(body.get("imei", "")).strip()
+    dk = _ota_load_device(env, imei)
+    text = str(body.get("sentence") or "").strip()
+    try:
+        if text.startswith("$MMI"):
+            s = ota_protocol.parse_sentence(text)
+            mtype, code = s.message_type, s.key_code
+            data_body, checksum_ok = s.data_body, s.checksum_ok
+        else:
+            data_body = str(body.get("data_body") or text)
+            mtype = int(body.get("message_type", 1))
+            code = int(body.get("key_code", 1))
+            checksum_ok = None
+        source = str(body.get("key_source") or ota_protocol.key_source(mtype))
+        key_hex = _ota_resolve_key(dk, source, code)
+        decrypted = ota_protocol.crypto.decrypt_text(key_hex, data_body)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"decrypted": decrypted, "message_type": mtype, "key_code": code,
+            "key_source": source, "checksum_ok": checksum_ok}
+
+
+@app.post("/api/ota/send")
+async def ota_send(body: dict):
+    """Live round trip: build -> POST to the OTA cloud -> decrypt, auto-downloading keys.
+
+    Returns the full chain of hops (each is the four panes), persisting any new comm keys.
+    """
+    usage_count("otaExchanges")
+    env = str(body.get("env", "dev"))
+    imei = str(body.get("imei", "")).strip()
+    mtype = int(body.get("message_type", 3))
+    code = int(body.get("key_code", 1))
+    auto_keys = bool(body.get("auto_keys", True))
+    if not imei:
+        raise HTTPException(400, "imei is required")
+
+    dk = _ota_load_device(env, imei)
+    base_url = _ota_base_url(env, dk)
+    if not base_url:
+        raise HTTPException(400, "this profile has no endpoint — edit it and enter the URL")
+    if ota_protocol.key_source(mtype) == "static" and not dk.static_keys:
+        raise HTTPException(400, "save the device's 3 static keys first")
+
+    session = OtaSession(base_url, dk)
+    try:
+        if mtype in (1, 2):
+            chain = [await session.download_keys(message_type=mtype, key_code=code)]
+        else:
+            readable = body.get("readable")
+            if isinstance(readable, (dict, list)):
+                readable = json.dumps(readable)
+            elif readable is None:
+                readable = json.dumps({"ReqVersion": "1", "imei": imei})
+            chain = await session.send(mtype, readable, key_code=code, auto_keys=auto_keys)
+    except Exception as exc:                       # pragma: no cover - defensive
+        raise HTTPException(502, f"OTA exchange failed: {exc}")
+
+    _ota_store_device(env, dk)                     # persist any freshly downloaded comm keys
+    return {"chain": [tx.to_dict() for tx in chain],
+            "summary": _ota_device_summary(env, imei, dk)}
 
 
 # Dashboard (mounted last so /api and /ws win). html=True serves index.html at /.

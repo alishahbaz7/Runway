@@ -131,14 +131,20 @@
         if (r.latitude == null || r.longitude == null) return;
         if (r.latitude === 0 && r.longitude === 0) return;
         const ll = [r.latitude, r.longitude];
-        pts.push(ll);
+        pts.push({ ll, t: Date.parse(r.timestamp), pos });
         const m = L.circleMarker(ll, { radius: 5, color: "#3fb6ff", fillColor: "#3fb6ff", fillOpacity: 0.9 })
           .addTo(map).bindTooltip(`#${pos + 1} · ${fmtTs(r.timestamp)}`);
         m.on("click", () => selectRecord(idx));
         state.markers.push(m);
       });
-      if (pts.length > 1) state.trail = L.polyline(pts, { color: "#00d18f", weight: 2, opacity: 0.6 }).addTo(map);
-      if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 14 });
+      // The trail joins points in device time whatever order the table shows: in arrival order a
+      // device's history packets (sent after an outage, between live ones) drew a fan of lines
+      // back to old positions. A record without a time keeps the time of the one before it.
+      let last = -Infinity;
+      pts.forEach((p) => { if (isNaN(p.t)) p.t = last; else last = p.t; });
+      const path = [...pts].sort((a, b) => a.t - b.t || a.pos - b.pos).map((p) => p.ll);
+      if (path.length > 1) state.trail = L.polyline(path, { color: "#00d18f", weight: 2, opacity: 0.6 }).addTo(map);
+      if (path.length) map.fitBounds(L.latLngBounds(path).pad(0.3), { maxZoom: 14 });
     }
 
     // ---- click-to-highlight: select a field's bytes inside the single input ----
@@ -234,8 +240,8 @@
     }
     function addGroupRow(tbody, text, bad, sub) {
       const tr = el("tr", "group" + (bad ? " crc-bad" : ""));
-      const td = el("td", "", (sub ? "▸ " : "") + text);
-      td.colSpan = 5; td.style.paddingLeft = sub ? "20px" : "9px";
+      const td = el("td", sub ? "group-sub" : "", text);    // a sub-group sits indented under its parent
+      td.colSpan = 5; td.style.paddingLeft = sub ? "24px" : "10px";
       tr.appendChild(td); tbody.appendChild(tr);
     }
     // One grid row per record: each "AVL Record N" group of a Teltonika packet, or — for every
@@ -353,7 +359,7 @@
       });
       if (cols.length > MAX_ROWS) {
         const tr = el("tr");
-        const td = el("td", "empty", `… showing ${MAX_ROWS} of ${cols.length} records — use ⤓ CSV to export all`);
+        const td = el("td", "empty", `${MAX_ROWS} of ${cols.length} records shown · the CSV has all of them`);
         td.colSpan = rows.length + 1;
         tr.appendChild(td); tbody.appendChild(tr);
       }
@@ -371,7 +377,7 @@
       const w = q(".map-wrap");
       if (w.classList.contains("folded")) {
         w.classList.remove("folded");
-        q(".map-fold").textContent = "Hide map ▾";
+        paintMapFold(false);
         setTimeout(() => { map.invalidateSize(); map.panTo(ll); highlightAt(ll); }, 0);
       } else { map.panTo(ll); highlightAt(ll); }
     }
@@ -399,7 +405,7 @@
       const wrap = q(".summary");
       wrap.innerHTML = "";
       const pkts = state.lastPackets || [];
-      if (!pkts.length) { wrap.appendChild(el("p", "empty", "Decode to see a summary")); return; }
+      if (!pkts.length) { wrap.appendChild(el("p", "empty", "No summary yet")); return; }
 
       // Handshakes, GPRS messages, CRC and Priority are Teltonika (codec-id framed) notions;
       // a sentence protocol is summarised by its message types instead.
@@ -519,7 +525,7 @@
           + (data.protocol ? ` · ${data.protocol}` : "")      // which codec read it
           + (k ? ` · ${k} skipped (corrupt)` : "");
         if (data.error) { msg.className = "parse-msg err"; msg.textContent = `${note} · ${data.error}`; }
-        else { msg.className = "parse-msg ok"; msg.textContent = "✓ " + note; }
+        else { msg.className = "parse-msg ok"; msg.textContent = note; }
         // Feed the Dashboard's live store; surface a hint if the endpoint is missing
         // (e.g. a server started before /api/ingest existed).
         fetch("/api/ingest", {
@@ -530,18 +536,18 @@
         }).then((r) => { if (!r.ok) throw new Error(r.status); })
           .catch(() => {
             msg.className = "parse-msg err";
-            msg.textContent += " · dashboard sync failed — restart the server";
+            msg.textContent += " · not sent to the Dashboard (restart the server)";
           });
         return true;
       } catch (e) {
-        msg.className = "parse-msg err"; msg.textContent = "parse failed: " + e.message;
+        msg.className = "parse-msg err"; msg.textContent = "Could not decode: " + e.message;
         return false;
       }
     }
     async function decode() {
       const hex = q(".hexin").value.trim();
       const msg = q(".parse-msg");
-      if (!hex) { msg.className = "parse-msg err"; msg.textContent = "paste some hex first"; return; }
+      if (!hex) { msg.className = "parse-msg err"; msg.textContent = "Paste a packet first"; return; }
       if (await decodeHex(hex)) { state.feeds.push(hex); onChange(); }
     }
 
@@ -568,20 +574,21 @@
     // CSV button → pick which signals to include, then download.
     function exportCsv() {
       const msg = q(".parse-msg");
-      if (!state.lastPackets.length) { msg.className = "parse-msg err"; msg.textContent = "nothing to export"; return; }
+      if (!state.lastPackets.length) { msg.className = "parse-msg err"; msg.textContent = "Nothing to export"; return; }
       const { cols, rows } = buildGrid(state.lastPackets);
-      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "no records to export"; return; }
+      if (!cols.length) { msg.className = "parse-msg err"; msg.textContent = "No records to export"; return; }
       q(".more-panel").classList.remove("open");
 
       const overlay = el("div", "modal-overlay");
       const modal = el("div", "modal");
       const head = el("div", "modal-head");
-      head.append(el("span", "", "Export columns"),
-        Object.assign(el("button", "modal-x", "✕"), { onclick: () => overlay.remove() }));
+      const x = el("button", "modal-x"); x.type = "button"; x.innerHTML = window.RunwayUI.icons.x;
+      x.setAttribute("aria-label", "Close"); x.onclick = () => overlay.remove();
+      head.append(el("span", "", "Export columns"), x);
       const tools = el("div", "export-tools");
       const allBtn = el("button", "ghost mini", "All");
       const noneBtn = el("button", "ghost mini", "None");
-      const search = el("input", "export-search"); search.placeholder = "filter…";
+      const search = el("input", "export-search"); search.placeholder = "Search";
       tools.append(allBtn, noneBtn, search);
       const list = el("div", "export-list");
       const tRow = el("label", "export-row");
@@ -598,7 +605,7 @@
       });
       const foot = el("div", "modal-foot");
       const cancel = el("button", "ghost", "Cancel"); cancel.onclick = () => overlay.remove();
-      const dl = el("button", "", "⤓ Download CSV");
+      const dl = window.RunwayUI.setLabel(el("button", ""), "download", "Download CSV");
       foot.append(cancel, dl);
       modal.append(head, tools, list, foot);
 
@@ -649,7 +656,7 @@
       if (!f) return;
       const reader = new FileReader();
       reader.onload = () => { q(".hexin").value = String(reader.result || ""); closeMore(); decode(); };
-      reader.onerror = () => { const m = q(".parse-msg"); m.className = "parse-msg err"; m.textContent = "could not read file"; };
+      reader.onerror = () => { const m = q(".parse-msg"); m.className = "parse-msg err"; m.textContent = "Could not read the file"; };
       reader.readAsText(f);
       e.target.value = "";
     });
@@ -668,10 +675,14 @@
     [".tz-sign", ".tz-h", ".tz-m"].forEach((s) => q(s).addEventListener("change", () => { rerender(); onChange(); }));
 
     // ---- foldable map ----
+    function paintMapFold(folded) {
+      window.RunwayUI.setLabel(q(".map-fold"), folded ? "chevron-right" : "chevron-down", folded ? "Show map" : "Hide map");
+    }
+    paintMapFold(q(".map-wrap").classList.contains("folded"));
     q(".map-fold").addEventListener("click", () => {
       const w = q(".map-wrap");
       const folded = w.classList.toggle("folded");
-      q(".map-fold").textContent = folded ? "Show map ▸" : "Hide map ▾";
+      paintMapFold(folded);
       if (!folded) setTimeout(() => map.invalidateSize(), 0);
     });
 
@@ -718,14 +729,14 @@
         rerender(); return;
       }
       const name = sel.value;
-      if (!name) { m.className = "parse-msg err"; m.textContent = "pick a signature first"; return; }
+      if (!name) { m.className = "parse-msg err"; m.textContent = "Pick a signature first"; return; }
       try {
         const d = await fetch("/api/signatures/" + encodeURIComponent(name)).then((r) => r.json());
         state.signature = d.content; state.signatureName = name;
         btn.textContent = "Remove"; btn.classList.add("on"); sel.disabled = true;
-        m.className = "parse-msg ok"; m.textContent = "signature applied: " + name;
+        m.className = "parse-msg ok"; m.textContent = "Signature applied: " + name;
         rerender();
-      } catch (e) { m.className = "parse-msg err"; m.textContent = "apply failed: " + e.message; }
+      } catch (e) { m.className = "parse-msg err"; m.textContent = "Could not apply: " + e.message; }
     });
 
     // ---- instance API (for session persistence across page navigation) ----
@@ -813,10 +824,16 @@
 
     const panel = tpl.content.firstElementChild.cloneNode(true);
     panels.appendChild(panel);
+    window.RunwayUI.paint(panel);                      // a template's icons are not in the page yet
+    window.RunwayUI.foldable(panel.querySelector(".parser-right"),
+      { key: "parser-summary", side: "right", title: "Summary" });
 
     const btn = el("div", "tab");
     const label = el("span", "tab-label", name);
-    const close = el("span", "tab-close", "✕");
+    label.title = "Double-click to rename";
+    const close = el("span", "tab-close");
+    close.innerHTML = window.RunwayUI.icons.x;
+    close.title = "Close tab";
     btn.append(label, close);
     tabbar.insertBefore(btn, document.getElementById("tab-add"));
 
@@ -824,10 +841,10 @@
     tab.parser = createParser(panel, id, persist, () => tab.name);
     tabs.push(tab);
 
-    btn.addEventListener("click", (e) => { if (e.target !== close) activate(id); });
-    label.addEventListener("dblclick", () => {
-      const n = prompt("Tab name", tab.name);
-      if (n) { tab.name = n; label.textContent = n; persist(); }
+    btn.addEventListener("click", (e) => { if (!close.contains(e.target)) activate(id); });
+    label.addEventListener("dblclick", async () => {
+      const n = await window.RunwayUI.prompt({ title: "Rename tab", label: "Name", value: tab.name, action: "Rename" });
+      if (n && n.trim()) { tab.name = n.trim(); label.textContent = tab.name; persist(); }
     });
     close.addEventListener("click", () => closeTab(id));
 
@@ -850,9 +867,13 @@
     persist();
   }
 
-  // "+" button to open a new device tab.
-  const addBtn = el("div", "", "+ New device");
+  // the dashed + that opens a new device tab
+  const addBtn = el("button", "");
   addBtn.id = "tab-add";
+  addBtn.type = "button";
+  addBtn.innerHTML = window.RunwayUI.icons.plus;
+  addBtn.title = "New device tab";
+  addBtn.setAttribute("aria-label", "New device tab");
   tabbar.appendChild(addBtn);
   addBtn.addEventListener("click", () => addTab());
 

@@ -46,7 +46,8 @@ class Pipeline:
         self._closed: deque[str] = deque()     # ended connections, oldest first (stats pruning)
         self.records_emitted = 0
         self.bytes_in = 0
-        self.per_peer: dict[str, dict] = {}   # peer -> {records, bytes, first, last} (server lifetime)
+        # peer -> {records, bytes, first, last, device_id, protocol} (server lifetime)
+        self.per_peer: dict[str, dict] = {}
 
     # -- session / codec selection ----------------------------------------- #
     def _session_for(self, frame: RawFrame) -> Session:
@@ -177,6 +178,12 @@ class Pipeline:
                 if pp is not None:
                     pp["records"] += 1
                     pp["last"] = time.time()
+                    # who is on this connection, for the page: its own records of an old
+                    # connection are long gone from its memory
+                    if _known_id(rec.device_id):
+                        pp["device_id"] = rec.device_id
+                    if rec.protocol and (rec.protocol != "generic_hex" or "protocol" not in pp):
+                        pp["protocol"] = rec.protocol
                 for sink in self.sinks:
                     try:
                         await sink.handle(rec)

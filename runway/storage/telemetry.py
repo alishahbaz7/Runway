@@ -81,19 +81,29 @@ AXES = ("ax", "ay", "az", "pitch", "roll", "yaw", "amag")
 # 43,200 rows a device instead of ~26 million samples — and it outlives the samples' retention,
 # so an old day still shows at minute resolution. A packet counts towards the minute of its own
 # time (its samples spread over its interval, 2-10 s, before that).
+# Speed rides along from the same IMU packets (spd_n of them reported one), so a long range has
+# its speed too after the packets' retention.
+_SPEED_COLS = (("spd_n", "INTEGER NOT NULL DEFAULT 0"), ("spd_min", "REAL"), ("spd_max", "REAL"),
+               ("spd_sum", "REAL NOT NULL DEFAULT 0"))
 _MINUTE_DDL = (
     "CREATE TABLE IF NOT EXISTS imu_minute (device_id TEXT NOT NULL, minute INTEGER NOT NULL, "
     "n INTEGER NOT NULL, pk INTEGER NOT NULL, "
-    + ", ".join(f"{a}_min REAL, {a}_max REAL, {a}_sum REAL" for a in AXES)
+    + ", ".join(f"{a}_min REAL, {a}_max REAL, {a}_sum REAL" for a in AXES) + ", "
+    + ", ".join(f"{c} {decl}" for c, decl in _SPEED_COLS)
     + ", PRIMARY KEY (device_id, minute)) WITHOUT ROWID"
 )
 _MINUTE_UPSERT = (
     "INSERT INTO imu_minute (device_id, minute, n, pk, "
     + ", ".join(f"{a}_min, {a}_max, {a}_sum" for a in AXES)
-    + ") VALUES (?, ?, ?, 1, " + ", ".join("?, ?, ?" for _ in AXES) + ") "
+    + ", spd_n, spd_min, spd_max, spd_sum) VALUES (?, ?, ?, 1, " + ", ".join("?, ?, ?" for _ in AXES)
+    + ", ?, ?, ?, ?) "
     "ON CONFLICT(device_id, minute) DO UPDATE SET n = n + excluded.n, pk = pk + 1, "
     + ", ".join(f"{a}_min = MIN({a}_min, excluded.{a}_min), {a}_max = MAX({a}_max, excluded.{a}_max), "
                 f"{a}_sum = {a}_sum + excluded.{a}_sum" for a in AXES)
+    # MIN/MAX of two values is NULL when either is: fall back to whichever is known
+    + ", spd_n = spd_n + excluded.spd_n, spd_sum = spd_sum + excluded.spd_sum, "
+    "spd_min = COALESCE(MIN(spd_min, excluded.spd_min), spd_min, excluded.spd_min), "
+    "spd_max = COALESCE(MAX(spd_max, excluded.spd_max), spd_max, excluded.spd_max)"
 )
 _SUMMARY_UPSERT = (
     "INSERT INTO device_summary (device_id, protocol, packets, imu_samples, first, last) "
@@ -140,6 +150,11 @@ class TelemetryStore:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.executescript(_DDL)
             conn.execute(_MINUTE_DDL)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(imu_minute)")}
+            if "spd_n" not in have:                       # a v1.1.25 database: no speed yet
+                for col, decl in _SPEED_COLS:
+                    conn.execute(f"ALTER TABLE imu_minute ADD COLUMN {col} {decl}")
+                self._backfill_speed(conn)
             self._backfill(conn)
             self._conn = conn
         return self._conn
@@ -158,7 +173,17 @@ class TelemetryStore:
                 "SELECT device_id, CAST(packet_time / 60 AS INTEGER), COUNT(*), COUNT(DISTINCT packet_id), "
                 + ", ".join(f"MIN({a}), MAX({a}), SUM({a})" for a in AXES)
                 + " FROM imu_samples GROUP BY device_id, CAST(packet_time / 60 AS INTEGER)")
+            TelemetryStore._backfill_speed(conn)
         conn.commit()
+
+    @staticmethod
+    def _backfill_speed(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "WITH s AS (SELECT device_id, CAST(event_time / 60 AS INTEGER) AS m, COUNT(speed_kph) AS c, "
+            "MIN(speed_kph) AS lo, MAX(speed_kph) AS hi, COALESCE(SUM(speed_kph), 0) AS sm FROM packets "
+            "WHERE imu_count > 0 GROUP BY device_id, m) "
+            "UPDATE imu_minute SET spd_n = s.c, spd_min = s.lo, spd_max = s.hi, spd_sum = s.sm FROM s "
+            "WHERE imu_minute.device_id = s.device_id AND imu_minute.minute = s.m")
 
     def close(self) -> None:
         with self._lock:
@@ -205,7 +230,9 @@ class TelemetryStore:
                 for i in range(len(AXES)):
                     vals = [r[5 + i] for r in rows]
                     agg += [min(vals), max(vals), sum(vals)]
-                db.execute(_MINUTE_UPSERT, (rec.device_id, int(pt // 60), of_n, *agg))
+                spd = rec.speed_kph
+                db.execute(_MINUTE_UPSERT, (rec.device_id, int(pt // 60), of_n, *agg,
+                                            int(spd is not None), spd, spd, spd or 0.0))
             db.commit()
 
     # -- read ---------------------------------------------------------------- #
@@ -302,7 +329,8 @@ class TelemetryStore:
         with self._lock:
             db = self._db()
             rows = db.execute(
-                f"SELECT CAST((minute * 60 + 30 - :t0) / :w AS INTEGER) AS b, SUM(n), SUM(pk), {agg} "
+                f"SELECT CAST((minute * 60 + 30 - :t0) / :w AS INTEGER) AS b, SUM(n), SUM(pk), {agg}, "
+                "SUM(spd_n), MIN(spd_min), MAX(spd_max), SUM(spd_sum) "
                 "FROM imu_minute WHERE device_id = :dev AND minute BETWEEN :m0 AND :m1 "
                 "GROUP BY b ORDER BY b", args).fetchall()
             peak = db.execute("SELECT minute, amag_max FROM imu_minute WHERE device_id = :dev AND "
@@ -317,9 +345,13 @@ class TelemetryStore:
         series = {a: {"min": [r[3 + 3 * i] for r in rows], "max": [r[4 + 3 * i] for r in rows],
                       "mean": [r[5 + 3 * i] / r[1] if r[1] else None for r in rows]}
                   for i, a in enumerate(AXES)}
-        return {"device_id": device_id, "start": start, "end": end, "mode": "minutes",
+        times = [start + (r[0] + 0.5) * width for r in rows]
+        spd = [(t, r[-3], r[-2], r[-1] / r[-4]) for t, r in zip(times, rows) if r[-4]]
+        speed = {"t": [x[0] for x in spd], "min": [x[1] for x in spd], "max": [x[2] for x in spd],
+                 "mean": [x[3] for x in spd], "w": width}
+        return {"device_id": device_id, "start": start, "end": end, "mode": "minutes", "speed": speed,
                 "timing": {"anchor": anchor, **used}, "samples": sum(r[1] for r in rows),
-                "t": [start + (r[0] + 0.5) * width for r in rows], "g": [width] * len(rows), "w": width,
+                "t": times, "g": [width] * len(rows), "w": width,
                 "series": series, "packets": pk[0], "imu_packets": sum(r[2] for r in rows),
                 "history_packets": pk[1] or 0, "events": [], "gaps": [], "missing_frames": None,
                 "peak": {"t": peak[0] * 60 + 30, "amag": peak[1]} if peak else None,
@@ -366,10 +398,26 @@ class TelemetryStore:
                 "AND event_time BETWEEN :t0 AND :t1 ORDER BY event_time", args).fetchall()
         return {"device_id": device_id, "start": start, "end": end, "mode": mode,
                 "timing": {"anchor": anchor, **used}, "samples": total, "t": times, "g": gaps, "w": width,
-                "series": series, **_packet_view(pkts),
+                "series": series, **_packet_view(pkts), "speed": _speed_view(pkts, start, end, points),
                 "peak": {"t": peak[0], "amag": peak[1]} if peak else None,
                 "extremes": {"pitch_abs": ext[0], "roll_abs": ext[1], "yaw_abs": ext[2]}
                 if ext and ext[0] is not None else None}
+
+
+def _speed_view(pkts: list[tuple], start: float, end: float, points: int) -> dict[str, Any]:
+    """Speed over the range from every packet that reports it (IMU and NR alike): each packet's
+    own value when they fit in ``points``, else min / max / mean per bucket — the same buckets
+    as the samples, so the two line up."""
+    pts = [(p[0], p[4]) for p in pkts if p[4] is not None]
+    if len(pts) <= points:
+        return {"t": [t for t, _ in pts], "mean": [v for _, v in pts], "w": None}
+    width = (end - start) / points
+    acc: dict[int, list[float]] = {}
+    for t, v in pts:
+        acc.setdefault(int((t - start) // width), []).append(v)
+    keys = sorted(acc)
+    return {"t": [start + (b + 0.5) * width for b in keys], "mean": [sum(acc[b]) / len(acc[b]) for b in keys],
+            "min": [min(acc[b]) for b in keys], "max": [max(acc[b]) for b in keys], "w": width}
 
 
 def _packet_view(pkts: list[tuple]) -> dict[str, Any]:

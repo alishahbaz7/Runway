@@ -7,37 +7,39 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="archive">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
       <h1>Archive</h1>
-      <span class="tag">Every stored packet, one file per device per day</span>
+      <span class="tag">Every stored packet, one file per device per day — download it, or replay it to a platform</span>
     </header>
 
-    <div id="arch-bar">
+    <div id="arch-bar" class="ui-strip">
       <label class="imu-fld">Device
         <select id="arch-device"><option value="">All devices</option></select>
       </label>
       <span class="spacer"></span>
       <span id="arch-total" class="muted"></span>
-      <button id="arch-refresh" class="ghost mini">⟳ Refresh</button>
+      <button id="arch-refresh" class="ghost" type="button"><span data-icon="refresh"></span>Refresh</button>
     </div>
 
-    <section class="arch-card">
-      <h2 class="arch-h">Storage <span id="arch-free" class="muted"></span></h2>
-      <table class="arch-table" id="arch-store"></table>
-    </section>
+    <div id="arch-scroll">
+      <div class="arch-card">
+        <h2 class="arch-h">Storage <span id="arch-free" class="muted"></span></h2>
+        <table class="arch-table" id="arch-store"></table>
+      </div>
 
-    <section id="arch-replays-wrap" class="arch-card" hidden>
-      <h2 class="arch-h">Replays <span id="arch-replays-count" class="muted"></span></h2>
-      <table class="arch-table" id="arch-replays"></table>
-    </section>
+      <div id="arch-replays-wrap" class="arch-card" hidden>
+        <h2 class="arch-h">Replays <span id="arch-replays-count" class="muted"></span></h2>
+        <table class="arch-table" id="arch-replays"></table>
+      </div>
 
-    <section class="arch-card">
-      <h2 class="arch-h">Days <span id="arch-days-count" class="muted"></span></h2>
-      <table class="arch-table" id="arch-days"></table>
-      <p id="arch-empty" class="empty" hidden></p>
-    </section>
+      <div class="arch-card">
+        <h2 class="arch-h">Days <span id="arch-days-count" class="muted"></span></h2>
+        <table class="arch-table" id="arch-days"></table>
+        <p id="arch-empty" class="empty" hidden></p>
+      </div>
+    </div>
   </div>
 
   <script src="shell.js"></script>

@@ -21,12 +21,21 @@ Rules change while the listener runs (:meth:`TcpServerSource.set_routes`). A new
 held until the pipeline names its device (:meth:`identified`, normally its login) so its own
 rule applies from the first byte; a device moved to another server is delivered there from then
 on, its login first.
+
+**Dead connections are closed.** A cellular device that loses its data session re-dials from a
+new address and never closes the old connection — no FIN arrives, and nothing is ever written to
+it, so neither side notices. Seen live: one device left 60 such connections open in 40 minutes,
+the newest of them keeping its relay link (and the platform's view of it) alive for hours. So a
+connection is closed when its device has dialled in again and it has gone quiet
+(``REPLACED_AFTER``), when it has sent nothing for ``idle_timeout``, or when the OS's keepalive
+probes go unanswered (``KEEPALIVE``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 from typing import AsyncIterator, Awaitable, Callable, Optional
 
@@ -84,7 +93,7 @@ class _Link:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self.finished = False
-        self.state = "connecting"          # connecting | up | down
+        self.state = "connecting"          # connecting | up | down | idle (server closed it, nothing to send)
         self.error: str | None = None
         self.since = time.time()
         self.bytes_up = self.bytes_down = 0
@@ -167,6 +176,15 @@ class _Link:
                     return
                 self._set("down", self.error or "closed by the server")
                 await asyncio.sleep(self.BACKOFF[0])
+                # Nothing left to send (a platform drops a quiet connection after a minute or
+                # two): dial again when the device sends, not at once. Every dial opens with the
+                # device's login, so dialling at once made a quiet — or vanished — device look
+                # like one logging in every two minutes, for hours.
+                self._wake.clear()
+                await self._refresh()
+                if not self.queued_rows and self._dev is not None:
+                    self._set("idle")
+                    await self._wake.wait()           # bytes pushed, or the device left
         finally:
             self.finished = True
             self._set("down", self.error)
@@ -194,11 +212,14 @@ class _Link:
                 if not batch:
                     if self._dev is None and not inflight:
                         await self._refresh()
-                        if not self.queued_rows:
+                        if not self.queued_rows and self._dev is None:   # none re-attached meanwhile
                             return True
                     self._wake.clear()
                     waiter = asyncio.ensure_future(self._wake.wait())
-                    await asyncio.wait({waiter, down}, timeout=self.GRACE if inflight else 30,
+                    # wake when the oldest in-flight rows ripen, not a whole GRACE later: rows
+                    # still here when the server drops the link are sent again
+                    ripen = self.GRACE - (time.monotonic() - inflight[0][1]) if inflight else 30
+                    await asyncio.wait({waiter, down}, timeout=max(0.05, ripen),
                                        return_when=asyncio.FIRST_COMPLETED)
                     waiter.cancel()
                     continue
@@ -247,6 +268,23 @@ class _Conn:
         self.waiting = False
         self.link: _Link | None = None
         self.timer: asyncio.TimerHandle | None = None
+        self.opened = self.last_rx = time.monotonic()
+
+
+def _keepalive(writer: asyncio.StreamWriter, idle: int, interval: int, count: int) -> None:
+    """Have the OS probe a quiet connection: one whose device vanished without closing it then
+    errors out, while a device that is only quiet answers and stays. Best effort — the idle
+    timeout closes it anyway."""
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for opt, value in (("TCP_KEEPIDLE", idle), ("TCP_KEEPINTVL", interval), ("TCP_KEEPCNT", count)):
+            if hasattr(socket, opt):
+                sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), value)
+    except OSError:
+        log.debug("keepalive not set on %s", writer.get_extra_info("peername"))
 
 
 @register_source
@@ -258,15 +296,23 @@ class TcpServerSource(Source):
     name = "tcp_server"
     IDENTIFY_WAIT = 3.0                    # longest a new connection is held to learn its device
     HOLD_MAX = 256 * 1024
+    # Closing dead connections (see the module docstring). IDLE_TIMEOUT sits well above a quiet
+    # device's slowest report (ignition-off / sleep heartbeat): a live device is never cut off.
+    IDLE_TIMEOUT = 600.0                   # nothing received for this long -> closed (0 = never)
+    REPLACED_AFTER = 30.0                  # an older connection of a device that dialled in again
+    SWEEP_EVERY = 15.0
+    KEEPALIVE = (120, 10, 3)               # probe after 120 s quiet, every 10 s, 3 unanswered = dead
 
     def __init__(self, host: str = "0.0.0.0", port: int = 5050, read_size: int = 4096,
                  on_event: Optional[EventCb] = None, relay: str = "",
                  routes: Optional[dict] = None, local_ack: Optional[bool] = None,
-                 outbox: Optional[Outbox] = None):
+                 outbox: Optional[Outbox] = None, idle_timeout: Optional[float] = None):
         self.host = host
         self.port = int(port)
         self.read_size = int(read_size)
         self.on_event = on_event
+        self.idle_timeout = self.IDLE_TIMEOUT if idle_timeout is None else float(idle_timeout)
+        self._sweeper: asyncio.Task | None = None
         self._all, self._per = parse_routes(routes if routes is not None else {"all": relay})
         # None = Runway ACKs exactly the devices it does not relay (their server ACKs the rest)
         self.local_ack = local_ack
@@ -381,6 +427,41 @@ class TcpServerSource(Source):
                 self._link_for(device, parse_hostport(target))
 
     # -- connections ------------------------------------------------------------ #
+    async def _sweep(self) -> None:
+        while True:
+            await asyncio.sleep(self.SWEEP_EVERY)
+            try:
+                self.close_dead()
+            except Exception:                     # a listener runs for weeks: keep sweeping
+                log.exception("closing dead connections failed")
+
+    def close_dead(self) -> int:
+        """Close the connections that are dead though still open: an older one of a device that
+        has dialled in again, once it has gone quiet, and any that has sent nothing for
+        ``idle_timeout``. Their read loops then end and clean up as for any disconnect."""
+        now = time.monotonic()
+        newest: dict[str, _Conn] = {}
+        for conn in self._conns.values():
+            if conn.device_id and (conn.device_id not in newest
+                                   or conn.opened > newest[conn.device_id].opened):
+                newest[conn.device_id] = conn
+        closed = 0
+        for conn in list(self._conns.values()):
+            if conn.writer.is_closing():
+                continue
+            quiet = now - conn.last_rx
+            if self.idle_timeout and quiet >= self.idle_timeout:
+                why = f"nothing received for {quiet:.0f} s"
+            elif (conn.device_id and newest[conn.device_id] is not conn
+                  and quiet >= self.REPLACED_AFTER):
+                why = f"device dialled in again from {newest[conn.device_id].peer}"
+            else:
+                continue
+            log.info("closing %s (%s): %s", conn.peer, conn.device_id or "?", why)
+            conn.writer.transport.abort()
+            closed += 1
+        return closed
+
     async def _emit(self, kind: str, peer: str) -> None:
         if self.on_event is None:
             return
@@ -395,12 +476,10 @@ class TcpServerSource(Source):
         peer = f"{peername[0]}:{peername[1]}"
         self._writers[peer] = writer
         conn = self._conns[peer] = _Conn(peer, writer)
-        if self._routing():
-            # Hold the first bytes until the pipeline names the device (its login, normally
-            # milliseconds) so a per-device rule applies from the very first byte.
-            conn.waiting = True
-            conn.timer = asyncio.get_running_loop().call_later(
-                self.IDENTIFY_WAIT, lambda: asyncio.ensure_future(self._settle(conn)))
+        _keepalive(writer, *self.KEEPALIVE)
+        # Hold the first bytes until the pipeline names the device (its login, normally
+        # milliseconds) so a per-device rule applies from the very first byte.
+        conn.waiting = self._routing()
         log.info("device connected: %s", peer)
         await self._emit("up", peer)
         try:
@@ -408,15 +487,25 @@ class TcpServerSource(Source):
                 data = await reader.read(self.read_size)
                 if not data:
                     break
+                conn.last_rx = time.monotonic()
                 if conn.waiting:
+                    # The wait starts with the first bytes: a connection that sends nothing
+                    # gets no link to the server at all.
+                    if conn.timer is None:
+                        conn.timer = asyncio.get_running_loop().call_later(
+                            self.IDENTIFY_WAIT, lambda: asyncio.ensure_future(self._settle(conn)))
                     if len(conn.pending) < self.HOLD_MAX:
                         conn.pending.extend(data)
                 elif conn.link is not None:
+                    if conn.link.finished or conn.link.peer is None:
+                        # its device's newer connection ended and took the link down with it:
+                        # this one is the device's connection now
+                        self._open(conn, (conn.link.host, conn.link.port))
                     conn.link.push(data)            # into the outbox first, untouched
                 await self._queue.put(
                     RawFrame(data=data, transport="tcp", peer=peer, source=self.name)
                 )
-        except (ConnectionError, asyncio.IncompleteReadError):
+        except (OSError, asyncio.IncompleteReadError):    # incl. TimeoutError: keepalive gave up
             pass
         finally:
             self._writers.pop(peer, None)
@@ -438,6 +527,7 @@ class TcpServerSource(Source):
 
     async def frames(self) -> AsyncIterator[RawFrame]:
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
+        self._sweeper = asyncio.create_task(self._sweep())
         log.info("TCP listener up on %s:%d%s%s", self.host, self.port,
                  f" — all devices relayed to {self._all[0]}:{self._all[1]}" if self._all else "",
                  f" — {len(self._per)} device rule(s)" if self._per else "")
@@ -475,6 +565,9 @@ class TcpServerSource(Source):
             return False
 
     async def close(self) -> None:
+        if self._sweeper is not None:
+            self._sweeper.cancel()
+            self._sweeper = None
         if self._server is not None:
             self._server.close()
             # Drop live client connections too. server.close() only stops ACCEPTING new

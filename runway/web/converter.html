@@ -7,27 +7,27 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-page="converter">
-  <!-- #rail is injected here by shell.js -->
+  <!-- the rail and top bar are built around #content by shell.js -->
   <div id="content">
     <header>
       <h1>Converter</h1>
-      <span class="tag">Upload a vehicle signature (CanPlus XML), view/edit signals, export to JSON &amp; DBC</span>
+      <span class="tag">A vehicle signature (CanPlus XML): view and edit its signals, export them as JSON and DBC</span>
     </header>
 
-    <div id="conv-addbar">
-      <input type="file" id="conv-file" accept=".xml,text/xml" style="display:none" />
-      <button id="conv-upload" class="ghost">⤒ Upload XML</button>
+    <div id="conv-addbar" class="ui-strip">
+      <input type="file" id="conv-file" accept=".xml,text/xml" hidden />
+      <button id="conv-upload" class="ghost" type="button"><span data-icon="upload"></span>Upload XML</button>
       <span id="conv-veh" class="conv-veh"></span>
-      <input id="conv-search" placeholder="🔍 filter signals…" />
+      <input id="conv-search" placeholder="Search signals" />
       <span class="spacer"></span>
       <span id="conv-msg"></span>
-      <button id="conv-json" class="ghost" disabled>⤓ Export JSON</button>
-      <button id="conv-dbc" class="ghost" disabled>⤓ Export DBC</button>
+      <button id="conv-json" class="ghost" type="button" disabled><span data-icon="download"></span>Export JSON</button>
+      <button id="conv-dbc" class="ghost" type="button" disabled><span data-icon="download"></span>Export DBC</button>
     </div>
 
     <main id="conv-main">
-      <div id="conv-empty" class="empty conv-empty">Upload a CanPlus <code>.Config.XML</code> to begin.</div>
-      <div id="conv-table-wrap" style="display:none">
+      <div id="conv-empty" class="empty conv-empty">No CanPlus file loaded</div>
+      <div id="conv-table-wrap" hidden>
         <table id="conv-table" class="conv-table">
           <thead>
             <tr>

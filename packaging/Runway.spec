@@ -1,12 +1,12 @@
-# PyInstaller spec — builds a standalone one-file Runway-v<version>.exe.
+# PyInstaller spec — builds Runway-v<version>\Runway-v<version>.exe as a ONE-FOLDER program, the
+# folder build_release.py places under versions\ of the launcher install:
 #
 #   pip install pyinstaller
-#   pyinstaller packaging/Runway.spec --noconfirm       # run from the REPO ROOT
+#   python packaging/build_release.py --rebuild          # the usual way (runs this spec)
+#   pyinstaller packaging/Runway.spec --noconfirm --distpath build/pyinstaller --workpath build/pyinstaller-work
 #
-# Output: dist/Runway-v<version>.exe  (double-click to start the server + open the dashboard).
-# A `data/` folder is created next to the exe on first run (db, logs, repositories).
-#
-# One-file build: passing a.binaries + a.datas into EXE (no COLLECT) makes it one-file.
+# One folder, not one file: it starts without unpacking itself to a temp folder each time, and the
+# process the launcher starts is the server itself — which a restart into a new version relies on.
 
 import sys
 
@@ -56,10 +56,11 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name=RELEASE_NAME,
-    console=True,          # show the startup banner + URL + logs while testing
+    icon="runway.ico",
+    console=True,          # the startup banner, the URL and the logs
     upx=False,
 )
+coll = COLLECT(exe, a.binaries, a.datas, name=RELEASE_NAME, upx=False)

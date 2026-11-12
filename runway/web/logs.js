@@ -19,7 +19,7 @@
       $("log-info").textContent = `${lines.length} lines · ${(d.size / 1024).toFixed(1)} KB`;
       render();
     } catch (e) {
-      $("log-view").className = "empty"; $("log-view").textContent = "failed to load log: " + e.message;
+      $("log-view").className = "empty"; $("log-view").textContent = "Could not load the log: " + e.message;
     }
   }
 
@@ -37,7 +37,7 @@
     view.innerHTML = "";
     if (!show.length) {
       view.className = "empty";
-      view.textContent = lines.length ? "no matching lines" : "log is empty";
+      view.textContent = lines.length ? "No matching lines" : "The log is empty";
       return;
     }
     view.className = "";
@@ -58,8 +58,12 @@
   $("log-source").addEventListener("change", load);
   $("log-download").addEventListener("click", () => { window.location.href = `/api/logs/download?source=${source()}`; });
   $("log-clear").addEventListener("click", async () => {
-    const what = source() === "errors" ? "kept errors & warnings log" : "activity log";
-    if (!confirm(`Clear the ${what}?`)) return;
+    const what = source() === "errors" ? "errors and warnings log" : "activity log";
+    const ok = await window.RunwayUI.confirm({
+      title: `Clear the ${what}?`,
+      text: "Every line in it is deleted from data/runway.log. New lines are written as Runway runs.",
+      action: "Clear", tone: "danger" });
+    if (!ok) return;
     try { await fetch(`/api/logs?source=${source()}`, { method: "DELETE" }); } catch (e) { /* ignore */ }
     load();
   });

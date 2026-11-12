@@ -12,7 +12,7 @@ import sys
 
 from runway.cli import main
 
-SUBCOMMANDS = {"serve", "replay", "listen", "codecs"}
+SUBCOMMANDS = {"serve", "replay", "listen", "codecs", "ota"}
 TOP_LEVEL_FLAGS = {"--version", "-h", "--help"}   # answered by the CLI itself, not `serve`
 
 
