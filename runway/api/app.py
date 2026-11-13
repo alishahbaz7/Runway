@@ -24,6 +24,7 @@ import asyncio
 import io
 import json
 import logging
+import mimetypes
 import re
 import sys
 import threading
@@ -42,6 +43,10 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..core import registry
+
+# The bundled font (web/fonts/*.woff2): Windows' MIME table often lacks it, and the static files
+# would then go out as text/plain.
+mimetypes.add_type("font/woff2", ".woff2")
 from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..convert import log_export

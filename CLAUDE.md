@@ -153,12 +153,13 @@ wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static
   `data/runway.crash.log` + a message box if start-up fails) and show a tray icon (Open · Logs ·
   Quit, Quit asks while listeners run; `RUNWAY_TRAY=1` shows it from source). It stays a server
   underneath on purpose: closing the window must not stop 24x7 relays.
-- **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse is the
-  bar). `shell.js` builds the rail + top bar around each page's `#content` and exposes
+- **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse sets the
+  layout and components, Supabase Studio the look — palette, Inter, density). `shell.js` builds the rail + top bar around each page's `#content` and exposes
   `window.RunwayUI` — the one icon map (`icons`, `icon()`, `<span data-icon>` painted on load;
   a `<template>`'s clones need `paint()`), `setLabel` (icon + word), `foldable` (side panes,
   `data-fold`), `confirm` / `prompt` (never the browser's), and 5 s hold-tips (`data-tip`).
-  `style.css` holds the tokens (`--dim --frame --accent-soft`, the `--*-ink` tones) and the kit;
-  `ota.css` only Device OTA's own parts. Sentence case, no emoji on controls, no rule on a bare
+  `style.css` holds the tokens (`--dim --frame --accent-soft`, `--primary-*` / `--btn-bg` for
+  buttons, `--info` for "a second kind" beside green, the `--*-ink` tones) and the kit; Inter is
+  bundled in `web/fonts/` (never a CDN — Runway runs offline); `ota.css` only Device OTA's own parts. Sentence case, no emoji on controls, no rule on a bare
   `main`/`aside`/`section`/`header`/`nav` — `tests/test_ui.py` fails otherwise. Verify UI changes
   driven and populated in headless Edge, never from an empty page.

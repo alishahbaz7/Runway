@@ -29,7 +29,7 @@
   const ENV_LABEL = { dev: "Dev", prod: "Prod", custom: "Custom" };
   // Red is for a fault only. Prod is the real platform (accent), Dev the test one (amber, the DEV
   // mark used across these apps), Custom neutral.
-  const ENV_TONE = { dev: "warn", prod: "accent", custom: "neutral" };
+  const ENV_TONE = { dev: "warn", prod: "info", custom: "neutral" };
   const TABS_KEY = "runway.ota.tabs";
   const PANEL_KEY = "runway.ota.panel";
   const HISTORY_MAX = 30;

@@ -19,19 +19,19 @@ body[data-page="ota"] input.mono, body[data-page="ota"] textarea.mono { font-fam
 body[data-page="ota"] .ota-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   width: auto; height: 34px; margin: 0; padding: 0 13px; box-sizing: border-box;
-  border: 1px solid var(--frame); border-radius: 6px; background: transparent; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--btn-bg); color: var(--text);
   font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; cursor: pointer;
 }
 body[data-page="ota"] .ota-btn:hover:not(:disabled) {
-  background: var(--hover); border-color: color-mix(in srgb, var(--frame) 70%, var(--text));
+  background: var(--hover); border-color: color-mix(in srgb, var(--border-strong) 80%, var(--text));
 }
 body[data-page="ota"] .ota-btn:active:not(:disabled) { transform: translateY(1px); }
 body[data-page="ota"] .ota-btn:disabled { opacity: .55; cursor: default; }
 body[data-page="ota"] .ota-btn.primary {
-  background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600;
+  background: var(--primary-bg); border-color: var(--primary-border); color: var(--primary-text); font-weight: 500;
 }
 body[data-page="ota"] .ota-btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover); border-color: var(--accent-hover);
+  background: var(--primary-hover); border-color: var(--accent);
 }
 body[data-page="ota"] .ota-btn.sm { height: 28px; padding: 0 9px; gap: 5px; font-size: 12.5px; }
 body[data-page="ota"] .ota-btn.sm .ui-ico svg { width: 14px; height: 14px; }
@@ -89,6 +89,7 @@ body[data-page="ota"] input::placeholder { color: var(--muted); }
 .ota-pill.warn { --c: var(--warn-ink); }
 .ota-pill.bad { --c: var(--danger-ink); }
 .ota-pill.accent { --c: var(--accent-ink); }
+.ota-pill.info { --c: var(--info-ink); }
 .ota-pill.muted { --c: var(--muted); }
 .ota-count { font-size: 12.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -316,9 +317,7 @@ body[data-page="ota"] .ota-pane textarea::placeholder { color: var(--muted); }
 /* the actions, in the toolbar: the two local steps, a divider, then the round trip */
 .ota-actions { display: flex; align-items: center; gap: 8px; }
 .ota-vrule { width: 1px; height: 22px; margin: 0 2px; background: var(--border); }
-body[data-page="ota"] #ota-send {
-  padding: 0 16px; box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
-}
+body[data-page="ota"] #ota-send { padding: 0 16px; }
 .ota-send-status { font-size: 12.5px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ota-send-status.ok { color: var(--ok); }
 .ota-send-status.bad { color: var(--danger); }

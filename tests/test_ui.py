@@ -134,3 +134,27 @@ def test_stylesheets_balance():
     for p in STYLES:
         css = _text(p)
         assert css.count("{") == css.count("}"), f"{p.name}: unbalanced braces"
+
+
+def test_the_font_ships_with_the_app():
+    """Inter (Supabase's typeface) is bundled, never fetched: Runway runs offline. Every font the
+    stylesheet loads is a file beside it, and its licence goes with it."""
+    css = _text(WEB / "style.css")
+    urls = re.findall(r'@font-face\s*{[^}]*url\("([^"]+)"\)', css)
+    assert urls, "no @font-face"
+    for u in urls:
+        assert not u.startswith(("http:", "https:", "//")), f"{u}: a font from the network"
+        assert (WEB / u).is_file(), f"{u}: missing"
+    assert (WEB / "fonts" / "Inter-LICENSE.txt").is_file()
+
+
+async def test_the_font_is_served_as_a_font():
+    """Windows' MIME table often has no .woff2; the server must not send the font as text/plain."""
+    from httpx import ASGITransport, AsyncClient
+
+    from runway.api.app import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/fonts/InterVariable.woff2")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "font/woff2"

@@ -7,6 +7,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
 ## [1.1.27] — Unreleased
 
 ### Changed
+- **Runway looks like Supabase Studio.** Its colours, type and density now follow Supabase's:
+  the near-black canvas with a breath of green, surfaces one step lighter, hairline borders,
+  soft white text and Supabase's green as the brand (light theme: white surfaces, grey hairlines,
+  near-black text). The font is **Inter**, bundled with Runway so it looks the same offline and on
+  a PC without it. The main button is a deep green with a green edge, the others quiet fills;
+  tables have a quiet header and hairlines instead of stripes; the open page in the sidebar is a
+  raised fill instead of a blue bar. Things that were blue to tell them apart from green
+  (conditional pass, signature sub-signals, hex, test sessions, running jobs, the Prod
+  environment) are now blue-violet. The app and tray icon are green. Headings stay in sentence
+  case — Supabase's capitalised labels were not adopted.
 - **Runway opens like an app.** It used to start a black command window and then a browser tab;
   now it opens in **its own window** (Edge's app mode: no address bar, no tabs, Runway's title and
   icon) and shows itself **by the clock**: left-click opens Runway, right-click has *Open Runway*,

@@ -523,8 +523,8 @@
   (function setFavicon() {
     const mark =
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
-      '<rect width="24" height="24" rx="6" fill="#5ab0f0"/>' +
-      '<g fill="none" stroke="#04121d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect width="24" height="24" rx="6" fill="#3ecf8e"/>' +
+      '<g fill="none" stroke="#0b1a12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 19h6"/><path d="M6.5 15.5 18.5 6"/><path d="M13.5 6h5v5"/></g></svg>';
     let link = document.querySelector('link[rel="icon"]');
     if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
