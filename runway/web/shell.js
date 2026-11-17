@@ -1,16 +1,20 @@
-/* Runway app shell — the frame every page shares, in BluePulse's shape.
+/* Runway app shell — the frame every page shares: BluePulse's shape, Supabase Studio's look.
  *
- *   body ─ #app (row) ─ #rail  (brand + version, then the nav — folds to a 58px icon rail)
- *                     └ #main-col (column) ─ #topbar   (☰ · page title · page controls · chips)
- *                                          ├ #env-warn (server/page mismatch, missing deps)
+ *   body ─ #banner (fixed, full width: logo · Runway · version / Hello, Name / page · controls · chips)
+ *        └ #app (row) ─ #rail  (the nav; a fold button at its foot — folds to a 58px icon rail)
+ *                     └ #main-col (column) ─ #env-warn (server/page mismatch, missing deps)
  *                                          └ #content  (the page)
  *
  * Also the shared UI pieces every page uses, as window.RunwayUI:
  *   icons / icon(name) / paint(root)   one line-icon family (Feather style, currentColor);
  *                                      `<span data-icon="name">` is painted on load
  *   setLabel(button, icon, text)       an icon and a word on a button (no emoji, no text arrows)
- *   foldable(pane, opts)               a side pane that folds to a strip and remembers it
- * and the hold-tip: any element with data-tip="…" shows it after the pointer rests 5 s.
+ *   foldable(pane, opts)               a side pane that folds to a strip and remembers it; dragged
+ *                                      by its inner edge, it is also resized (between a min and a max)
+ *   resizable(target, opts)            any edge dragged to resize, remembered; declaratively with
+ *                                      data-resize="key" data-resize-edge="right|left|top" …
+ * and the hold-tip: any element with data-tip="…" shows it after the pointer rests 5 s. Table
+ * columns are resized by dragging the edge of their header; a double-click on any edge resets it.
  *
  * Two things worth knowing:
  *   - The data-mode chip is AUTOMATIC: it polls /api/health and shows Live (a listener/QC session
@@ -85,17 +89,30 @@
     "columns": svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M15 4v16"/>'),
     "chevron-down": svg('<path d="m6 9 6 6 6-6"/>'),
     "chevron-right": svg('<path d="m9 6 6 6-6 6"/>'),
+    "arrow-left": svg('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
+    "arrow-right": svg('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'),
     "info": svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>'),
     "relay": svg('<path d="M7 17 17 7"/><path d="M8 7h9v9"/>'),
     "store": svg('<ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/>'),
     "clock": svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     "repeat": svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+    "maximize": svg('<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>'),
+    "minimize": svg('<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/>'),
     "zoom-out": svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/>'),
     "clipboard": svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h3"/>'),
     "file": svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>'),
     "map": svg('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2Z"/><path d="M9 4v14"/><path d="M15 6v14"/>'),
     "replay": svg('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="m10.5 9 4.5 3-4.5 3Z"/>'),
     "more": svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'),
+    "analysis": svg('<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="5" rx=".5"/><rect x="12" y="8" width="3" height="9" rx=".5"/><rect x="17" y="5" width="3" height="12" rx=".5"/>'),
+    "gauge": svg('<path d="M12 14l3.5-3.5"/><path d="M3.3 17a9 9 0 1 1 17.4 0"/><circle cx="12" cy="14" r="1.2"/>'),
+    "route": svg('<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H17a3.5 3.5 0 0 0 0-7H7a3.5 3.5 0 0 1 0-7h8.5"/>'),
+    "power": svg('<path d="M13 2 4 14h7l-1 8 9-12h-7Z"/>'),
+    "satellite": svg('<path d="m13.5 6.5 4 4"/><path d="m4.5 15.5 4 4"/><rect x="8" y="8" width="8" height="8" rx="1" transform="rotate(45 12 12)"/><path d="M19 13a6 6 0 0 1-6 6"/><path d="M22 13a9 9 0 0 1-9 9"/>'),
+    "chip": svg('<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
+    "list": svg('<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
+    "direction": svg('<path d="M6 5 19 12 6 19 9.5 12Z" fill="currentColor"/>'),   // a filled arrowhead (map direction)
+    "user": svg('<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.4-3.6 4.2-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/>'),
   };
   const BRAND = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
     'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -127,6 +144,7 @@
       { id: "ota", label: "Device OTA", icon: "ota", href: "ota.html" },   // act as a TCU vs the OTA cloud
     ] },
     { title: "Analysis", items: [
+      { id: "analysis", label: "Log analysis", icon: "analysis", href: "analysis.html" },   // platform reports, judged
       { id: "imu", label: "IMU", icon: "imu", href: "imu.html" },
     ] },
     { title: "Capture", items: [
@@ -155,23 +173,80 @@
   // can reveal it to preview the shape of the app).
   const isSoon = (it) => !it.href && !it.action;
 
-  // Folded rail, remembered across pages. Under 1000px it is always a rail (the toggle hides).
-  const COLLAPSE_KEY = "runway.rail.collapsed";
-  let collapsed = false;
-  try { collapsed = localStorage.getItem(COLLAPSE_KEY) === "1"; } catch (e) { /* ignore */ }
+  // The sidebar's mode, as Supabase's "Sidebar control": Expanded, Collapsed (the icon rail) or
+  // Expand on hover (the icon rail, opening over the page while the pointer is on it). Remembered
+  // across pages. Under 1000px it always behaves as Expand on hover.
+  const RAIL_KEY = "runway.rail.mode";
+  const RAIL_MODES = [
+    { id: "expanded", label: "Expanded" },
+    { id: "collapsed", label: "Collapsed" },
+    { id: "hover", label: "Expand on hover" },
+  ];
+  let railMode = "expanded";
+  try {
+    railMode = localStorage.getItem(RAIL_KEY) ||
+      (localStorage.getItem("runway.rail.collapsed") === "1" ? "collapsed" : "expanded");   // the old switch
+  } catch (e) { /* private mode */ }
+  if (!RAIL_MODES.some((m) => m.id === railMode)) railMode = "expanded";
+  let peek = false;                     // Expand on hover: the pointer is on the rail
   const narrow = window.matchMedia("(max-width: 1000px)");
-  const applyRail = () => document.body.classList.toggle("rail-collapsed", collapsed || narrow.matches);
+  const hoverMode = () => railMode === "hover" || narrow.matches;
+  function applyRail() {
+    const hov = hoverMode();
+    const b = document.body.classList;
+    b.toggle("rail-hover", hov);
+    b.toggle("rail-peek", hov && peek);
+    b.toggle("rail-collapsed", hov ? !peek : railMode === "collapsed");
+  }
   applyRail();
-  narrow.addEventListener("change", applyRail);
+  narrow.addEventListener("change", () => { peek = false; applyRail(); });
 
-  // ---- feature visibility (Settings) ----------------------------------------------------------
+  // ---- which pages this copy shows -----------------------------------------------------------
+  // In order: what the owner switched (the policy from the usage server, /api/features) — off is off
+  // for everyone on this copy; then the person's own choice in Settings; then the page's default:
+  // shown, folded under More, or (IMU) shown once data exists. The last answer is kept, so the
+  // sidebar is right on the first paint and the server's answer only confirms it.
   const FEAT_KEY = "runway.features";
+  const RESOLVED_KEY = "runway.features.resolved";
   let prefs = {};
   try { prefs = JSON.parse(localStorage.getItem(FEAT_KEY) || "{}") || {}; } catch (e) { prefs = {}; }
-  const visible = (it) =>
-    Object.prototype.hasOwnProperty.call(prefs, it.id) ? prefs[it.id] !== false : !isSoon(it);
+  let resolved = {};
+  try { resolved = JSON.parse(localStorage.getItem(RESOLVED_KEY) || "{}") || {}; } catch (e) { resolved = {}; }
+  let featuresKey = null;
+  const hasPref = (it) => Object.prototype.hasOwnProperty.call(prefs, it.id);
+  const ownerOff = (it) => !!resolved[it.id] && resolved[it.id].by === "owner" && resolved[it.id].state === "hidden";
+  const visible = (it) => {
+    if (ownerOff(it)) return false;
+    if (hasPref(it)) return prefs[it.id] !== false;
+    if (resolved[it.id]) return resolved[it.id].state !== "hidden";
+    return !isSoon(it);
+  };
+  const inMore = (it) => !hasPref(it) && !!resolved[it.id] && resolved[it.id].state === "more";
   function savePrefs() {
     try { localStorage.setItem(FEAT_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
+  }
+  function loadFeatures() {
+    return fetch("/api/features").then((r) => r.json()).then((d) => {
+      resolved = d.features || {};
+      featuresKey = d.key || null;
+      try { localStorage.setItem(RESOLVED_KEY, JSON.stringify(resolved)); } catch (e) { /* ignore */ }
+      buildRail();
+      guardPage();
+    }).catch(() => { /* the server is away: the kept answer stands */ });
+  }
+  // a page the owner switched off says so, instead of working half-hidden
+  function guardPage() {
+    const it = SECTIONS.reduce((f, sec) => f || sec.items.find((x) => x.id === page), null);
+    const content = document.getElementById("content");
+    if (!it || !content || !ownerOff(it) || document.getElementById("feature-off")) return;
+    [...content.children].forEach((c) => { c.hidden = true; });
+    const n = document.createElement("div");
+    n.id = "feature-off";
+    n.className = "feature-off";
+    n.innerHTML = '<span class="ui-ico">' + ICONS.lock + "</span>" +
+      '<p class="feature-off-t">' + esc(it.label) + " is switched off on this copy</p>" +
+      '<a class="feature-off-a" href="index.html">Dashboard</a>';
+    content.appendChild(n);
   }
 
   // ---- data mode (auto: live / demo / idle; offline when the API is unreachable) ---------------
@@ -191,65 +266,165 @@
     if (chip) chip.title = offline ? "The Runway server is not answering" : info.tip;
   }
 
-  // ---- the rail: brand + version, then the nav --------------------------------------------------
+  // ---- the rail: the nav, and the fold button at its foot (the brand lives in the banner) -------
   const rail = document.createElement("aside");
   rail.id = "rail";
   rail.innerHTML =
-    '<div class="rail-brand">' +
-      '<span class="rail-logo">' + BRAND + "</span>" +
-      '<span class="rail-brand-txt"><span class="rail-name">Run<b>way</b></span>' +
-      '<span class="rail-version" id="rail-version"></span></span>' +
-    "</div>" +
-    '<div id="rail-nav"></div>';
+    '<div id="rail-nav"></div>' +
+    '<div class="rail-foot"><button class="rail-fold" id="rail-ctl" type="button" aria-haspopup="menu" ' +
+      'title="Sidebar control" aria-label="Sidebar control"><span class="rail-ico">' + ICONS.sidebar + "</span>" +
+      "</button></div>";
   const railNav = rail.querySelector("#rail-nav");
 
+  // Expand on hover: open a moment after the pointer arrives, close a moment after it leaves
+  let peekTimer = 0;
+  rail.addEventListener("pointerenter", (e) => {
+    if (!hoverMode() || e.pointerType === "touch") return;
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { peek = true; applyRail(); }, 120);
+  });
+  rail.addEventListener("pointerleave", () => {
+    clearTimeout(peekTimer);
+    if (!peek || document.getElementById("rail-menu")) return;
+    peekTimer = setTimeout(() => { peek = false; applyRail(); }, 180);
+  });
+
+  // ---- Sidebar control: the menu at the rail's foot -------------------------------------------
+  function setRailMode(id) {
+    railMode = id;
+    peek = false;
+    try { localStorage.setItem(RAIL_KEY, id); } catch (e) { /* ignore */ }
+    applyRail();
+    // maps and canvases re-measure once the rail has finished moving
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 230);
+  }
+  function closeRailMenu() {
+    const m = document.getElementById("rail-menu");
+    if (m) m.remove();
+    document.removeEventListener("pointerdown", railMenuOutside, true);
+    document.removeEventListener("keydown", railMenuKey, true);
+    const ctl = rail.querySelector("#rail-ctl");
+    if (ctl) ctl.setAttribute("aria-expanded", "false");
+    if (peek && !rail.matches(":hover")) { peek = false; applyRail(); }
+  }
+  function railMenuOutside(e) {
+    const m = document.getElementById("rail-menu");
+    if (m && !m.contains(e.target) && !e.target.closest("#rail-ctl")) closeRailMenu();
+  }
+  function railMenuKey(e) {
+    const m = document.getElementById("rail-menu");
+    if (!m) return;
+    if (e.key === "Escape") { e.preventDefault(); closeRailMenu(); rail.querySelector("#rail-ctl").focus(); return; }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = Array.from(m.querySelectorAll(".ui-menu-item"));
+    const i = items.indexOf(document.activeElement);
+    items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  }
+  function openRailMenu() {
+    const ctl = rail.querySelector("#rail-ctl");
+    const m = document.createElement("div");
+    m.id = "rail-menu";
+    m.className = "ui-menu";
+    m.setAttribute("role", "menu");
+    m.setAttribute("aria-label", "Sidebar control");
+    m.innerHTML = '<div class="ui-menu-h">Sidebar control</div>';
+    RAIL_MODES.forEach((mode) => {
+      const it = document.createElement("button");
+      it.type = "button";
+      it.className = "ui-menu-item" + (mode.id === railMode ? " is-on" : "");
+      it.setAttribute("role", "menuitemradio");
+      it.setAttribute("aria-checked", String(mode.id === railMode));
+      it.innerHTML = '<span class="ui-menu-dot" aria-hidden="true"></span>';
+      it.appendChild(document.createTextNode(mode.label));
+      it.addEventListener("click", () => { closeRailMenu(); setRailMode(mode.id); });
+      m.appendChild(it);
+    });
+    document.body.appendChild(m);
+    const r = ctl.getBoundingClientRect();
+    m.style.left = Math.max(8, r.left) + "px";
+    m.style.top = Math.max(8, r.top - m.offsetHeight - 6) + "px";
+    ctl.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", railMenuOutside, true);
+    document.addEventListener("keydown", railMenuKey, true);
+    (m.querySelector(".is-on") || m.querySelector(".ui-menu-item")).focus();
+  }
+  rail.querySelector("#rail-ctl").addEventListener("click", () => {
+    if (document.getElementById("rail-menu")) closeRailMenu(); else openRailMenu();
+  });
+
+  const MORE_KEY = "runway.rail.more";
   function buildRail() {
     railNav.innerHTML = "";
+    const more = [];
+    const item = (sec, it) => {
+      const soon = isSoon(it);
+      const a = document.createElement("a");
+      a.className = "rail-item" + (it.id === page ? " active" : "") + (soon ? " disabled" : "");
+      a.title = sec.title + " · " + it.label;
+      if (it.id === page) a.setAttribute("aria-current", "page");
+      if (it.href && !soon) a.href = it.href;
+      a.innerHTML = '<span class="rail-ico">' + (ICONS[it.icon] || "") + "</span>" +
+        '<span class="rail-label">' + esc(it.label) + "</span>" +
+        (soon ? '<span class="rail-soon" title="Not built yet">Soon</span>' : "");
+      if (it.action === "settings") {
+        a.href = "#";
+        a.addEventListener("click", (e) => { e.preventDefault(); openSettings(); });
+      }
+      return a;
+    };
     SECTIONS.forEach((sec) => {
       const items = sec.items.filter(visible);
-      if (!items.length) return;
+      items.filter(inMore).forEach((it) => more.push([sec, it]));
+      const here = items.filter((it) => !inMore(it));
+      if (!here.length) return;
       const h = document.createElement("div");
       h.className = "rail-section";
       h.innerHTML = '<span class="rail-section-t">' + esc(sec.title) + '</span><span class="rail-section-rule"></span>';
       railNav.appendChild(h);
-      items.forEach((it) => {
-        const soon = isSoon(it);
-        const a = document.createElement("a");
-        a.className = "rail-item" + (it.id === page ? " active" : "") + (soon ? " disabled" : "");
-        a.title = sec.title + " · " + it.label;
-        if (it.id === page) a.setAttribute("aria-current", "page");
-        if (it.href && !soon) a.href = it.href;
-        a.innerHTML = '<span class="rail-ico">' + (ICONS[it.icon] || "") + "</span>" +
-          '<span class="rail-label">' + esc(it.label) + "</span>" +
-          (soon ? '<span class="rail-soon" title="Not built yet">Soon</span>' : "");
-        if (it.action === "settings") {
-          a.href = "#";
-          a.addEventListener("click", (e) => { e.preventDefault(); openSettings(); });
-        }
-        railNav.appendChild(a);
-      });
+      here.forEach((it) => railNav.appendChild(item(sec, it)));
     });
+    // used now and then: folded under More, opened by its heading (and always for the open page)
+    if (more.length) {
+      let open = false;
+      try { open = localStorage.getItem(MORE_KEY) === "1"; } catch (e) { /* ignore */ }
+      if (more.some(([, it]) => it.id === page)) open = true;
+      const h = document.createElement("button");
+      h.type = "button";
+      h.className = "rail-section rail-more" + (open ? " open" : "");
+      h.setAttribute("aria-expanded", String(open));
+      h.innerHTML = '<span class="rail-section-t">More</span><span class="rail-more-ico">' + ICONS["chevron-down"] +
+        '</span><span class="rail-section-rule"></span>';
+      h.title = "More";
+      h.addEventListener("click", () => {
+        try { localStorage.setItem(MORE_KEY, open ? "0" : "1"); } catch (e) { /* ignore */ }
+        buildRail();
+      });
+      railNav.appendChild(h);
+      if (open) more.forEach(([sec, it]) => railNav.appendChild(item(sec, it)));
+    }
   }
   buildRail();
 
-  // ---- the top bar: fold · page title (its description is a hold-tip) · controls · chips ------
+  // ---- the banner: fixed across the top, Supabase's breadcrumb line — the app, the person, the
+  // page — then the page's own controls and the chips. The page's description is the page crumb's
+  // hold-tip; the greeting appears once the person has given their name (appctl.js).
+  const here = SECTIONS.reduce((f, s) => f || s.items.find((it) => it.id === page), null);
   const topbar = document.createElement("div");
-  topbar.id = "topbar";
+  topbar.id = "banner";
   topbar.innerHTML =
-    '<button class="topbar-btn topbar-toggle" type="button" title="Fold the sidebar" aria-label="Fold the sidebar">' + ICONS.sidebar + "</button>" +
-    '<div class="topbar-page" id="topbar-page"></div>' +
-    '<span class="topbar-spacer"></span>' +
+    // the name and its version nested, one above the other — the brand stays as narrow as the name
+    '<a class="bn-brand" href="index.html" title="Dashboard"><span class="bn-logo">' + BRAND + "</span>" +
+      '<span class="bn-id"><span class="bn-name">Runway</span><span class="bn-version" id="app-version"></span></span></a>' +
+    '<span class="bn-sep" aria-hidden="true"></span>' +
+    '<span class="bn-crumb bn-hello" id="banner-hello" hidden>' + icon("user") + '<span id="banner-hello-t"></span></span>' +
+    '<span class="bn-sep" id="banner-hello-sep" aria-hidden="true" hidden></span>' +
+    '<span class="bn-crumb bn-page" id="topbar-page">' + (here ? icon(here.icon) : "") + "</span>" +
+    '<span class="bn-spacer"></span>' +
     '<span class="topbar-ctl" id="topbar-ctl"></span>' +
     '<button class="ui-chip update-chip" id="update-chip" type="button" hidden></button>' +   // appctl.js
     '<span class="ui-chip topbar-status" id="mode-badge"><span class="ui-chip-dot"></span><span id="mode-label">Idle</span></span>' +
     '<button class="topbar-btn" id="theme-btn" type="button"></button>';
-  topbar.querySelector(".topbar-toggle").addEventListener("click", () => {
-    collapsed = !collapsed;
-    applyRail();
-    try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
-    // maps and canvases re-measure once the rail has finished moving
-    setTimeout(() => window.dispatchEvent(new Event("resize")), 230);
-  });
   topbar.querySelector("#theme-btn").addEventListener("click", () => {
     theme = theme === "dark" ? "light" : "dark";
     try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* ignore */ }
@@ -264,6 +439,26 @@
       b.title = theme === "dark" ? "Light theme" : "Dark theme";
       b.setAttribute("aria-label", b.title);
     }
+    paintTitleBar();
+  }
+  // The window's title bar takes the banner's colour, so Runway's own window reads as one piece.
+  // Edge's app window ignores the page's theme-color (kept for a browser that honours it), so the
+  // server colours its own windows through Windows (/api/desktop/titlebar).
+  function paintTitleBar() {
+    const cs = getComputedStyle(document.documentElement);
+    const bg = cs.getPropertyValue("--panel").trim() || "#171918";
+    const fg = cs.getPropertyValue("--text").trim() || "#edefee";
+    let m = document.querySelector('meta[name="theme-color"]');
+    if (!m) {
+      m = document.createElement("meta");
+      m.name = "theme-color";
+      document.head.appendChild(m);
+    }
+    m.content = bg;
+    fetch("/api/desktop/titlebar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ background: bg, text: fg, dark: theme === "dark" }),
+    }).catch(() => { /* not on Windows, or the server is away: the title bar stays as it is */ });
   }
 
   // ---- assemble ---------------------------------------------------------------------------------
@@ -274,14 +469,15 @@
   envWarn.hidden = true;
   const mainCol = document.createElement("div");
   mainCol.id = "main-col";
-  mainCol.append(topbar, envWarn);
+  mainCol.append(envWarn);
   if (content) mainCol.appendChild(content);
   const app = document.createElement("div");
   app.id = "app";
   app.append(rail, mainCol);
-  document.body.prepend(app);
+  document.body.prepend(topbar, app);
   applyMode();
   applyTheme();
+  setTimeout(paintTitleBar, 1500);     // a window just opened may not carry its title yet
 
   // The page's own <header> folds up into the top bar: its <h1> is the title, its .tag the
   // title's hold-tip (a description is never printed — it is help text), and anything else it
@@ -343,6 +539,272 @@
   document.addEventListener("scroll", hideTip, true);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
 
+  // ---- resizing: drag an edge, between a min and a max, remembered (Supabase's panels) -----------
+  // The handle is a thin strip on the target's edge, placed in the target's parent so a pane that
+  // scrolls does not carry it away. Dragging writes a CSS variable on the parent, which the page's
+  // CSS reads (a grid column, a height), or calls opts.apply. A double-click puts the default back;
+  // with the handle focused, the arrow keys move it 16 px. Under 1000px only vertical splits resize
+  // (side panes then lie over the page). The max always leaves `keep` px for the rest of the parent.
+  const sizeKey = (k) => "runway.size." + k;
+  function readSize(k) {
+    try { const v = parseFloat(localStorage.getItem(sizeKey(k))); return isFinite(v) ? v : null; } catch (e) { return null; }
+  }
+  function saveSize(k, v) {
+    if (!k) return;
+    try {
+      if (v == null) localStorage.removeItem(sizeKey(k)); else localStorage.setItem(sizeKey(k), String(Math.round(v)));
+    } catch (e) { /* private mode */ }
+  }
+  let kickFrame = 0;
+  function kickResize() {             // maps and canvases re-measure, at most once a frame
+    if (kickFrame) return;
+    kickFrame = requestAnimationFrame(() => { kickFrame = 0; window.dispatchEvent(new Event("resize")); });
+  }
+  function dragging(axis, on) {
+    document.body.classList.toggle("ui-resizing", on);
+    document.body.classList.toggle("ui-resizing-" + axis, on);
+  }
+  function resizable(target, opts) {
+    if (!target || target.dataset.resizeReady) return null;
+    const o = opts || {};
+    const d = target.dataset;
+    const edge = o.edge || d.resizeEdge || "right";
+    const vertical = edge === "top" || edge === "bottom";
+    const key = o.key || d.resize;
+    const cssVar = o.cssVar || d.resizeVar;
+    const min = +(o.min || d.resizeMin || 160);
+    const maxOpt = +(o.max || d.resizeMax || 0);
+    const keep = +(o.keep || d.resizeKeep || 320);
+    const title = o.title || d.resizeTitle || "the panel";
+    const host = o.host || target.parentElement;
+    if (!host) return null;
+    d.resizeReady = "1";
+    if (getComputedStyle(host).position === "static") host.style.position = "relative";
+    const grow = edge === "right" || edge === "bottom" ? 1 : -1;
+    const apply = o.apply || ((px) => {
+      if (px == null) host.style.removeProperty(cssVar); else host.style.setProperty(cssVar, px + "px");
+    });
+    const size = () => { const r = target.getBoundingClientRect(); return vertical ? r.height : r.width; };
+    // folded (a strip far under the minimum) or not on screen: no handle
+    const enabled = o.enabled || (() => !(narrow.matches && !vertical) &&
+      !target.classList.contains("is-folded") && target.offsetParent !== null && size() >= min * 0.75);
+    const maxNow = () => {
+      const room = (vertical ? host.clientHeight : host.clientWidth) - keep;
+      return Math.max(min, maxOpt ? Math.min(maxOpt, room) : room);
+    };
+    const clamp = (v) => Math.round(Math.min(Math.max(v, min), maxNow()));
+
+    const h = document.createElement("div");
+    h.className = "ui-resize " + (vertical ? "is-y" : "is-x");
+    h.setAttribute("role", "separator");
+    h.setAttribute("aria-orientation", vertical ? "horizontal" : "vertical");
+    h.setAttribute("aria-label", "Resize " + title);
+    h.tabIndex = 0;
+    h.dataset.tip = "Drag to resize " + title + ". A double-click puts it back.";
+    host.appendChild(h);
+
+    function place() {
+      if (!enabled()) { h.hidden = true; return; }
+      h.hidden = false;
+      const t = target.getBoundingClientRect(), p = host.getBoundingClientRect();
+      if (vertical) {
+        const y = (edge === "top" ? t.top : t.bottom) - p.top + host.scrollTop;
+        h.style.cssText = "left:" + (t.left - p.left) + "px;width:" + t.width + "px;top:" + (y - 3) + "px";
+      } else {
+        const x = (edge === "left" ? t.left : t.right) - p.left + host.scrollLeft;
+        h.style.cssText = "top:" + (t.top - p.top) + "px;height:" + t.height + "px;left:" + (x - 3) + "px";
+      }
+    }
+    function set(px, save) {
+      apply(px);
+      if (save) saveSize(key, px);
+      place();
+      kickResize();
+    }
+    const saved = key ? readSize(key) : null;   // the parent may not be laid out yet: min/max only
+    if (saved != null) apply(Math.max(min, maxOpt ? Math.min(maxOpt, saved) : saved));
+
+    h.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      h.setPointerCapture(e.pointerId);
+      const start = vertical ? e.clientY : e.clientX;
+      const from = size();
+      let last = from;
+      dragging(vertical ? "y" : "x", true);
+      h.classList.add("is-active");
+      const move = (ev) => { last = clamp(from + ((vertical ? ev.clientY : ev.clientX) - start) * grow); set(last, false); };
+      const up = () => {
+        h.removeEventListener("pointermove", move);
+        h.removeEventListener("pointerup", up);
+        h.removeEventListener("pointercancel", up);
+        dragging(vertical ? "y" : "x", false);
+        h.classList.remove("is-active");
+        saveSize(key, last);
+        window.dispatchEvent(new Event("resize"));
+      };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+      h.addEventListener("pointercancel", up);
+    });
+    h.addEventListener("dblclick", () => set(null, true));
+    h.addEventListener("keydown", (e) => {
+      const step = (vertical ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1 })[e.key];
+      if (!step) return;
+      e.preventDefault();
+      set(clamp(size() + step * 16 * grow), true);
+    });
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => place());
+      ro.observe(target);
+      ro.observe(host);
+    }
+    window.addEventListener("resize", place);
+    narrow.addEventListener("change", place);
+    requestAnimationFrame(place);
+    return { place, reset: () => set(null, true) };
+  }
+
+  // the rail: Supabase's side menu widens and narrows; folded, it is the icon rail
+  resizable(rail, {
+    key: "rail", edge: "right", host: app, min: 180, max: 380, keep: 480, title: "the sidebar",
+    apply: (px) => {
+      if (px == null) document.documentElement.style.removeProperty("--rail-w");
+      else document.documentElement.style.setProperty("--rail-w", px + "px");
+    },
+    enabled: () => railMode === "expanded" && !narrow.matches,
+  });
+
+  // ---- table columns: drag the edge of a header cell, as in Supabase's grid ----------------------
+  // The first drag fixes every column of that table at the width it had, then the dragged one
+  // follows the pointer (between COL_MIN and COL_MAX); the table grows or shrinks with it. Widths
+  // are remembered per page, table and column name, and put back when the table is drawn again.
+  // A double-click on an edge gives the table its natural widths back.
+  const COLS_KEY = "runway.cols." + (page || "page");
+  const EDGE_PX = 6, COL_MIN = 44, COL_MAX = 900;
+  let colPrefs = {};
+  try { colPrefs = JSON.parse(localStorage.getItem(COLS_KEY) || "{}") || {}; } catch (e) { colPrefs = {}; }
+  const saveCols = () => { try { localStorage.setItem(COLS_KEY, JSON.stringify(colPrefs)); } catch (e) { /* ignore */ } };
+  function tableKey(t) {
+    if (t.id) return t.id;
+    const owner = t.parentElement && t.parentElement.closest("[id]");
+    const cls = String(t.className || "").replace("ui-cols", "").trim().split(/\s+/)[0] || "table";
+    return (owner ? owner.id : "page") + "/" + cls;
+  }
+  function headCells(t) {
+    const rows = t && t.tHead ? t.tHead.rows : null;
+    return rows && rows.length === 1 && rows[0].cells.length > 1 ? Array.from(rows[0].cells) : null;
+  }
+  const colName = (th, i) => (th.textContent || "").replace(/\s+/g, " ").trim().slice(0, 48) || "#" + i;
+  const colSig = (cells) => cells.map(colName).join("|");
+  function unfreeze(t, cells) {
+    t.classList.remove("ui-cols");
+    t.style.width = "";
+    cells.forEach((c) => { c.style.width = ""; });
+  }
+  function freeze(t, cells) {
+    if (t.classList.contains("ui-cols")) return;
+    const ws = cells.map((c) => c.getBoundingClientRect().width);
+    cells.forEach((c, i) => { c.style.width = ws[i] + "px"; });
+    t.classList.add("ui-cols");
+    t.style.width = ws.reduce((a, b) => a + b, 0) + "px";
+  }
+  function applyCols(t) {
+    const cells = headCells(t);
+    if (!cells) return;
+    const saved = colPrefs[tableKey(t)];
+    const sig = colSig(cells);
+    const sized = t.classList.contains("ui-cols");
+    if (t.dataset.colsSig === sig && (!sized || cells.every((c) => c.style.width))) return;   // as it was
+    t.dataset.colsSig = sig;
+    unfreeze(t, cells);
+    if (!saved || !cells.some((c, i) => saved[colName(c, i)])) return;
+    freeze(t, cells);
+    let total = 0;
+    cells.forEach((c, i) => {
+      const w = saved[colName(c, i)];
+      if (w) c.style.width = w + "px";
+      total += w || parseFloat(c.style.width) || 0;
+    });
+    t.style.width = total + "px";
+  }
+  const nearEdge = (th, x) => th.getBoundingClientRect().right - x <= EDGE_PX;
+  let swallowClick = false;
+  document.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !e.target.closest) return;
+    const th = e.target.closest("thead th");
+    const t = th && th.closest("table");
+    const cells = headCells(t);
+    if (!cells || !cells.includes(th) || !nearEdge(th, e.clientX)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    freeze(t, cells);
+    const startX = e.clientX;
+    const from = parseFloat(th.style.width) || th.getBoundingClientRect().width;
+    const others = cells.reduce((s, c) => s + (c === th ? 0 : parseFloat(c.style.width) || 0), 0);
+    let w = from;
+    dragging("x", true);
+    const move = (ev) => {
+      w = Math.round(Math.min(COL_MAX, Math.max(COL_MIN, from + ev.clientX - startX)));
+      th.style.width = w + "px";
+      t.style.width = (others + w) + "px";
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+      dragging("x", false);
+      const k = tableKey(t);
+      const m = colPrefs[k] || (colPrefs[k] = {});
+      cells.forEach((c, i) => { m[colName(c, i)] = Math.round(parseFloat(c.style.width) || 0) || undefined; });
+      saveCols();
+      t.dataset.colsSig = colSig(cells);
+      swallowClick = true;                         // the click that ends a drag is not a sort
+      setTimeout(() => { swallowClick = false; }, 0);
+    };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+  }, true);
+  document.addEventListener("click", (e) => {
+    if (swallowClick) { e.stopPropagation(); e.preventDefault(); swallowClick = false; }
+  }, true);
+  document.addEventListener("dblclick", (e) => {
+    const th = e.target.closest ? e.target.closest("thead th") : null;
+    const t = th && th.closest("table");
+    const cells = headCells(t);
+    if (!cells || !nearEdge(th, e.clientX)) return;
+    e.preventDefault();
+    delete colPrefs[tableKey(t)];
+    saveCols();
+    unfreeze(t, cells);
+  }, true);
+  // tables drawn later, or drawn again (a column added, a new decode): put their widths back
+  let colFrame = 0;
+  const colTables = new Set();
+  function queueTables(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node.tagName === "TABLE") colTables.add(node);
+    else if (node.closest("table")) colTables.add(node.closest("table"));
+    else node.querySelectorAll("table").forEach((t) => colTables.add(t));
+  }
+  if (content && window.MutationObserver) {
+    new MutationObserver((muts) => {
+      if (!Object.keys(colPrefs).length) return;
+      for (const m of muts) {
+        const n = m.target;
+        if (n.nodeType !== 1 || n.tagName === "TBODY" || n.closest("tbody")) continue;  // rows come and go
+        queueTables(n);
+      }
+      if (colTables.size && !colFrame) {
+        colFrame = requestAnimationFrame(() => {
+          colFrame = 0;
+          colTables.forEach((t) => { if (t.isConnected) applyCols(t); });
+          colTables.clear();
+        });
+      }
+    }).observe(content, { childList: true, subtree: true });
+    if (Object.keys(colPrefs).length) content.querySelectorAll("table").forEach(applyCols);
+  }
+
   // ---- foldable side panes -----------------------------------------------------------------------
   // A pane marked data-fold="key" (or handed to foldable()) folds to a narrow strip and remembers
   // it per key. Its fold button is the [data-fold-toggle] inside it; folded, the strip shows the
@@ -395,12 +857,26 @@
     if (!foldGroups.has(key)) foldGroups.set(key, new Set());
     foldGroups.get(key).add(pane);
     paintFold(pane, foldedFor(key));
+    // its inner edge resizes it — every pane of the group together (one per Parser tab)
+    const cssVar = side === "left" ? "--pane-l-w" : "--pane-r-w";
+    resizable(pane, {
+      key: "pane." + key, edge: side === "left" ? "right" : "left", cssVar,
+      min: +(o.min || pane.dataset.foldMin || 240), max: +(o.max || pane.dataset.foldMax || 720), keep: 380,
+      title: title.toLowerCase(),
+      apply: (px) => (foldGroups.get(key) || [pane]).forEach((p) => {
+        const h = p.parentElement;
+        if (!h) return;
+        if (px == null) h.style.removeProperty(cssVar); else h.style.setProperty(cssVar, px + "px");
+      }),
+    });
   }
   document.querySelectorAll("[data-fold]").forEach((p) => foldable(p));
+  document.querySelectorAll("[data-resize]").forEach((t) => resizable(t));
 
   // ---- the house confirm / prompt: a <dialog>, never window.confirm (unstyled, shows the host,
   // and the browser lets people suppress it). A title, one sentence, Cancel focused, the action on
-  // the right — red only when it destroys. User strings are set as text, never parsed.
+  // the right — red only when it destroys. A notice (something did not work) has OK alone, focused.
+  // User strings are set as text, never parsed.
   function ask(o) {
     return new Promise((resolve) => {
       const d = document.createElement("dialog");
@@ -428,6 +904,7 @@
       }
       const ok = d.querySelector("[data-ok]");
       ok.textContent = o.action || "OK";
+      if (o.notice) d.querySelector("[data-cancel]").remove();
       if (o.tone === "danger") ok.className = "danger-fill";
       let result = null;
       d.querySelector("[data-cancel]").addEventListener("click", () => d.close());
@@ -442,17 +919,18 @@
       });
       document.body.appendChild(d);
       d.showModal();
-      if (field) { field.focus(); field.select(); } else d.querySelector("[data-cancel]").focus();
+      if (field) { field.focus(); field.select(); } else (d.querySelector("[data-cancel]") || ok).focus();
     });
   }
   const confirmDlg = (o) => ask(o);                                  // → true / false
+  const noticeDlg = (o) => ask(Object.assign({}, o, { notice: true }));  // OK only
   const promptDlg = (o) => ask(Object.assign({}, o, { input: { label: o.label, value: o.value, placeholder: o.placeholder } }));  // → text / null
 
   // Sections other scripts add to Settings, above the sidebar switches (appctl.js: Usage reporting,
   // Updates). Each is a function that fills the element it is given.
   const settingsSections = [];
 
-  window.RunwayUI = { icons: ICONS, icon, paint, setLabel, foldable, esc, confirm: confirmDlg, prompt: promptDlg,
+  window.RunwayUI = { icons: ICONS, icon, paint, setLabel, foldable, resizable, esc, confirm: confirmDlg, notice: noticeDlg, prompt: promptDlg,
                       settingsSections, openSettings: () => openSettings() };
 
   // ---- settings (show / hide rail items) -------------------------------------------------------
@@ -490,7 +968,7 @@
     if (settingsSections.length) {
       const h = document.createElement("div");
       h.className = "set-h";
-      h.innerHTML = '<span class="set-title" data-tip="Show or hide items in the sidebar. Items marked Soon have no page yet.">Sidebar</span>';
+      h.innerHTML = '<span class="set-title" data-tip="Show or hide pages in the sidebar for yourself. Off centrally: switched off for this copy by Runway\'s owner. More: folded under More until you switch it on. With data: shown once a device has sent its data.">Sidebar</span>';
       body.appendChild(h);
     }
     SECTIONS.forEach((sec) => {
@@ -503,12 +981,19 @@
       toggleable.forEach((it) => {
         const row = document.createElement("label");
         row.className = "feat-row";
+        const r = resolved[it.id];
+        const note = ownerOff(it) ? '<span class="ui-pill sm bad feat-note">Off centrally</span>'
+          : r && r.by === "owner" ? '<span class="ui-pill sm ok feat-note">On centrally</span>'
+          : !hasPref(it) && r && r.state === "more" ? '<span class="ui-pill sm muted feat-note">More</span>'
+          : r && r.by === "data" ? '<span class="ui-pill sm muted feat-note">' + (r.state === "shown" ? "Has data" : "With data") + "</span>"
+          : "";
         row.innerHTML = '<span class="feat-ico">' + (ICONS[it.icon] || "") + "</span>" +
           '<span class="feat-label">' + esc(it.label) +
-          (isSoon(it) ? '<span class="rail-soon">Soon</span>' : "") + "</span>" +
+          (isSoon(it) ? '<span class="rail-soon">Soon</span>' : "") + note + "</span>" +
           '<span class="switch"><input type="checkbox" /><span class="slider"></span></span>';
         const cb = row.querySelector("input");
-        cb.checked = visible(it);
+        cb.checked = visible(it) && !inMore(it);
+        if (ownerOff(it)) { cb.disabled = true; row.classList.add("is-locked"); }
         cb.addEventListener("change", () => { prefs[it.id] = cb.checked; savePrefs(); buildRail(); });
         body.appendChild(row);
       });
@@ -552,17 +1037,18 @@
       document.body.classList.remove("api-offline");
       offline = false;
       if (UI_VERSION === null) UI_VERSION = d.code_version || d.version || null;
-      const v = document.getElementById("rail-version");
+      const v = document.getElementById("app-version");
       if (v && d.version) {
         v.textContent = "Version " + d.version;
         v.title = "Server " + d.version + (d.code_version && d.code_version !== d.version
           ? " · code on disk " + d.code_version : "");
       }
       if (d.mode && d.mode !== mode) mode = d.mode;
+      if (d.features_key && d.features_key !== featuresKey) loadFeatures();
       applyMode();
       const warns = [];
       if (d.version && UI_VERSION && d.version !== UI_VERSION) {
-        // The rail shows the SERVER's version: a page older than the server is a cached tab
+        // The banner shows the SERVER's version: a page older than the server is a cached tab
         // (reload); a page newer than the server means the process runs the previous code.
         warns.push(cmpVersion(d.version, UI_VERSION) > 0
           ? `This page is ${UI_VERSION}, the server ${d.version}. Reload the page (Ctrl+Shift+R).`
@@ -580,6 +1066,7 @@
       applyMode();
     });
   }
+  loadFeatures();
   refreshStatus();
   setInterval(refreshStatus, 4000);
 

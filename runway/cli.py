@@ -84,6 +84,21 @@ def _port_free(host: str, port: int) -> bool:
             return False
 
 
+def _window() -> dict:
+    """Runway's own window: its own Edge profile (data/window) so its options apply even while the
+    person's Edge runs, and Edge's dark mode when Runway's theme is dark — that is what gives the
+    window a dark title bar to match the banner. The page remembers the theme (/api/desktop/titlebar)."""
+    import os
+
+    try:
+        from .storage.db import DATA_DIR
+        from .storage.live import config
+        return {"profile_dir": os.path.join(str(DATA_DIR), "window"),
+                "dark": config.get("ui_theme", "dark") != "light"}
+    except Exception:
+        return {}
+
+
 def _open_when_ready(url: str) -> None:
     """Show Runway once the server answers: in its own window (Edge's app mode), unless a Runway
     window is already open — after a restart or an update it reconnects by itself. Off Windows,
@@ -104,7 +119,7 @@ def _open_when_ready(url: str) -> None:
     # No Runway window anywhere: open at once (a cold start). One open — after a restart, or a copy
     # on another port — counts only if a page of THIS server checks in within a few seconds.
     if desktop.IS_WINDOWS and not desktop.runway_windows():
-        desktop.open_app_window(url)
+        desktop.open_app_window(url, **_window())
         return
     deadline = time.monotonic() + PAGE_GRACE_S
     while time.monotonic() < deadline:
@@ -115,7 +130,7 @@ def _open_when_ready(url: str) -> None:
         except Exception:
             pass
         time.sleep(0.5)
-    desktop.open_app_window(url)
+    desktop.open_app_window(url, **_window())
 
 
 def _start_tray(url: str) -> None:
@@ -142,8 +157,8 @@ def _start_tray(url: str) -> None:
 
     base = getattr(sys, "_MEIPASS", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packaging"))
     desktop.start_tray(icon_path=os.path.join(base, "runway.ico"),
-                       on_open=lambda: desktop.show(url),
-                       on_logs=lambda: desktop.open_app_window(url + "/logs.html"),
+                       on_open=lambda: desktop.show(url, **_window()),
+                       on_logs=lambda: desktop.open_app_window(url + "/logs.html", **_window()),
                        on_quit=quit_runway,
                        tip=lambda: desktop.tray_tip(__version__, listeners()))
 
@@ -186,7 +201,7 @@ def _serve(args) -> None:
         # Runway already runs here (started again from the pinned icon): show it, don't start a second
         print(f"Runway is already running at {url}")
         if not getattr(args, "no_browser", False):
-            desktop.show(url)
+            desktop.show(url, **_window())
         return
     elif not _port_free(args.host, args.port):
         text = (f"Port {args.port} is in use by another program, so Runway cannot start.\n\n"

@@ -11,11 +11,18 @@ Copy this file into the app (for example `myapp/usage_client.py`) and use it lik
     usage.record("job_started", {"devices": 140})
     usage.record_error(exc)              # from the app's own unhandled-error hook
     usage.metrics = lambda: {"jobsStarted": jobs}   # optional: this app's own counters
+    usage.on_policy = apply                 # optional: called with the copy's policy when it changes
+    usage.feature("imu")                 # True / False when the owner set it, None when not (app default)
     usage.status()                       # for Settings → Usage reporting
 
 Reports go to the shared usage server — one Supabase project for every app — in the format of
 references/report-format.md. Nothing here may slow the app or stop it: sending happens on a
 background thread, a failure keeps the report for the next try, and closing waits 3 s at most.
+
+Control: the server answers each report with this copy's policy ({"features": {name: true/false}}),
+set by the owner per app, group, person or copy. It is kept in usage.json, so a copy that cannot
+reach the server goes on with the last policy it got; a copy that never got one has none, and the
+app's own defaults apply.
 """
 from __future__ import annotations
 
@@ -166,6 +173,8 @@ class UsageReporter:
         self.url, self.key = url, key
         self.enabled = bool(enabled and url)
         self.metrics: Optional[Callable[[], dict]] = None
+        self.on_policy: Optional[Callable[[dict], None]] = None
+        self.policy: Optional[dict] = None
         self.session: Optional[dict] = None
         self.last_sent: Optional[str] = None
         self.error: Optional[str] = None
@@ -215,6 +224,8 @@ class UsageReporter:
                 self.record("version_changed", {"from": previous, "to": self.version})
             self._state["lastVersion"] = self.version
             self.last_sent = self._state.get("lastSent")
+            if isinstance(self._state.get("policy"), dict):
+                self.policy = self._state["policy"]      # the last one the server gave: holds offline
             self._put_session()
             self._save()
         if at_exit:
@@ -339,10 +350,17 @@ class UsageReporter:
                 events = [dict(e) for e in box["events"][:EVENTS_PER_SEND]]
                 install = {**self._install, "name": self.name or None}
             more = False
+            changed = None
             try:
-                self._send(self.url, self.key, {"install": install, "sessions": list(sessions.values()), "events": events},
-                           timeout=timeout or 20.0, user_agent=f"{self.app}/{self.version}")
+                answer = self._send(self.url, self.key, {"install": install, "sessions": list(sessions.values()), "events": events},
+                                    timeout=timeout or 20.0, user_agent=f"{self.app}/{self.version}")
                 with self._lock:
+                    if isinstance(answer, dict) and isinstance(answer.get("policy"), dict):
+                        if answer["policy"] != self.policy:
+                            changed = answer["policy"]
+                        self.policy = answer["policy"]
+                        self._state["policy"] = self.policy
+                        self._state["policyAt"] = _iso(self._clock())
                     self._acknowledge(sessions, events)
                     self.last_sent = _iso(self._clock())
                     self._state["lastSent"] = self.last_sent
@@ -359,6 +377,11 @@ class UsageReporter:
                 with self._lock:
                     self.sending = False
                     self._save()
+            if changed is not None and self.on_policy is not None:
+                try:
+                    self.on_policy(changed)
+                except Exception:
+                    pass  # the app's handler must never stop reporting
             if not more:
                 return
 
@@ -377,6 +400,15 @@ class UsageReporter:
         while len(box) > MAX_SESSIONS:
             del box[next(iter(box))]
 
+    # ── Control ───────────────────────────────────────────────────────────────────────────────
+
+    def feature(self, name: str) -> Optional[bool]:
+        """What the owner set for this feature on this copy: True, False, or None (not set — the
+        app's own default applies)."""
+        with self._lock:
+            v = ((self.policy or {}).get("features") or {}).get(name)
+            return v if isinstance(v, bool) else None
+
     # ── For Settings → Usage reporting ───────────────────────────────────────────────────────
 
     def status(self) -> dict:
@@ -386,7 +418,8 @@ class UsageReporter:
             waiting = len(box["events"]) + len([k for k in box["sessions"] if k != current])
             return {"enabled": self.enabled, "name": self.name, "install_id": self._state.get("installId"),
                     "reporting_to": urllib.parse.urlsplit(self.url).hostname, "last_sent": self.last_sent,
-                    "sending": self.sending, "waiting": waiting, "error": self.error}
+                    "sending": self.sending, "waiting": waiting, "error": self.error,
+                    "policy_at": self._state.get("policyAt")}
 
     # ── The file ──────────────────────────────────────────────────────────────────────────────
 

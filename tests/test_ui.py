@@ -136,6 +136,24 @@ def test_stylesheets_balance():
         assert css.count("{") == css.count("}"), f"{p.name}: unbalanced braces"
 
 
+def test_the_banner_names_the_app_the_person_and_the_page():
+    """The user, 13-11-2026, on Supabase's top line: a fixed banner where the application name, the
+    greeting and the page name are visible — on every page, so the greeting lives there."""
+    shell = _code(_text(WEB / "shell.js"))
+    for part in ('id = "banner"', 'class="bn-name">Runway<', 'id="banner-hello"', 'id="topbar-page"'):
+        assert part in shell, part
+    appctl = _code(_text(WEB / "appctl.js"))
+    assert 'getElementById("banner-hello")' in appctl and "dash-hello" not in appctl
+
+
+def test_side_panes_take_a_dragged_width():
+    """A pane's column reads the width it was dragged to (--pane-l-w / --pane-r-w), and folds over it."""
+    css = _text(WEB / "style.css")
+    for rule in ("#dash-main", "#sig-main, #proto-main", "#tcp-main, #qc-main, #cap-main", ".parser-main"):
+        body = css[css.index(rule + " {"):].split("}", 1)[0]
+        assert "var(--pane-l, var(--pane-l-w" in body or "var(--pane-r, var(--pane-r-w" in body, rule
+
+
 def test_the_font_ships_with_the_app():
     """Inter (Supabase's typeface) is bundled, never fetched: Runway runs offline. Every font the
     stylesheet loads is a file beside it, and its licence goes with it."""

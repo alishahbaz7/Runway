@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Log analysis</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="analysis.css" />
+</head>
+<body data-page="analysis">
+  <!-- the banner and rail are built around #content by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Log analysis</h1>
+      <span class="tag">A platform report — the drive log today — judged: a status per area, the findings behind it, and every row</span>
+    </header>
+
+    <!-- one tab per open log, and per comparison; the dashed + adds a log -->
+    <div id="an-tabs"></div>
+
+    <main id="an-main" class="ui-split">
+      <!-- the logs analysed so far -->
+      <div id="an-list-pane" data-fold="analysis-list" data-fold-title="Logs" data-fold-min="240" data-fold-max="460">
+        <div class="pane-head">
+          <span class="pane-title">Logs</span><span class="ui-count" id="an-count"></span>
+          <span class="spacer"></span>
+          <button class="ghost mini" type="button" id="an-select" hidden>Select</button>
+          <button class="ghost mini" type="button" id="an-add"><span data-icon="upload"></span>Add log</button>
+          <button class="ui-icon-btn" type="button" data-fold-toggle></button>
+        </div>
+        <div class="an-selbar" id="an-selbar" hidden>
+          <label class="an-selall"><input type="checkbox" id="an-selall" /><span id="an-selcount">0 selected</span></label>
+          <span class="spacer"></span>
+          <button class="ghost mini" type="button" id="an-selcmp" disabled data-tip="Devices fitted in one vehicle, side by side over the time they share — the first ticked is the reference positions are measured from"><span data-icon="columns"></span>Compare</button>
+          <button class="ghost mini danger" type="button" id="an-seldel" disabled><span data-icon="trash"></span>Delete</button>
+          <button class="ui-icon-btn" type="button" id="an-selcancel" title="Done selecting" aria-label="Done selecting"><span data-icon="x"></span></button>
+        </div>
+        <ul id="an-list"></ul>
+        <input type="file" id="an-file" accept=".csv,text/csv" hidden />
+      </div>
+
+      <!-- the selected log: summary or details -->
+      <div id="an-work">
+        <div id="an-drop" class="an-drop" hidden>
+          <span class="an-drop-ico" data-icon="analysis"></span>
+          <p class="an-drop-t">Drop a drive log here</p>
+          <button type="button" id="an-choose"><span data-icon="upload"></span>Choose a file</button>
+          <span class="an-drop-sub">CSV exported from the platform</span>
+        </div>
+
+        <div id="an-busy" class="an-card an-busy" hidden>
+          <div class="an-busy-line"><span class="ui-spin"></span><span id="an-busy-t">Uploading</span><span class="spacer"></span><span id="an-busy-pct" class="ui-count"></span></div>
+          <div class="upd-bar"><div class="upd-fill" id="an-busy-bar" style="width:0%"></div></div>
+        </div>
+
+        <div id="an-report" hidden>
+          <div class="an-card an-head">
+            <div class="an-nav" role="group" aria-label="Back and forward">
+              <button class="ui-icon-btn" type="button" id="an-back" aria-label="Back" disabled><span data-icon="arrow-left"></span></button>
+              <button class="ui-icon-btn" type="button" id="an-fwd" aria-label="Forward" disabled><span data-icon="arrow-right"></span></button>
+            </div>
+            <div class="an-head-main">
+              <div class="an-title-row">
+                <span class="an-title mono" id="an-title"></span>
+                <span class="ui-pill sm" id="an-kind">Drive log</span>
+                <span class="ui-pill" id="an-status"></span>
+                <span class="an-scope" id="an-scope" data-tip="The whole page shows this trip alone" hidden></span>
+              </div>
+              <div class="an-sub" id="an-sub"></div>
+            </div>
+            <span class="spacer"></span>
+            <div class="tcp-seg an-views" role="tablist" aria-label="View">
+              <button class="seg on" type="button" data-view="summary">Summary</button>
+              <button class="seg" type="button" data-view="details">Details</button>
+            </div>
+            <button class="ghost mini" type="button" id="an-settings"><span data-icon="settings"></span>Settings</button>
+            <a class="an-btn-link ghost mini" id="an-xlsx" href="#"><span data-icon="download"></span>Excel</a>
+            <button class="ghost mini danger" type="button" id="an-delete"><span data-icon="trash"></span>Delete</button>
+          </div>
+
+          <!-- summary: a status per area, the track, the day on a timeline, packets by mode, the scorecard,
+               the charts; the findings are in the side rail -->
+          <div id="an-summary">
+            <div class="an-tiles" id="an-tiles"></div>
+            <div class="an-card an-map-card">
+                <div class="an-card-head"><span class="an-card-title">Track</span>
+                  <div class="tcp-seg an-map-mode" role="tablist" aria-label="Colour the track by">
+                    <button class="seg on" type="button" data-mode="trips">Trips</button>
+                    <button class="seg" type="button" data-mode="speed">Speed</button>
+                  </div>
+                  <div class="tcp-seg an-map-draw" role="tablist" aria-label="Draw the track as">
+                    <button class="seg on" type="button" data-draw="lines">Lines</button>
+                    <button class="seg" type="button" data-draw="dots" data-tip="One dot per packet — a click shows that packet">Dots</button>
+                  </div>
+                  <span class="an-legend" id="an-map-legend"></span></div>
+                <div class="an-trip-bar" id="an-trip-bar" hidden></div>
+                <div class="an-map-wrap">
+                  <div id="an-map"></div>
+                  <div class="an-map-tiles" id="an-map-tiles"></div>
+                </div>
+            </div>
+            <div class="an-card">
+              <div class="an-card-head">
+                <span class="an-card-title">Timeline</span>
+                <span class="an-legend" id="an-legend"></span>
+              </div>
+              <div class="an-chart" id="an-timeline"></div>
+            </div>
+            <div class="an-card">
+              <div class="an-card-head"><span class="an-card-title" data-tip="Active: ignition on. Standby: ignition off, still awake. Sleep: after standby (or the deep-sleep packet), the slowest. Packets made against those due (time in the mode ÷ its interval), how evenly (on time), and their delay to InTouch">Packets by mode</span>
+                <span class="an-card-side" id="an-modes-src"></span></div>
+              <div id="an-modes"></div>
+            </div>
+            <div class="an-card">
+              <div class="an-card-head"><span class="an-card-title" data-tip="Every measure of this log, judged against its limit (Settings): green good, amber attention, red poor. With a trip chosen, the whole log beside it">Scorecard</span></div>
+              <div id="an-score" class="an-cmp-score"></div>
+            </div>
+            <div class="an-grid3">
+              <div class="an-card">
+                <div class="an-card-head"><span class="an-card-title" data-tip="From the device making a packet (timestampStr) to it landing on InTouch (insertTimeStr): how many packets took how long">Delay to InTouch</span></div>
+                <div class="an-chart sm" id="an-latency"></div>
+              </div>
+              <div class="an-card">
+                <div class="an-card-head"><span class="an-card-title" data-tip="The same delay through the day: the median of each period, and its slowest packet">Delay over the day</span>
+                  <span class="an-legend" id="an-delay-legend"></span></div>
+                <div class="an-chart sm" id="an-delay"></div>
+              </div>
+              <div class="an-card">
+                <div class="an-card-head"><span class="an-card-title" data-tip="Main supply (left axis) and the device's internal battery (right axis), ignition-on periods shaded">Power</span></div>
+                <div class="an-chart sm" id="an-volts"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- details: one section per part of the report, and every row (below) -->
+          <div id="an-details" class="an-details" hidden>
+            <nav class="an-dnav" id="an-dnav" aria-label="Sections"></nav>
+            <div class="an-dbody" id="an-dbody"></div>
+          </div>
+        </div>
+        <!-- a comparison: several logs (devices in one vehicle) side by side -->
+        <div id="an-compare" hidden>
+          <div class="an-card an-head">
+            <div class="an-head-main">
+              <div class="an-title-row">
+                <span class="an-title">Comparison</span>
+                <span class="ui-pill sm" id="an-cmp-n"></span>
+              </div>
+              <div class="an-sub" id="an-cmp-sub"></div>
+            </div>
+            <span class="spacer"></span>
+            <a class="an-btn-link ghost mini" id="an-cmp-xlsx" href="#"><span data-icon="download"></span>Excel</a>
+          </div>
+          <div class="an-tiles" id="an-cmp-devs"></div>
+          <div class="an-card">
+            <div class="an-card-head"><span class="an-card-title" data-tip="Every figure that tells the devices apart, each judged over the time they share. The best of a row is green, the worst red; a row with no better side is not marked">Scorecard</span></div>
+            <div id="an-cmp-score" class="an-cmp-score"></div>
+          </div>
+          <div class="an-grid2">
+            <div class="an-card an-map-card">
+              <div class="an-card-head"><span class="an-card-title">Tracks</span><span class="an-legend" id="an-cmp-map-legend"></span></div>
+              <div id="an-cmp-map"></div>
+            </div>
+            <div class="an-card">
+              <div class="an-card-head"><span class="an-card-title" data-tip="Packets made against those due in each mode, how evenly, and their delay — device by device">Packets by mode</span></div>
+              <div id="an-cmp-modes"></div>
+            </div>
+          </div>
+          <div class="an-card">
+            <div class="an-card-head"><span class="an-card-title">Speed</span><span class="an-legend" id="an-cmp-speed-legend"></span></div>
+            <div class="an-chart" id="an-cmp-speed"></div>
+          </div>
+          <div class="an-card">
+            <div class="an-card-head"><span class="an-card-title" data-tip="The median delay from the device making a packet to it landing on InTouch, through the time compared">Delay to InTouch</span></div>
+            <div class="an-chart" id="an-cmp-delay"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- the side rail: findings, scorecard, insights, the packet chosen on the map — one open at a time -->
+      <div id="an-rail" class="an-rail" hidden>
+        <div class="an-rail-panel" id="an-rail-panel" hidden>
+          <div class="pane-head">
+            <span class="pane-title" id="an-rail-title"></span><span class="ui-count" id="an-rail-scope"></span>
+            <span class="spacer"></span>
+            <button class="ui-icon-btn" type="button" id="an-rail-close" title="Fold" aria-label="Fold"><span data-icon="x"></span></button>
+          </div>
+          <div class="an-rail-body" id="an-rail-body"></div>
+        </div>
+        <div class="an-rail-tabs" role="tablist" aria-label="Side panels">
+          <button class="an-rail-tab" type="button" role="tab" data-rail="findings" data-tip="What was found — poor, attention, notes — of the whole log or the trip chosen; each opens its rows"><span data-icon="alert"></span><span>Findings</span><b class="an-rail-n" id="an-rail-n"></b></button>
+          <button class="an-rail-tab" type="button" role="tab" data-rail="score" data-tip="Every measure, judged — of the whole log or the trip chosen"><span data-icon="check"></span><span>Scorecard</span></button>
+          <button class="an-rail-tab" type="button" role="tab" data-rail="insight" data-tip="How each area stands, what the modes' figures say, what needs attention"><span data-icon="info"></span><span>Insights</span></button>
+          <button class="an-rail-tab" type="button" role="tab" data-rail="packet" data-tip="The packet chosen on the map: a click on a dot or a line"><span data-icon="file"></span><span>Packet</span></button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="ui-dlg an-set-dlg" id="an-set-dlg">
+    <form method="dialog">
+      <div class="ui-dlg-head"><h2>Analysis settings</h2></div>
+      <div class="ui-dlg-body">
+        <div class="an-set-grid" id="an-set-grid"></div>
+        <div class="an-prof" id="an-prof">
+          <div class="an-prof-head">
+            <span class="an-prof-title" data-tip="The interval a device should keep in each mode — matched by the device's number, else by its firmware">Device profiles</span>
+            <span class="spacer"></span>
+            <button type="button" class="ghost mini" id="an-prof-add"><span data-icon="plus"></span>Add profile</button>
+          </div>
+          <table class="an-prof-table"><thead><tr id="an-prof-headrow"></tr></thead><tbody id="an-prof-body"></tbody></table>
+          <div class="an-empty" id="an-prof-none">No device profiles</div>
+        </div>
+      </div>
+      <div class="ui-dlg-foot">
+        <button type="button" class="ghost" id="an-set-reset">Defaults</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost" data-cancel>Cancel</button>
+        <button type="button" class="ghost" id="an-set-save" data-tip="New logs are judged with these">Save as default</button>
+        <button type="submit" id="an-set-apply">Apply to this log</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="ui-dlg an-row-dlg" id="an-row-dlg">
+    <form method="dialog">
+      <div class="ui-dlg-head"><h2 id="an-row-title">Row</h2><span class="spacer"></span>
+        <button class="ui-icon-btn modal-x" type="submit" aria-label="Close"><span data-icon="x"></span></button></div>
+      <div class="ui-dlg-body"><div id="an-row-flags" class="an-flags"></div><dl class="an-row-kv" id="an-row-kv"></dl></div>
+    </form>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="shell.js"></script>
+  <script src="analysis.js"></script>
+</body>
+</html>

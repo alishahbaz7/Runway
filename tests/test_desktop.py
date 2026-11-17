@@ -32,6 +32,37 @@ def test_the_app_window_is_edges_app_mode():
     assert cmd[0].endswith("msedge.exe") and "--app=http://127.0.0.1:8080" in cmd
 
 
+def test_the_window_has_its_own_profile_and_follows_the_theme():
+    """Its own Edge profile, so its options apply while the person's Edge runs; Edge's dark mode
+    while Runway is dark — the title bar then matches the banner (the user, 13-11-2026)."""
+    dark = desktop.app_window_command("msedge.exe", "http://x", profile_dir=r"D:\r\data\window", dark=True)
+    assert r"--user-data-dir=D:\r\data\window" in dark and "--force-dark-mode" in dark
+    light = desktop.app_window_command("msedge.exe", "http://x", profile_dir=r"D:\r\data\window", dark=False)
+    assert "--force-dark-mode" not in light
+
+
+def test_the_title_bar_colour_is_windows_colorref():
+    assert desktop._colorref("#171918") == 0x181917          # 0x00BBGGRR
+    assert desktop._colorref("ffffff") == 0xFFFFFF
+
+
+async def test_the_page_tells_the_window_its_theme(monkeypatch):
+    """The page sends its banner colour and theme; the theme is remembered for the next window.
+    Bad colours are refused. (No real window is touched: the recolouring is stubbed.)"""
+    from httpx import ASGITransport, AsyncClient
+
+    from runway.api.app import app
+    from runway.storage.live import config
+
+    monkeypatch.setattr(desktop, "color_title_bars", lambda bg, fg, dark: 0)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post("/api/desktop/titlebar", json={"background": "red", "text": "#ffffff", "dark": True})).status_code == 400
+        r = await c.post("/api/desktop/titlebar", json={"background": "#ffffff", "text": "#171717", "dark": False})
+        assert r.status_code == 200 and config.get("ui_theme") == "light"
+        await c.post("/api/desktop/titlebar", json={"background": "#171918", "text": "#edefee", "dark": True})
+    assert config.get("ui_theme") == "dark"
+
+
 def test_a_browser_is_found_where_one_is_installed():
     path = desktop.find_browser()
     assert path is None or os.path.isfile(path)

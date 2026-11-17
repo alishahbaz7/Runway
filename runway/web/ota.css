@@ -96,7 +96,7 @@ body[data-page="ota"] input::placeholder { color: var(--muted); }
 /* ---- tabs: one per session, like Capture ------------------------------------ */
 .ota-tabs {
   flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
-  background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none;
+  background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none;
 }
 .ota-tabs::-webkit-scrollbar { display: none; }
 .ota-tab {
@@ -107,8 +107,8 @@ body[data-page="ota"] input::placeholder { color: var(--muted); }
 }
 .ota-tab:hover { background: var(--hover); color: var(--text); }
 .ota-tab.active {
-  background: var(--bg); color: var(--text); font-weight: 600; border-color: var(--border);
-  height: 37px; margin-bottom: -1px;
+  background: var(--raised); color: var(--text); font-weight: 600; border-color: var(--border-strong);
+  height: 37px; margin-bottom: -1px; box-shadow: var(--raised-shadow); z-index: 1;
 }
 .ota-tab.active::before {
   content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px;

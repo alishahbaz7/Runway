@@ -4,7 +4,191 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
-## [1.1.27] — Unreleased
+## [1.1.27] — 2026-11-17
+
+### Added
+- **Feature control**: the owner decides which pages each copy shows — for everyone, a group, a
+  person or one copy — on the shared usage server (`usage.policies`); the copy is told in the
+  answer to its usage report and keeps it, so it holds offline. A page switched off leaves the
+  sidebar, says *switched off on this copy* when opened, and its switch in Settings is locked
+  (*Off centrally*). Each person can still hide more for themselves. By default, pages used now and
+  then (Protocols, Signatures) sit folded under *More*, and IMU appears once a device has sent IMU
+  data. Needs the usage server's v4 script run once in Supabase; until then the defaults apply.
+- **Log analysis** — a new page (Analysis → Log analysis). Drop in a drive log exported from the
+  platform and it is judged: a status for each area — completeness, delivery, GPS, power,
+  driving, payload — and overall, each tile with its figure. A timeline of the day shows speed,
+  ignition, lost and asleep periods and a marker for everything found. The track is drawn on the
+  map coloured by speed, with stale positions and jumps dashed. A ranked list of findings closes
+  the summary; each finding opens the rows behind it. Details go section by section (gaps, frame
+  numbers, GPS jumps, delivery delay and batching, power, trips, events, IMU and CAN values,
+  packet types, columns) down to every row, filterable by what was found on it, with every
+  exported column one click away. What it finds:
+  - data lost with the ignition on, told apart from ignition-off sleep;
+  - frame holes that repeat (another packet type) told apart from real loss;
+  - delivery delay, rows arriving after newer ones, the platform's history flag against the
+    device's own live/history mark, rows without a position and the reconnect bursts after them;
+  - stale positions at power-on, jumps and the distance they add, repeated positions while
+    moving, reported against position speed, satellites stuck at one value;
+  - battery and supply voltage, power cuts;
+  - trips, idling, overspeed and the device's driving events;
+  - IMU rate and movement while parked, CAN values, alerts that do not follow their value.
+
+  Logs are kept (data/analysis) to reopen, judge again with other limits (Settings), export to
+  Excel or delete. Every layout of the export is read; columns and limits are tables.
+- **Trips stand out on the analysis map**: each trip in its own colour with a dark outline over a
+  greyed street map, numbered at its start and ringed at its end. Choosing a trip above the map
+  (or a row of the Trips table) brings it to the front, fades the rest, zooms to it and labels
+  its start and end; *Speed* colours the track by speed instead.
+  Arrows along the track show the way the vehicle went, evenly spaced at any zoom.
+  Missing data is a dotted line from the last position before the gap to the first after it —
+  red when the ignition was on (data lost), grey when it was off (asleep).
+- **A chosen trip is the whole page**: picking a trip (above the map, on it, or in the Trips table)
+  turns the tiles, findings, timeline, charts, Details, the rows and the Excel export into that
+  trip's alone — judged by the server from the same rows (`GET /api/analysis/{id}/part`), every
+  row link still pointing at the row in the whole log. A pill in the header names the trip; its ×
+  goes back to the whole log. The trip is kept in the address, so a reload or a shared link opens it.
+- **A side rail on the analysis page** — four tabs like bookmarks on the right edge, folded at
+  first, one open at a time (its inner edge widens it): *Findings* (with the count of issues on its
+  tab — the findings left the summary for it, and the map has the row to itself), *Scorecard*,
+  *Insights* (how each area stands, what the packets-by-mode figures say) and *Packet*. They follow
+  what is chosen — the whole log, a trip (beside the whole log), a packet.
+- **Pick a packet on the map**: a click on the line (or on a dot) chooses the packet nearest it — a
+  ring marks it and *Packet* opens on it: live or history, its mode and trip, what was found on it,
+  device and stored time, the delay, the step from the packet before, speed, satellites, position,
+  GSM, ignition, supply, frame, alert, and every column; ← → step to the packet before or after,
+  *Rows* opens it among the rows, *Show on map* zooms to it. A click on a line used to choose its
+  trip — the trip chips and the start pins still do.
+- **The map full screen**: a button under the zoom fills the screen with the map (the browser's own
+  full screen where it allows it) — the area tiles float over it, the trip chips and legend stay
+  on top, the side rail stays at its edge and the map makes room for it; the same button or Esc
+  brings it back.
+- **Every comment on the map is a card**: jumps and stale positions (from and to — time, position,
+  satellites — then how far, in how long, the speed that would take), trips (start, end, how long,
+  how far, top and average speed), driving events, the last position and the comparison's tracks
+  are shown in the same table card as missing data, in the page's colours and its Inter (Leaflet set
+  Helvetica / Arial on every map — now each map, its cards and controls read in the page's font), instead
+  of a thin white strip; the trip pins' start and end in a one-line card.
+- **A jump or a stale position, picked**: a click on one opens its panel in the side rail — how far,
+  in how long, the speed it would take, the satellites, and the packets before and after (each one
+  click away), marked on the map. A driving event or the last position opens its packet.
+- **Missing data on hover is a small table**: start and end, each with its time and position, then
+  the duration, how far apart and what kind — in the page's own colours, not a white strip.
+- **What each figure means, on a held pointer**: every scorecard measure (and the comparison's),
+  every area tile and each part of the packets-by-mode panels explains what it is and what it is
+  used for after the pointer rests on it for 5 s — the house hold-tip, so nothing is printed on the
+  page. A test keeps every measure described.
+- **Trip times written once**: a trip's start and end read "17-11-2026 · 07:53:32 → 08:31:54" (the
+  date once, and not at all on the log's own first day), the map's pins "Start 07:53:32" and
+  "End 08:31:54".
+- **On time means within a margin that fits the interval**: a step between packets is on time within
+  ±1 s at intervals up to 20 s, ±2 s up to 2 min, ±3 s up to 10 min and ±5 s beyond (each band in
+  Settings) — no longer a fixed 10% of the interval, which allowed ±90 s on a 15 min sleep ping. The
+  scorecard says per mode how many steps came early, on time and late (Attention from 5%, Poor from
+  15% early or late), each row showing the interval and margin it was judged by.
+- **Missing data, picked on the map**: a click on a dotted line opens *Missing data* in the side
+  rail — data lost or asleep, its trip, how long, how far apart its two ends are (and the speed that
+  would take), about how many packets went missing, and its start and end: the last packet before
+  and the first after, each with time, position and a way to it. The Gaps section (and its Excel
+  sheet) gives every gap its start and end position and the distance between them.
+- **What is picked shows on a dark map**: a clicked line used to get the browser's focus box,
+  near-black and lost on the dark map; the page marks a picked packet or gap itself now, in the text
+  colour (light on dark, dark on light).
+- **The Device tile leads with alerts**: how many, then the three most frequent by name and count
+  (restarts and firmware on hover; restarts still set the tile's status). Tile captions wrap to two
+  lines, and a tile's header wraps rather than spilling out of a narrow tile.
+- **Lines or dots**: the track can be drawn one dot per packet (live bright, history small and dim,
+  no data still dotted lines) — remembered here.
+- **The summary fits a narrower page**: with the side rail open, the map and findings stack, the
+  packets-by-mode panels stack, and a card's legend wraps onto its own line.
+- **A scorecard for every log** — the comparison's scorecard for one device: every measure (data,
+  packets by mode, delivery, GPS, driving, power, device, network), each value in the colour of its
+  judgement against its limit (green good, amber attention, red poor) with the limit beside it, and
+  chips to show only the poor or attention rows. With a trip chosen, the whole log's value sits
+  beside the trip's. On the summary, as a Details section, and as a sheet in Excel. One table of
+  measures (`scorecard.py`) feeds both scorecards.
+- **Packets by mode, mode by mode** — a panel each for Active, Standby and Sleep: packets made
+  against those due and how many more or short (and about how many missed); live against history;
+  the steps against the interval (early, on time, late, missed); the interval between packets and
+  the delay to InTouch, each as average, median, min and max (with 90%, the spread, and live against
+  history); how long the device was in the mode; and notes that say what is behind the figures —
+  the packet types that made too many, the longest silence, how late history landed, the slow tail,
+  a clock running ahead, repeated times, how long standby really lasted. A mode the log never shows
+  says so. Due now counts each stretch's first packet, so a device that keeps its interval exactly
+  makes 100%; and standby's interval is learned only from the time before sleep (it used to borrow
+  the steps sleep was then judged by).
+- **Log analysis in tabs**, like Capture's sessions: each log opens in its own tab and keeps its
+  own page — the trip chosen, summary or details, the section, the rows' page and scroll — so
+  several analyses stay open side by side. The tabs (and which is in front) are remembered.
+- **Compare devices** — for benchmarking several devices fitted in one vehicle: *Select* logs, then
+  *Compare*. They are judged over the time all of them cover (each with its own intervals), in a
+  tab of their own: a tile per device saying how far it put the vehicle from the reference (the
+  first ticked: median and 90% apart, speed difference); a scorecard of every figure that tells
+  them apart — data, packets by mode, delivery, GPS, agreement, driving, power, device, network —
+  the best of each row green and the worst red (ties marked alike); the tracks on one map as
+  nested stripes so every device shows on a shared road; speed and delay on one time axis;
+  packets by mode per device; and an Excel workbook (`GET /api/analysis/compare`, `…/compare.xlsx`).
+- **Back and forward**, like a file explorer: every jump — a finding, a timeline marker, a *Rows*
+  button, a section, summary or details, a trip — can be undone with ← (and redone with →) in the
+  header, Alt+← / Alt+→ or the mouse's back and forward buttons, returning to the same view,
+  section, rows filter and page, trip and scroll. Each tab keeps its own.
+- **Three kinds of line on the track**: live packets solid and bright; history packets (sent
+  later) in the trip's colour, dimmed and thin; no data dotted. Stretches outside a trip are a
+  plain muted line now, so dots only ever mean missing data — and a long hop at a believable speed
+  (a 10 s device on a highway) is drawn as driving instead of leaving a hole in the line.
+- **Packets by mode** — how the device keeps time in each of its three modes: *Active* (ignition
+  on), *Standby* (ignition off, still awake for a while) and *Sleep* (after that, or after its
+  deep-sleep packet — the slowest rate). Per mode: the interval it should keep and the one it
+  showed most, the packets it made against those due (time in the mode ÷ the interval; every packet
+  counts) — *too few* below 90% (Poor), *Attention* below 98%, *too many* above 110% — how many
+  steps were on time, early or late, and the delay to InTouch. On the summary as a card, in Details
+  as *Modes*, on the timeline as the band under the speed, and in Excel as a *Modes* sheet. The
+  intervals come from **device profiles** (Settings → Device profiles: by the device's number or its
+  firmware; any number left empty is taken from the log); a device with no profile is judged by
+  what its own log shows most, and the finding says so. These replace the old "every N s with
+  ignition on/off" findings.
+- **A drive log saved again from Excel is refused**, saying why: Excel writes the device times as it
+  shows them (16-11-2026 18:07), the seconds gone — it used to analyse to an empty report.
+- **Map first, then the day**: the map and findings sit right under the tiles, the timeline below
+  them, each trip shaded on it in its own colour (a soft wash, numbered) so a stretch of the day
+  reads as its trip. Trip chips carry the day when a log spans several.
+- **Findings grouped by remark** — Poor, Attention, Note, Good — each group headed with its count,
+  and a button per remark to show that group alone (on the summary and in Details).
+- **Delete from the Logs list**: one log by the bin on its row, several by *Select* and ticking
+  them, or every log with *select all* — always asked first, removed in one call
+  (`POST /api/analysis/delete`).
+- **Device on the analysis page**: a new area and section for the device itself.
+  - **Starts and restarts**: the frame counter beginning again, how long the device was silent
+    before, and its boot report (reset reason, boot count). Frame holes are now counted within each
+    start, so a restart's repeated numbers are no longer read as loss. A hole within a minute of an
+    ignition change is said so.
+  - **AIS-140 alerts** from `otherData` (PacketType + alertId), named from the standard's table
+    with the device's own code beside it; codes outside the table are listed. Ignition alerts are
+    checked against the ignition input: one that disagrees, a change with no alert, a repeat.
+    The ignition flickering (changes within 30 s) is counted. Driving events are named by the
+    alert they came with (harsh braking …).
+  - **Firmware** version in the header, and any change during the log.
+  - **Named now**: `greenDriveType` 1 is harsh acceleration and 2 harsh braking; the DBG packet is
+    Zenithra's debug report (it carries the boot report). Driving events are judged once named.
+  - **Deep sleep** (DSEN, DeepSleepENable — the last packet before the device sleeps, sent when its
+    internal battery is low and the main supply is disconnected): each one with the readings it was
+    sent with, whether it came during an engine start, and whether the device really went quiet
+    after it. One sent with the battery not low or the supply connected, or followed by more rows,
+    is flagged.
+- **More checks**: the reporting interval with the ignition on and off and how often it is kept;
+  rows stored over 10 minutes late; rows with a GSM signal but no cell id (only for a device that
+  reports its cell); the supply's lowest point each time the engine starts (a dip there is no
+  longer called a power cut); internal-battery readings of 0 V.
+- **A missing battery is critical**: the main (external) battery missing — its supply under the
+  floor or the device's own power flag at 0, outside an engine start — and the internal battery
+  missing — it reads 0 V — are each flagged Poor with when and for how long, marked on the timeline,
+  banded red on the power chart and listed in Details; the device's own alerts for them (AIS-140
+  3, main power disconnected; 4, internal battery low) count too. A low internal battery (under
+  3.6 V or 20%) is Attention.
+- **Power chart**: main supply and the internal battery on one chart, each on its own axis, with
+  the ignition-on periods shaded and every engine start marked at its lowest supply.
+- **Delay over the day** on the analysis summary: how long each packet took from the device
+  making it to landing on InTouch — each period's median and its slowest packet, against the
+  30 s limit — next to how many packets took how long.
 
 ### Changed
 - **Runway looks like Supabase Studio.** Its colours, type and density now follow Supabase's:
@@ -17,6 +201,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
   (conditional pass, signature sub-signals, hex, test sessions, running jobs, the Prod
   environment) are now blue-violet. The app and tray icon are green. Headings stay in sentence
   case — Supabase's capitalised labels were not adopted.
+- **A fixed banner across the top of every page**, like Supabase's: *Runway* with its version,
+  your greeting (*Hello, Name*), and the page you are on — then the page's own figures, the
+  Live / Idle chip and the theme switch. The greeting moved there from the Dashboard, so it shows
+  on every page.
+- **Sidebar control**, as in Supabase: the button at the foot of the sidebar opens a menu —
+  *Expanded*, *Collapsed* (icons only) or *Expand on hover* (icons only, opening over the page
+  while the pointer is on it). The choice is remembered. A narrow window always expands on hover.
+- **The window's title bar matches Runway** instead of showing a light Windows bar over a dark
+  app: Runway's window opens in its own Edge profile, in Edge's dark mode while Runway's theme is
+  dark. A theme switched while the window is open reaches the title bar the next time it opens.
+- **A run from source asks your name, shows it and reports usage too**, so the whole flow can be
+  checked without a release. Its reports are marked as a development build, so the user list
+  tells them apart; `RUNWAY_USAGE=off` switches reporting off (the tests do).
+- **The open tab stands out**: in Capture, Packet parser and Device OTA the selected session tab
+  is raised off the bar with a lighter fill and a shadow, so the one you are working in is plain
+  to see.
+- **Drag to resize, within limits**: the sidebar (180–380 px), every side pane (Capture's session,
+  the Dashboard's packet detail, the Parser's summary, the Signatures and Protocols lists, Device
+  OTA's profile), the Dashboard's split between the map and the packets, its devices list, and
+  every table column. Each keeps a minimum and a maximum so nothing is squeezed out, is remembered,
+  and goes back to its default on a double-click of its edge.
 - **Runway opens like an app.** It used to start a black command window and then a browser tab;
   now it opens in **its own window** (Edge's app mode: no address bar, no tabs, Runway's title and
   icon) and shows itself **by the clock**: left-click opens Runway, right-click has *Open Runway*,

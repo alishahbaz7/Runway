@@ -259,5 +259,60 @@ class SendTest(unittest.TestCase):
         self.assertIsNotNone(self.server.seen[-1][1]["sessions"][-1]["endedAt"])
 
 
+class PolicyTest(unittest.TestCase):
+    """Control (server v4): the answer carries the copy's policy; it is kept across restarts and
+    offline, read with feature(), and a change is announced once."""
+
+    def reporter(self, folder, transport):
+        return uc.UsageReporter("T", "1.0.0", folder, transport=transport, facts=FACTS)
+
+    def test_the_policy_in_the_answer_is_kept_used_and_announced(self):
+        folder = tempfile.mkdtemp()
+        answers = [{"ok": True, "policy": {"features": {"imu": False, "protocols": True}, "groups": ["pilot"]}}]
+        seen = []
+        r = self.reporter(folder, lambda *a, **kw: answers[0])
+        r.on_policy = seen.append
+        self.assertIsNone(r.feature("imu"))                  # nothing yet: the app's default
+        r.start(background=False, at_exit=False)
+        r.flush()
+        self.assertIs(r.feature("imu"), False)
+        self.assertIs(r.feature("protocols"), True)
+        self.assertIsNone(r.feature("other"))
+        self.assertEqual(len(seen), 1)
+        r.flush()
+        self.assertEqual(len(seen), 1)                       # the same policy again: not announced
+        answers[0] = {"ok": True, "policy": {"features": {"imu": True}, "groups": []}}
+        r.flush()
+        self.assertEqual(len(seen), 2)
+        self.assertIs(r.feature("imu"), True)
+        r.stop()
+
+        def offline(*a, **kw):
+            raise uc.SendError("offline")
+        again = self.reporter(folder, offline)
+        again.start(background=False, at_exit=False)
+        again.flush()
+        self.assertIs(again.feature("imu"), True)            # the last policy holds while offline
+        self.assertTrue(again.status()["policy_at"])
+        again.stop()
+
+    def test_an_old_server_answer_without_a_policy_changes_nothing(self):
+        r = self.reporter(tempfile.mkdtemp(), lambda *a, **kw: {"ok": True})
+        r.start(background=False, at_exit=False)
+        r.flush()
+        self.assertIsNone(r.policy)
+        self.assertIsNone(r.feature("imu"))
+        r.stop()
+
+    def test_a_failing_policy_handler_never_stops_reporting(self):
+        r = self.reporter(tempfile.mkdtemp(), lambda *a, **kw: {"ok": True, "policy": {"features": {"x": True}}})
+        r.on_policy = lambda p: 1 / 0
+        r.start(background=False, at_exit=False)
+        r.flush()
+        self.assertIs(r.feature("x"), True)
+        self.assertIsNone(r.error)
+        r.stop()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -9,14 +9,18 @@ skills). The work lives in ``runway/usage.py`` and ``runway/update/``; this only
     POST /api/update/offered   the offer was shown (once per run)
     POST /api/update/later     Later
     POST /api/update/install   download, verify, install beside, restart through the launcher
+    POST /api/desktop/titlebar the banner's colour for Runway's own window's title bar
+    GET  /api/features         which pages this copy shows: the owner's policy, defaults, IMU by data
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
 import threading
 from typing import Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .. import install, usage as usage_mod
@@ -71,6 +75,44 @@ async def usage_name(body: NameBody):
 async def usage_send():
     threading.Thread(target=usage_mod.usage.flush, daemon=True).start()
     return {**usage_mod.status(), "sending": True}
+
+
+@router.get("/api/features")
+async def features_status():
+    from .. import features
+    return await asyncio.to_thread(features.status)
+
+
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+class TitleBarBody(BaseModel):
+    background: str
+    text: str
+    dark: bool
+
+
+@router.post("/api/desktop/titlebar")
+async def desktop_titlebar(body: TitleBarBody, request: Request):
+    """The page's banner colour and theme, for Runway's own window. The theme is remembered: the
+    window opens in Edge's dark mode while it is dark (that is what darkens Edge's title bar); the
+    colour goes to the title bar through Windows where Windows draws it. Only a page on this
+    computer changes this computer's window."""
+    if not (_HEX.fullmatch(body.background) and _HEX.fullmatch(body.text)):
+        raise HTTPException(400, "Colours as #rrggbb")
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        return {"windows": 0}
+    from .. import desktop
+    from ..storage.live import config
+    theme = "dark" if body.dark else "light"
+    try:
+        if config.get("ui_theme", "dark") != theme:
+            config.set("ui_theme", theme)
+    except Exception:
+        pass                                     # remembering it is a nicety, never an error
+    n = await asyncio.to_thread(desktop.color_title_bars, body.background, body.text, body.dark)
+    return {"windows": n}
 
 
 @router.get("/api/update")

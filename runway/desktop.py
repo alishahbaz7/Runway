@@ -52,17 +52,26 @@ def find_browser() -> str | None:
     return None
 
 
-def app_window_command(browser: str, url: str) -> list[str]:
-    return [browser, f"--app={url}", "--window-size=1440,900"]
+def app_window_command(browser: str, url: str, profile_dir: str | None = None, dark: bool | None = None) -> list[str]:
+    """Edge's app mode. With profile_dir, Runway's window runs in its own Edge profile (its own
+    process), so its options apply even while the person's Edge is open — a window opened by a
+    running Edge takes that Edge's options. dark: Edge's dark mode, which is what gives the window
+    a dark title bar (an app window ignores the page's theme-color)."""
+    cmd = [browser, f"--app={url}", "--window-size=1440,900"]
+    if profile_dir:
+        cmd += [f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check"]
+    if dark:
+        cmd.append("--force-dark-mode")
+    return cmd
 
 
-def open_app_window(url: str) -> bool:
+def open_app_window(url: str, profile_dir: str | None = None, dark: bool | None = None) -> bool:
     """Opens Runway in its own window. Returns False when it fell back to a browser tab."""
     browser = find_browser()
     if browser:
         try:
             flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            subprocess.Popen(app_window_command(browser, url), creationflags=flags, close_fds=True,
+            subprocess.Popen(app_window_command(browser, url, profile_dir, dark), creationflags=flags, close_fds=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except OSError:
@@ -74,8 +83,10 @@ def open_app_window(url: str) -> bool:
     return False
 
 
-def runway_windows() -> list[int]:
-    """Visible top-level windows showing a Runway page (their title starts "Runway · ")."""
+def runway_windows(app_only: bool = False) -> list[int]:
+    """Visible top-level windows showing a Runway page (their title starts "Runway · "). With
+    app_only, Runway's own app windows only — a browser window holding a Runway tab is titled
+    "Runway · Dashboard - Microsoft Edge"; an app window carries the page's title alone."""
     if not IS_WINDOWS:
         return []
     import ctypes
@@ -91,12 +102,52 @@ def runway_windows() -> list[int]:
             if n:
                 buf = ctypes.create_unicode_buffer(n + 1)
                 user32.GetWindowTextW(hwnd, buf, n + 1)
-                if buf.value.startswith(WINDOW_TITLE_PREFIX):
+                if buf.value.startswith(WINDOW_TITLE_PREFIX) and not (app_only and " - " in buf.value):
                     found.append(hwnd)
         return True
 
     user32.EnumWindows(proto(each), 0)
     return found
+
+
+# ── the title bar ─────────────────────────────────────────────────────────────────────────────────
+# Edge's app window draws a plain Windows title bar (light on a light Windows) and ignores the
+# page's theme-color, so Runway colours its own windows' title bars through the window manager:
+# Windows 11 takes the exact colour (the banner's), Windows 10 at least the dark or light caption.
+DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR = 20, 35, 36
+
+
+def _colorref(hex_rgb: str) -> int:
+    """'#171918' → Windows' COLORREF (0x00BBGGRR)."""
+    h = hex_rgb.strip().lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return r | (g << 8) | (b << 16)
+
+
+def color_title_bars(background: str, text: str, dark: bool) -> int:
+    """Runway's app windows get a title bar in `background` with `text`; returns how many."""
+    if not IS_WINDOWS:
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        dwm = ctypes.windll.dwmapi
+    except OSError:
+        return 0
+    done = 0
+    for hwnd in runway_windows(app_only=True):
+        took = False
+        for attr, value in ((DWMWA_USE_IMMERSIVE_DARK_MODE, 1 if dark else 0),
+                            (DWMWA_CAPTION_COLOR, _colorref(background)),
+                            (DWMWA_TEXT_COLOR, _colorref(text))):
+            v = wintypes.DWORD(value)
+            try:
+                took = dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), attr, ctypes.byref(v), ctypes.sizeof(v)) == 0 or took
+            except OSError:
+                pass
+        done += took
+    return done
 
 
 def focus_window() -> bool:
@@ -116,10 +167,10 @@ def focus_window() -> bool:
     return True
 
 
-def show(url: str) -> None:
-    """Runway's window to the front, or a new one."""
+def show(url: str, **window) -> None:
+    """Runway's window to the front, or a new one (window: open_app_window's options)."""
     if not focus_window():
-        open_app_window(url)
+        open_app_window(url, **window)
 
 
 # ── a message box ─────────────────────────────────────────────────────────────────────────────────
