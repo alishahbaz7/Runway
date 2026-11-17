@@ -36,11 +36,28 @@ def reporting(tmp_path, monkeypatch):
     r.stop()
 
 
-async def test_a_development_run_reports_nothing():
+async def test_switched_off_reports_nothing():
+    """RUNWAY_USAGE=off (the test suite's own setting, conftest.py) — no name asked, nothing sent."""
     async with _client() as c:
         s = (await c.get("/api/usage")).json()
     assert s["enabled"] is False and s["needs_name"] is False
-    assert s["disabled_reason"] == "Development runs do not report usage"
+    assert s["disabled_reason"] == "Usage reporting is switched off on this computer"
+
+
+def test_a_run_from_source_reports_as_dev(monkeypatch):
+    """The user, 13-11-2026: a development run asks the name and reports too, marked build "dev"."""
+    import importlib
+
+    monkeypatch.delenv("RUNWAY_USAGE", raising=False)
+    monkeypatch.delenv("RUNWAY_USAGE_URL", raising=False)
+    try:
+        fresh = importlib.reload(usage_mod)
+        assert fresh.ENABLED is True
+        assert fresh.usage.build == "dev"                       # tests run from source
+        assert fresh.usage.url.startswith("https://") and "supabase.co" in fresh.usage.url
+    finally:
+        monkeypatch.setenv("RUNWAY_USAGE", "off")
+        importlib.reload(usage_mod)
 
 
 async def test_the_first_start_asks_the_name_once(reporting):

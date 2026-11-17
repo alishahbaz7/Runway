@@ -71,11 +71,13 @@ INSTALL
   Runway.exe to the taskbar or Start: it is the one program to start.
 
 RUN IT
-  1. Start Runway.exe. A console window opens (version banner + logs) and your
-     browser opens the dashboard at  http://127.0.0.1:8080
+  1. Start Runway.exe. Runway opens in its own window, and its icon appears by
+     the clock (it also answers at  http://127.0.0.1:8080  in any browser).
        - If Windows SmartScreen warns (unsigned):  More info -> Run anyway.
   2. The first start asks your name once.
-  3. To stop: close the console window.
+  3. Closing the window leaves Runway running — listeners and relays keep going.
+     Open it again from Runway.exe or the icon by the clock.
+  4. To stop Runway: right-click the icon by the clock -> Quit Runway.
 
 UPDATES
   Runway checks for a newer version each time it starts and offers it; Update
@@ -104,10 +106,10 @@ COMMAND LINE (optional)
   versions\\{rel}\\{exe} codecs
   versions\\{rel}\\{exe} --version
 
-USAGE REPORTING
-  Runway reports your name, this computer, the app version and how the app is
-  used (time running, pages opened, errors, counts). Never device IMEIs,
-  packets, endpoints, keys or files. Settings -> Usage reporting shows it.
+YOUR NAME
+  The first start asks your name — to greet you, and to make Runway better
+  for you. Settings -> Usage reporting shows what is shared; never device
+  IMEIs, packets, endpoints, keys or files.
 """
 
 
@@ -256,6 +258,10 @@ def main() -> int:
             z.write(p, Path(INSTALL_FOLDER) / p.relative_to(stage))
 
     notes = changelog_section((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), VER)
+    if not notes:
+        print(f"ERROR: the CHANGELOG section for {VER} is empty — copies would be offered an update "
+              "with no notes. Write it, then build again.", file=sys.stderr)
+        return 1
     sha, size = sha256_of(zpath), zpath.stat().st_size
     (DIST / "latest.json").write_text(json.dumps(build_manifest(notes=notes, sha=sha, size=size, minimum=minimum),
                                                  indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

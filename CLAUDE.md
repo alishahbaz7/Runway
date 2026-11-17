@@ -113,6 +113,20 @@ minutes 365, archive forever by default). Purges go device by device through the
 `(device_id, time)` indexes, in batches — a bare time filter scans every row each hour. Any new
 per-packet table needs a retention rule here and an index that serves its purge.
 
+**Log analysis** (`runway/analysis/`, `api/analysis.py`, `web/analysis.*`): a platform report read
+back and judged. `drivelog.py` reads the drive-log CSV — its layout varies (12 to 92 columns), so
+`COLUMNS` maps column name → row field and reader, and rows are sorted by device time.
+`analyse.py` is pure computation: every check becomes a finding (`area`, `level`, `text`, and the
+detail `view` + `filter` that shows its rows); the limits a status is judged by are `LIMITS`, the
+tunables `SETTINGS`, packet-type and driving-event names `PACKET_TYPES` / `DRIVING_EVENTS` (empty
+until the platform's meaning is confirmed — never guess a name into them); AIS-140 alerts are named
+from `AIS140_ALERTS` (the standard's table; `ROUTINE_CODES` keeps NR and our IMU packets out). Frame
+numbers are analysed per *run* — a run ends where the counter falls back to the start (a restart) — so
+a restart's repeats are never loss. Per-row flags go to the row view. A trip is analysed on its own (`analyse(log, span=…)` → `part()`): its rows keep their `"k"` from the whole log, so every check must index rows and per-row lists by `r["k"]`, never by position (`ign_k` is the ignition read that way); `store.part` caches the last few, never on disk. Packet generation by mode (`modes.py`: active / standby / sleep — interval, packets made ÷ due, steps on time, delay) takes each interval from a device profile (the user's, config `analysis_profiles`, matched by device number then firmware prefix; the built-in `PROFILES` stays empty until a device's figures are confirmed) else learns it from the log; a trip is judged by its whole log's intervals (`fixed`). A comparison (`compare.py`, devices in one vehicle) judges each log over the time all share (`store.part`). Both it and every log's own scorecard read one table, `scorecard.py`: a new measure is a `METRICS` row (group, label, unit, which side is better, how it is read from a report) and, if it has a limit, a `JUDGE` row. The page keeps one tab per open log or comparison (`tabs`, each log's page state stashed with it) and a back/forward list of places per tab — a new jump calls `remember()` before it moves. The right rail (`renderRail`: findings, scorecard, insights, the packet or gap picked on the map — `mapPoint` / `mapGap`) redraws from `renderHead`, so it follows every report or trip change; the maps run without Leaflet's keyboard handler (its focus scrolled a half-hidden map between press and release, losing the click). `store.py` keeps each analysis in `data/analysis/<id>/` (the upload gzipped, the
+report, the flags) and caches the last two parsed logs. A new check = a function, a `LIMITS` row,
+a finding; a new column = a `COLUMNS` row. Tests build drive logs in code — never commit a
+device's real log (the repo is public).
+
 **Pipeline ↔ API bridge** (`runway/storage/live.py`): two process-wide singletons connect the
 parse loop to the web layer — `store` (ring buffer + per-device summaries; the `memory_store` sink
 writes it, REST reads it) and `hub` (fan-out bus; the `ws_broadcast` sink publishes, each dashboard
@@ -143,15 +157,38 @@ wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static
   report to the shared Supabase server — counts only, never IMEIs/packets/endpoints/keys; add a
   counter with `usage.count("camelCaseName")`. `runway/update/` checks the GitHub releases of this (public)
   repo (`config.py`), installs beside, restarts through the launcher (`--wait-port`, a marker in
-  `data/update.json`). Both are off in a run from source unless pointed at a test server
-  (`RUNWAY_USAGE_URL`, `RUNWAY_UPDATE_MANIFEST_URL`). Page side: `web/appctl.js`, loaded by the
-  shell. Packaging and publishing: `packaging/README.md`.
-- **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse is the
-  bar). `shell.js` builds the rail + top bar around each page's `#content` and exposes
+  `data/update.json`). Usage reporting is on in a run from source too (the user wants the name
+  asked and the flow checked there), sent with build `dev`; `RUNWAY_USAGE=off` switches it off and
+  `tests/conftest.py` does so — no test may reach the real server. Updates stay off from source
+  unless pointed at a test channel (`RUNWAY_UPDATE_MANIFEST_URL`; `RUNWAY_USAGE_URL` likewise for
+  usage). Page side: `web/appctl.js`, loaded by the shell. Packaging and publishing: `packaging/README.md`.
+  **Features** (control, server v4): `runway/features.py` lists each page and its default (shown,
+  `more`, or `data` — IMU once data exists); the owner's policy comes back in the usage answer
+  (`usage.feature(name)`: True/False/None) and wins; `/api/features` gives the page the result and
+  `/api/health`'s `features_key` tells it when to re-read; the shell applies owner → the person's
+  own Settings choice → default. A new page needs a `FEATURES` row and a rail entry with the same id.
+- **On the desktop** (`runway/desktop.py`, stdlib ctypes): `serve` opens Runway in Edge's app mode
+  (its own window) in its own Edge profile (`data/window`), with Edge's dark mode while Runway's
+  theme is dark (`ui_theme`, remembered by the page through `/api/desktop/titlebar`) — an app
+  window ignores theme-color, and that is what darkens its title bar. It opens unless one of this
+  server's pages is already open; a second start finds the
+  running Runway (`/api/health`) and brings it to the front; release builds are windowed (no
+  console — `packaging/runway_main.py` gives a terminal command its console back and writes
+  `data/runway.crash.log` + a message box if start-up fails) and show a tray icon (Open · Logs ·
+  Quit, Quit asks while listeners run; `RUNWAY_TRAY=1` shows it from source). It stays a server
+  underneath on purpose: closing the window must not stop 24x7 relays.
+- **UI: one frame and one kit, in the house style** (the `utility-ui` skill; BluePulse sets the
+  layout and components, Supabase Studio the look — palette, Inter, density). `shell.js` builds
+  the fixed banner (Runway · version / *Hello, Name* / page · the page's controls · chips) and the
+  rail around each page's `#content` and exposes
   `window.RunwayUI` — the one icon map (`icons`, `icon()`, `<span data-icon>` painted on load;
   a `<template>`'s clones need `paint()`), `setLabel` (icon + word), `foldable` (side panes,
-  `data-fold`), `confirm` / `prompt` (never the browser's), and 5 s hold-tips (`data-tip`).
-  `style.css` holds the tokens (`--dim --frame --accent-soft`, the `--*-ink` tones) and the kit;
-  `ota.css` only Device OTA's own parts. Sentence case, no emoji on controls, no rule on a bare
+  `data-fold`; their inner edge resizes them, `data-fold-min/-max`), `resizable` (any edge,
+  `data-resize` + `-edge -var -min -max -keep`: writes a CSS variable on the parent, which the
+  page's CSS reads — a new split must read it), `confirm` / `prompt` (never the browser's), and 5 s
+  hold-tips (`data-tip`). Table columns resize by their header edge, remembered per page.
+  `style.css` holds the tokens (`--dim --frame --accent-soft`, `--primary-*` / `--btn-bg` for
+  buttons, `--info` for "a second kind" beside green, the `--*-ink` tones) and the kit; Inter is
+  bundled in `web/fonts/` (never a CDN — Runway runs offline); `ota.css` only Device OTA's own parts. Sentence case, no emoji on controls, no rule on a bare
   `main`/`aside`/`section`/`header`/`nav` — `tests/test_ui.py` fails otherwise. Verify UI changes
   driven and populated in headless Edge, never from an empty page.

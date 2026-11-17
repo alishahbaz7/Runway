@@ -40,6 +40,12 @@ single new file in `runway/codecs/` — nothing downstream changes.
    archived as received, one file per device per day, and a day can be **replayed** to a
    platform. Also **webhook/HTTP** and **SQLite** sinks (Postgres/Timescale on the roadmap).
 
+And **Log analysis**: drop in a drive log exported from the platform and it is judged — a status
+per area (completeness, delivery, GPS, power, driving, device), packets by mode (active, standby,
+sleep: made against due, on time, delay), a scorecard, trips on a map with missing data and jumps
+marked, and every finding one click from its rows. Several logs open in tabs; devices fitted in one
+vehicle can be **compared** side by side. Excel export throughout.
+
 Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
 for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build
 (see `packaging/`). Runs **locally first**, packaged in **Docker** so your team can push it to the cloud.

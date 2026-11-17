@@ -22,10 +22,11 @@
   <main id="dash-main" class="ui-split">
     <!-- the map on top, devices and the packet table along the bottom -->
     <div id="center">
-      <div id="dash-hello" class="dash-hello" hidden></div>
       <div id="map"></div>
-      <div id="bottom">
-        <div id="sidebar">
+      <div id="bottom" data-resize="dash-table" data-resize-edge="top" data-resize-var="--dash-bottom-h"
+           data-resize-min="140" data-resize-keep="160" data-resize-title="the map and the packets">
+        <div id="sidebar" data-resize="dash-devices" data-resize-edge="right" data-resize-var="--dash-dev-w"
+             data-resize-min="180" data-resize-max="460" data-resize-title="the devices list">
           <div class="dev-head">
             <h2>Devices</h2>
             <button id="clear-btn" class="ghost mini danger" type="button"><span data-icon="trash"></span>Clear</button>
@@ -51,7 +52,7 @@
     </div>
 
     <!-- the selected packet, in a pane that folds away -->
-    <div id="detail" data-fold="dash-detail" data-fold-side="right" data-fold-title="Packet detail">
+    <div id="detail" data-fold="dash-detail" data-fold-side="right" data-fold-title="Packet detail" data-fold-min="280">
       <div class="pane-head">
         <span class="pane-title">Packet detail</span>
         <span class="spacer"></span>

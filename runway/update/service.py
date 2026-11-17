@@ -309,7 +309,7 @@ class UpdateService:
         subprocess.Popen([launcher, "--after-update", *args, "--wait-port", "60"],
                          cwd=self.root, creationflags=flags, close_fds=True)
         log.info("update: launcher started; shutting down for the new version")
-        _daemon_timer(0.8, _shut_down)
+        _daemon_timer(0.8, shut_down)
 
 
 def _daemon_timer(seconds: float, fn: Callable[[], None]) -> None:
@@ -318,9 +318,9 @@ def _daemon_timer(seconds: float, fn: Callable[[], None]) -> None:
     t.start()
 
 
-def _shut_down() -> None:
+def shut_down() -> None:
     """Asks the server to stop as Ctrl+C would — listeners close, reports flush — and makes sure
-    the process ends even if something hangs."""
+    the process ends even if something hangs. Also what the tray's Quit Runway does."""
     _daemon_timer(20.0, lambda: os._exit(0))
     try:
         signal.raise_signal(signal.SIGINT)

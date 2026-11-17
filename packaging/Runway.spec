@@ -27,6 +27,8 @@ datas = [
     # first run by app.py:_seed_protocols so the send-command catalogue works from a bare
     # exe. Kept OUT of runway/ so it can't be mistaken for an importable package.
     ("../data/protocols", "_defaults/protocols"),
+    # the tray icon's picture (runway/desktop.py loads it from _MEIPASS)
+    ("runway.ico", "."),
 ]
 
 # uvicorn loads its protocol/loop backends by string; websockets and the runway plugins
@@ -60,7 +62,10 @@ exe = EXE(
     exclude_binaries=True,
     name=RELEASE_NAME,
     icon="runway.ico",
-    console=True,          # the startup banner, the URL and the logs
+    # No console window: Runway opens in its own window and shows itself by the clock (tray icon,
+    # runway/desktop.py); its log is on the Logs page. Commands run from a terminal still print
+    # there (runway_main.py attaches to it).
+    console=False,
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name=RELEASE_NAME, upx=False)

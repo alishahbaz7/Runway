@@ -1,7 +1,7 @@
 /* Runway — usage reporting and self-update in the page (the app-control and app-updates skills).
  *
  *   - First start: the name, asked once, before anything else; the dialog cannot be dismissed.
- *   - The Dashboard greets the person: "Hello, Name".
+ *   - The banner greets the person on every page: Runway / "Hello, Name" / the page.
  *   - Updates: a newer version is offered once per run, with its notes and the listeners its
  *     restart restarts; Later leaves a chip in the top bar. Update downloads, verifies, installs
  *     beside this version and restarts into it — the page follows on its own.
@@ -48,8 +48,14 @@
   let upd = null;             // GET /api/update
 
   // ---- first start: the name ---------------------------------------------------------------------
+  // A welcome, not a notice: the app getting to know its person (the user, 12-11-2026: "Who is
+  // using Runway? Runway reports your name…" read as someone watching — "not acceptable at all").
+  // The same words as BluePulse, so every app greets the same way; what is shared is in Settings.
   // Name only; Continue once something is typed; no Esc, no backdrop click — but nothing else waits
   // on the server: the name is saved at once and sent in the background.
+  const WELCOME = "Hi! May I have your name, please?";
+  const WELCOME_TEXT = "We'll use it to greet you and to make Runway better for you. "
+    + "Settings → Usage reporting shows what is shared.";
   function askName(edit) {
     return new Promise((resolve) => {
       const d = el("dialog", "ui-dlg");
@@ -57,12 +63,9 @@
         '<form method="dialog"><div class="ui-dlg-head"><h2></h2></div>' +
         '<div class="ui-dlg-body"></div>' +
         '<div class="ui-dlg-foot"><span class="spacer"></span></div></form>';
-      d.querySelector("h2").textContent = edit ? "Your name" : "Who is using Runway?";
+      d.querySelector("h2").textContent = edit ? "Your name" : WELCOME;
       const body = d.querySelector(".ui-dlg-body");
-      if (!edit) {
-        body.appendChild(el("p", "ui-dlg-text",
-          "Runway reports your name, this computer, the app version and how the app is used."));
-      }
+      body.appendChild(el("p", "ui-dlg-text", WELCOME_TEXT));
       const lab = el("label", "ui-dlg-field", "Name");
       const input = el("input");
       input.maxLength = 80;
@@ -109,13 +112,16 @@
     });
   }
 
-  // ---- the greeting, on the Dashboard ------------------------------------------------------------
+  // ---- the greeting, in the banner on every page (Runway / Hello, Name / page) --------------------
   function greet() {
-    const g = document.getElementById("dash-hello");
-    if (!g) return;
+    const g = document.getElementById("banner-hello");
+    const t = document.getElementById("banner-hello-t");
+    if (!g || !t) return;
     const name = usage && usage.enabled && usage.name;
-    g.textContent = name ? "Hello, " + name : "";
+    t.textContent = name ? "Hello, " + name : "";
     g.hidden = !name;
+    const sep = document.getElementById("banner-hello-sep");
+    if (sep) sep.hidden = !name;
   }
 
   // ---- updates: the chip, the offer, the progress ------------------------------------------------

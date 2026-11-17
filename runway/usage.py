@@ -1,9 +1,12 @@
 """Usage reporting for Runway (the app-control skill) — who uses this copy, which version, and how.
 
 One reporter for the app, sending to the shared usage server every app of this user reports to,
-as app "Runway". Release builds only: a run from source reports nothing unless pointed at a test
-server on purpose (``RUNWAY_USAGE_URL``). Reports wait in ``data/usage.json`` until the server has
-them, so starts made offline still count; nothing here may slow or stop Runway.
+as app "Runway". Release builds and runs from source both report — the user, 13-11-2026, wants
+the name asked and the flow to reach the server from a development run too, to check it — and
+each report carries its build ("release" / "dev"), so the user list tells them apart.
+``RUNWAY_USAGE=off`` switches reporting off (the test suite does); ``RUNWAY_USAGE_URL`` points it
+at a test server. Reports wait in ``data/usage.json`` until the server has them, so starts made
+offline still count; nothing here may slow or stop Runway.
 
 What is reported: the name the person gave once, this computer (login, computer name, Windows
 version), the app version, how long Runway ran, the pages opened, errors, and Runway's own counts
@@ -21,7 +24,8 @@ from .storage.db import DATA_DIR
 from .usage_client import URL, UsageReporter
 
 _TEST_URL = os.environ.get("RUNWAY_USAGE_URL")
-ENABLED = install.CHANNEL == "release" or bool(_TEST_URL)
+SWITCHED_OFF = os.environ.get("RUNWAY_USAGE", "").strip().lower() in ("0", "off", "false", "no")
+ENABLED = not SWITCHED_OFF
 
 usage = UsageReporter(app=install.APP_NAME, version=__version__, data_dir=DATA_DIR,
                       enabled=ENABLED, build=install.CHANNEL, url=_TEST_URL or URL)
@@ -68,7 +72,7 @@ def disabled_reason() -> str | None:
     """Why reporting is off on this copy, in words; None when it is on."""
     if usage.enabled:
         return None
-    return "Development runs do not report usage"
+    return "Usage reporting is switched off on this computer"
 
 
 def status() -> dict:

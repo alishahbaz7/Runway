@@ -24,6 +24,7 @@ import asyncio
 import io
 import json
 import logging
+import mimetypes
 import re
 import sys
 import threading
@@ -42,6 +43,10 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..core import registry
+
+# The bundled font (web/fonts/*.woff2): Windows' MIME table often lacks it, and the static files
+# would then go out as text/plain.
+mimetypes.add_type("font/woff2", ".woff2")
 from ..core.interfaces import Source
 from ..core.models import RawFrame
 from ..convert import log_export
@@ -53,6 +58,7 @@ from ..storage.db import DATA_DIR
 from ..storage.live import config, db, hub, packet_log, store
 from .. import usage as usage_mod
 from ..usage import count as usage_count, page_of
+from . import analysis as analysis_api
 from . import appctl
 
 log = logging.getLogger("runway.api")
@@ -271,6 +277,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 app.include_router(appctl.router)
+app.include_router(analysis_api.router)
 
 
 def _running_listeners() -> int:
@@ -650,7 +657,17 @@ async def health(probe: bool = False):
         "mode": _activity_mode(),
         "deps": {"openpyxl": has_openpyxl},
         "page_seen_s": round(time.time() - _page_seen_at, 1) if _page_seen_at else None,
+        "features_key": _features_key(),
     }
+
+
+def _features_key() -> str | None:
+    """Changes when the pages this copy shows change (a new policy, IMU data arriving)."""
+    try:
+        from .. import features
+        return features.key(features.resolve(usage_mod.usage.feature, features.imu_data_exists()))
+    except Exception:
+        return None
 
 
 @app.get("/api/codecs")

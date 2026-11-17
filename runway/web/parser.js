@@ -826,7 +826,7 @@
     panels.appendChild(panel);
     window.RunwayUI.paint(panel);                      // a template's icons are not in the page yet
     window.RunwayUI.foldable(panel.querySelector(".parser-right"),
-      { key: "parser-summary", side: "right", title: "Summary" });
+      { key: "parser-summary", side: "right", title: "Summary", min: 300 });
 
     const btn = el("div", "tab");
     const label = el("span", "tab-label", name);

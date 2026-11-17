@@ -111,6 +111,17 @@ def test_no_rule_on_a_bare_structural_element():
                     f"{p.name}: a rule on bare {sel!r} — style the element by its class or id"
 
 
+def test_the_first_start_is_a_welcome_not_a_notice():
+    """The user, 12-11-2026, on "Who is using Runway? Runway reports your name, this computer…":
+    "Not acceptable at all" — it read as being watched. The first start greets, as BluePulse does;
+    what is shared lives in Settings → Usage reporting."""
+    js = _code(_text(WEB / "appctl.js"))                 # what the page shows, not the comments
+    assert "Hi! May I have your name, please?" in js
+    assert "to greet you" in js
+    for notice in ("Who is using", "reports your name", "this computer, the app version"):
+        assert notice not in js, f"appctl.js: {notice!r} — the first start welcomes, it does not warn"
+
+
 def test_every_page_is_framed_by_the_shell():
     for p in PAGES:
         html = _text(p)
@@ -123,3 +134,45 @@ def test_stylesheets_balance():
     for p in STYLES:
         css = _text(p)
         assert css.count("{") == css.count("}"), f"{p.name}: unbalanced braces"
+
+
+def test_the_banner_names_the_app_the_person_and_the_page():
+    """The user, 13-11-2026, on Supabase's top line: a fixed banner where the application name, the
+    greeting and the page name are visible — on every page, so the greeting lives there."""
+    shell = _code(_text(WEB / "shell.js"))
+    for part in ('id = "banner"', 'class="bn-name">Runway<', 'id="banner-hello"', 'id="topbar-page"'):
+        assert part in shell, part
+    appctl = _code(_text(WEB / "appctl.js"))
+    assert 'getElementById("banner-hello")' in appctl and "dash-hello" not in appctl
+
+
+def test_side_panes_take_a_dragged_width():
+    """A pane's column reads the width it was dragged to (--pane-l-w / --pane-r-w), and folds over it."""
+    css = _text(WEB / "style.css")
+    for rule in ("#dash-main", "#sig-main, #proto-main", "#tcp-main, #qc-main, #cap-main", ".parser-main"):
+        body = css[css.index(rule + " {"):].split("}", 1)[0]
+        assert "var(--pane-l, var(--pane-l-w" in body or "var(--pane-r, var(--pane-r-w" in body, rule
+
+
+def test_the_font_ships_with_the_app():
+    """Inter (Supabase's typeface) is bundled, never fetched: Runway runs offline. Every font the
+    stylesheet loads is a file beside it, and its licence goes with it."""
+    css = _text(WEB / "style.css")
+    urls = re.findall(r'@font-face\s*{[^}]*url\("([^"]+)"\)', css)
+    assert urls, "no @font-face"
+    for u in urls:
+        assert not u.startswith(("http:", "https:", "//")), f"{u}: a font from the network"
+        assert (WEB / u).is_file(), f"{u}: missing"
+    assert (WEB / "fonts" / "Inter-LICENSE.txt").is_file()
+
+
+async def test_the_font_is_served_as_a_font():
+    """Windows' MIME table often has no .woff2; the server must not send the font as text/plain."""
+    from httpx import ASGITransport, AsyncClient
+
+    from runway.api.app import app
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/fonts/InterVariable.woff2")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "font/woff2"

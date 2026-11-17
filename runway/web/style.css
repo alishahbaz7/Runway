@@ -1,21 +1,41 @@
+/* Inter — Supabase's typeface, bundled (SIL Open Font License, fonts/Inter-LICENSE.txt) so Runway
+   looks the same offline and on a PC that does not have it installed. */
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
 :root {
-  /* ---- palette (dark, default): refined "current dark" — calmer blue/green ---- */
-  --bg: #0e1116;
-  --panel: #161b22;
-  --panel-2: #1c2330;
-  --hover: #232c3a;
-  --border: #2a3340;
-  --border-subtle: #1a212c;
-  --border-strong: #38424f;
-  --text: #d9e0ea;
-  --muted: #8b97a7;
-  --accent: #5ab0f0;
-  --accent-hover: #74bdf3;
-  --accent-2: #2ecfa0;
-  --warn: #ffb454;
-  --danger: #f2686b;
-  --on-accent: #04121d;
-  --accent-ring: rgba(90, 176, 240, .35);
+  /* ---- palette (dark, default): Supabase Studio's — a near-black canvas with a breath of green,
+     surfaces a step lighter, hairline borders, soft white text and the green brand (values
+     measured from supabase.com's own theme, 12-11-2026) ---- */
+  --bg: #131413;                    /* the canvas */
+  --panel: #171918;                 /* sidebars, bars, cards */
+  --panel-2: #1e201f;               /* raised: header rows, tiles, fields */
+  --hover: #232524;
+  --border: #252726;                /* hairlines */
+  --border-subtle: #1d1f1e;
+  --border-strong: #303231;         /* controls */
+  --text: #edefee;
+  --muted: #989a99;
+  --accent: #3ecf8e;                /* the brand green: focus, the active tab, links, toggles */
+  --accent-hover: #85e0ba;
+  --accent-2: #3ecf8e;              /* live / ok — the same green, as in Supabase */
+  --warn: #e6a019;
+  --danger: #e54d2e;
+  --info: #9491f5;                  /* blue-violet: a fact, not a success (Prod environment) */
+  --on-accent: #0b1a12;
+  --accent-ring: rgba(62, 207, 142, .28);
+  /* the filled primary button: Supabase's dark green with a green edge */
+  --primary-bg: #006239;
+  --primary-hover: #00754a;
+  --primary-border: #1f8a5a;
+  --primary-text: #edefee;
+  --btn-bg: #1e201f;                /* every other button: a quiet fill */
+  /* the open tab, raised off its bar: a lighter fill and a shadow (Supabase's editor tabs) */
+  --raised: #252726;
+  --raised-shadow: 0 4px 14px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .04);
   /* IMU lanes: categorical slots 1-2 (blue, orange), validated on --panel/--bg (dark) */
   --imu-acc: #3987e5;
   --imu-ori: #d95926;
@@ -24,18 +44,18 @@
   /* speed: context, in neutral ink (6.9:1 on --panel) — no hue to confuse with a series */
   --imu-spd: #9aa5b4;
 
-  /* surfaces / states (previously scattered one-off hexes, now tokens) */
-  --sel: #223047;
-  --badge-bg: #20303f;
-  --warn-bg: #2a2417;
-  --danger-bg: #3a2030;
-  --ok-bg: rgba(46, 207, 160, .16);
-  --bad-bg: rgba(242, 104, 107, .14);
-  --map-bg: #0a0d12;
-  --dot-dead: #4a5563;
-  --scrollbar: #313c4b;
-  --scrollbar-hover: #3f4c5e;
-  --scrim: rgba(0, 0, 0, .55);
+  /* surfaces / states */
+  --sel: #1a2a21;
+  --badge-bg: #1e201f;
+  --warn-bg: #2a2212;
+  --danger-bg: #2d1914;
+  --ok-bg: rgba(62, 207, 142, .14);
+  --bad-bg: rgba(229, 77, 46, .14);
+  --map-bg: #0f100f;
+  --dot-dead: #3d3f3e;
+  --scrollbar: #303231;
+  --scrollbar-hover: #3e403f;
+  --scrim: rgba(0, 0, 0, .6);
 
   /* elevation */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .32);
@@ -49,19 +69,19 @@
   /* live-packet colour code: live=green(--accent-2), history=amber(--warn),
      alarm=violet, unknown=neutral. "Other" packets stay uncoloured. */
   --pkt-alarm: #b57bff;
-  --pkt-unknown: #d9e0ea;
+  --pkt-unknown: #edefee;
 
-  /* ---- the house kit (BluePulse's language): secondary text, a border that shows on dark,
-     the accent's soft tint, and each tone's ink — the colour it takes as text (AA measured on
-     --bg, --panel and --panel-2, and on its own pill tint) ---- */
-  --dim: #aeb9c7;                   /* 7.9–9.5:1 */
+  /* ---- the kit: secondary text, a border that shows on dark, the accent's soft tint, and each
+     tone's ink — the colour it takes as text (AA measured on --bg, --panel and --panel-2) ---- */
+  --dim: #bcbdbc;
   --ok: var(--accent-2);
-  --frame: color-mix(in srgb, var(--border) 58%, var(--muted));
-  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
-  --ok-ink: var(--accent-2);
-  --warn-ink: var(--warn);
-  --accent-ink: var(--accent);
-  --danger-ink: var(--danger);
+  --frame: #303231;
+  --accent-soft: rgba(62, 207, 142, .12);
+  --ok-ink: #3ecf8e;
+  --warn-ink: #e6a019;
+  --accent-ink: #3ecf8e;
+  --danger-ink: #ef6a4f;
+  --info-ink: #9491f5;
   --tint: 14%;                      /* a pill's background: its tone at this strength */
   --strip-w: 52px;                  /* a folded side pane */
   color-scheme: dark;
@@ -69,51 +89,63 @@
 
 /* ---- light theme (toggle in the top bar; remembered in localStorage) ------ */
 :root[data-theme="light"] {
-  --bg: #f4f6fa;
+  /* Supabase's light theme: white surfaces on an almost-white canvas, grey hairlines, near-black text */
+  --bg: #fcfcfc;
   --panel: #ffffff;
-  --panel-2: #eef1f6;
-  --hover: #e5eaf1;
-  --border: #d8dee7;
-  --border-subtle: #e8ecf2;
-  --border-strong: #c3ccd8;
-  --text: #1b2430;
-  --muted: #5f6b7a;
-  --accent: #1f7fd6;
-  --accent-hover: #1a6cc0;
-  --accent-2: #12a97f;
-  --warn: #b5730a;
-  --danger: #d23b3f;
+  --panel-2: #f6f6f6;
+  --hover: #f0f0f0;
+  --border: #e6e6e6;
+  --border-subtle: #efefef;
+  --border-strong: #d6d6d6;
+  --text: #171717;
+  --muted: #6b6b6b;
+  --accent: #16b674;
+  --accent-hover: #097c4f;
+  --accent-2: #16b674;
+  --warn: #c27a00;
+  --danger: #e54d2e;
+  --info: #5b5bd6;
   --on-accent: #ffffff;
-  --accent-ring: rgba(31, 127, 214, .28);
+  --accent-ring: rgba(22, 182, 116, .25);
+  --primary-bg: #72e3ad;
+  --primary-hover: #5ed9a0;
+  --primary-border: #16b674;
+  --primary-text: #0b1a12;
+  --btn-bg: #ffffff;
+  --raised: #ffffff;
+  --raised-shadow: 0 3px 12px rgba(0, 0, 0, .13);
   --imu-acc: #2a78d6;                 /* same two slots, stepped for the light surface */
   --imu-ori: #eb6834;
   /* slots 3-4 sit under 3:1 on white: the charts' in-plot legends and the CSV are the relief */
   --imu-s1: #2a78d6; --imu-s2: #eb6834; --imu-s3: #1baf7a; --imu-s4: #eda100;
   --imu-spd: #5c6878;                 /* 5.7:1 on --panel */
 
-  --sel: #dbe9fb;
-  --badge-bg: #e6edf6;
-  --warn-bg: #fdf3e0;
-  --danger-bg: #fbe7e7;
-  --ok-bg: rgba(18, 169, 127, .14);
-  --bad-bg: rgba(210, 59, 63, .12);
-  --map-bg: #dfe6ee;
-  --dot-dead: #b3bcc8;
-  --scrollbar: #c4cdd9;
-  --scrollbar-hover: #a9b4c3;
-  --scrim: rgba(20, 28, 40, .38);
+  --sel: #e7f8ef;
+  --badge-bg: #f1f1f1;
+  --warn-bg: #fff5e2;
+  --danger-bg: #fdece9;
+  --ok-bg: rgba(22, 182, 116, .12);
+  --bad-bg: rgba(229, 77, 46, .10);
+  --map-bg: #e8eae9;
+  --dot-dead: #c4c6c5;
+  --scrollbar: #d6d6d6;
+  --scrollbar-hover: #bdbdbd;
+  --scrim: rgba(15, 15, 15, .35);
 
-  --shadow-sm: 0 1px 2px rgba(20, 30, 50, .08);
-  --shadow-md: 0 8px 24px rgba(20, 30, 50, .14);
-  --shadow-lg: 0 14px 40px rgba(20, 30, 50, .20);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .06);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, .10);
+  --shadow-lg: 0 14px 40px rgba(0, 0, 0, .16);
 
-  --pkt-unknown: #1b2430;   /* was white — needs dark ink on a light feed */
+  --pkt-unknown: #171717;   /* dark ink on a light feed */
 
-  --dim: #445060;                   /* 7.2–8.2:1 */
-  --ok-ink: #066c50;                /* the fills stay bright; their text form is darker for AA */
-  --warn-ink: #855400;
-  --accent-ink: #155fab;
-  --danger-ink: #b02d31;
+  --dim: #474747;
+  --frame: #d6d6d6;
+  --accent-soft: rgba(22, 182, 116, .12);
+  --ok-ink: #097c4f;                /* the fills stay bright; their text form is darker for AA */
+  --warn-ink: #8a5300;
+  --accent-ink: #097c4f;
+  --danger-ink: #b8331a;
+  --info-ink: #4646c2;
   --tint: 10%;
   color-scheme: light;
 }
@@ -125,8 +157,10 @@ tbody tr, .cols-row, .export-row {
   transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
 }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* a field in use: Supabase's — the edge brightens and a soft ring of the same grey, no colour */
 input:focus, select:focus, textarea:focus {
-  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
+  outline: none; border-color: color-mix(in srgb, var(--muted) 80%, var(--text));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--muted) 30%, transparent);
 }
 /* thin, theme-aware scrollbars (replaces the bright OS default in dark mode) */
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
@@ -137,9 +171,9 @@ input:focus, select:focus, textarea:focus {
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: padding-box; }
 /* gentle pulse ring for genuinely-live indicators */
 @keyframes runwayPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(46, 207, 160, .5); }
-  70%  { box-shadow: 0 0 0 6px rgba(46, 207, 160, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(46, 207, 160, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(62, 207, 142, .5); }
+  70%  { box-shadow: 0 0 0 6px rgba(62, 207, 142, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(62, 207, 142, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -159,11 +193,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   display: flex;
-  flex-direction: column;       /* topbar over [ rail | content ] */
+  flex-direction: column;       /* the banner over [ rail | content ] */
 }
 /* data/figures line up in columns */
 table, .tcp-feed-table, .conv-table, .stat-v, .kv .v, .sum-kv .v, .badge, .src-badge,
-.tcp-tab-count, .tcp-client-count, .tcp-port, .qc-imei, .rail-version {
+.tcp-tab-count, .tcp-client-count, .tcp-port, .qc-imei, .bn-version {
   font-variant-numeric: tabular-nums;
 }
 
@@ -171,38 +205,58 @@ table, .tcp-feed-table, .conv-table, .stat-v, .kv .v, .sum-kv .v, .badge, .src-b
    Form controls do not inherit the page font on their own, and a textarea left out of a colour
    rule draws black text on the dark panel — so every rule here names all four. */
 button, input, select, textarea { font-family: inherit; }
+/* Leaflet sets Helvetica / Arial on its maps; every map, its tooltips and controls read in the page's Inter */
+.leaflet-container { font-family: inherit; }
 select option, select optgroup { background-color: var(--panel); color: var(--text); }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 [hidden] { display: none !important; }
 
-/* ---- the frame: rail | (top bar · page) — BluePulse's shape ---------------------------------- */
-#app { flex: 1; min-height: 0; display: flex; flex-direction: row; }
+/* ---- the frame: the banner over rail | page — BluePulse's shape, Supabase's top line ---------- */
+#app { flex: 1; min-height: 0; display: flex; flex-direction: row; position: relative; }
 #main-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-#content > header { display: none; }          /* folded into the top bar by shell.js */
-#content > header .tag { color: var(--dim); }  /* the page description: becomes the title's hold-tip */
+#content > header { display: none; }          /* folded into the banner by shell.js */
+#content > header .tag { color: var(--dim); }  /* the page description: becomes the page crumb's hold-tip */
 
-#topbar {
-  flex: none; display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 12px 0 10px;
-  background: var(--bg); border-bottom: 1px solid var(--border); position: relative; z-index: 10;
+/* the banner: fixed across the top of every page — the app, the person, the page, as Supabase's
+   org / project / branch line; then the page's controls and the chips at the right */
+#banner {
+  flex: none; display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px 0 14px;
+  background: var(--panel); border-bottom: 1px solid var(--border); position: relative; z-index: 20;
+  min-width: 0;
 }
+a.bn-brand { display: inline-flex; align-items: center; gap: 10px; flex: none; color: var(--text); text-decoration: none; }
+.bn-logo { width: 26px; height: 26px; flex: none; border-radius: 7px; background: var(--primary-bg);
+  border: 1px solid var(--primary-border); color: var(--primary-text); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; }
+.bn-logo svg { display: block; width: 16px; height: 16px; }
+.bn-id { display: flex; flex-direction: column; justify-content: center; line-height: 1.15; min-width: 0; }
+.bn-name { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.bn-version { color: var(--dim); font-size: 11.5px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bn-version:empty { display: none; }
+/* Supabase's separator: a thin slanted stroke */
+.bn-sep { flex: none; width: 1px; height: 18px; margin: 0 6px; background: var(--border-strong); transform: rotate(20deg); }
+.bn-crumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-size: 14px; white-space: nowrap; }
+.bn-crumb .ui-ico { color: var(--muted); }
+.bn-crumb .ui-ico svg { width: 16px; height: 16px; }
+.bn-hello { color: var(--dim); }
+#banner-hello-t { overflow: hidden; text-overflow: ellipsis; }
+.bn-page h1 {
+  margin: 0; font-size: 14px; font-weight: 500; color: var(--text); letter-spacing: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bn-spacer { flex: 1; min-width: 8px; }
 .topbar-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
-  width: 36px; height: 36px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 8px;
+  width: 34px; height: 34px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 8px;
   background: transparent; color: var(--dim); cursor: pointer;
 }
 .topbar-btn:hover { background: var(--hover); color: var(--text); border-color: transparent; }
-.topbar-btn svg { display: block; width: 19px; height: 19px; }
-.topbar-page { min-width: 0; display: flex; align-items: center; padding-left: 2px; }
-.topbar-page h1 {
-  margin: 0; font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.topbar-page h1 b { color: var(--accent); }
-.topbar-spacer { flex: 1; }
+.topbar-btn svg { display: block; width: 18px; height: 18px; }
 .topbar-ctl { display: flex; align-items: center; gap: 8px; }
 .topbar-ctl:empty { display: none; }
-@media (max-width: 1000px) { .topbar-toggle { display: none; } }   /* always a rail there */
+/* a narrow window: the version, then the greeting, give way to the page's name */
+@media (max-width: 900px) { .bn-hello, #banner-hello-sep { display: none !important; } }
 
 /* status chip: a dot and a short word, toned by state (Live glows) */
 .ui-chip {
@@ -245,6 +299,7 @@ button.mini .ui-ico svg, .ui-pill .ui-ico svg { width: 14px; height: 14px; }
 .pill.dead, .pill.bad, .ui-pill.bad { --c: var(--danger-ink); }
 .pill.warn, .ui-pill.warn { --c: var(--warn-ink); }
 .pill.accent, .ui-pill.accent { --c: var(--accent-ink); }
+.pill.info, .ui-pill.info { --c: var(--info-ink); }
 .pill.muted, .ui-pill.muted { --c: var(--muted); }
 .ui-count { font-size: 12.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -262,7 +317,7 @@ button.mini .ui-ico svg, .ui-pill .ui-ico svg { width: 14px; height: 14px; }
 #env-warn { flex: none; margin: 10px 16px 0; }
 
 .ui-holdtip {
-  position: fixed; z-index: 200; max-width: 380px; padding: 8px 11px;
+  position: fixed; z-index: 1100; max-width: 380px; padding: 8px 11px;   /* above a full-screen map (Log analysis) */
   border: 1px solid var(--frame); border-radius: 7px; background: var(--panel-2); color: var(--text);
   font-size: 12.5px; line-height: 1.5; box-shadow: var(--shadow-md); pointer-events: none;
 }
@@ -322,9 +377,6 @@ dialog.ui-dlg.upd-dlg { width: min(560px, calc(100vw - 32px)); }
 .upd-prog-line { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
 .upd-bar { height: 6px; border-radius: 2px; background: var(--panel-2); overflow: hidden; }
 .upd-fill { height: 100%; background: var(--accent); transition: width .5s ease-out; }
-/* the Dashboard's greeting */
-.dash-hello { flex: none; padding: 12px 16px 10px; font-size: 20px; font-weight: 600; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bg); border-bottom: 1px solid var(--border); }
 
 /* ---- a pane's head: its title (and a count) over a rule, actions at the right ---------------- */
 .pane-head {
@@ -363,8 +415,26 @@ dialog.ui-dlg.upd-dlg { width: min(560px, calc(100vw - 32px)); }
 }
 @media (prefers-reduced-motion: reduce) { .ui-split { transition: none; } }
 
+/* ---- resize handles (shell.js resizable): a 6px strip on the edge; a hairline lights up on hover
+   and while dragging. The whole page takes the resize cursor during a drag, and nothing animates. */
+.ui-resize { position: absolute; z-index: 8; touch-action: none; outline: none;
+  grid-column: auto !important; grid-row: auto !important; }   /* placed by shell.js, not by a split's grid */
+.ui-resize.is-x { width: 6px; cursor: col-resize; }
+.ui-resize.is-y { height: 6px; cursor: row-resize; }
+.ui-resize::after { content: ""; position: absolute; background: transparent; transition: background-color .12s ease; }
+.ui-resize.is-x::after { top: 0; bottom: 0; left: 2px; width: 2px; }
+.ui-resize.is-y::after { left: 0; right: 0; top: 2px; height: 2px; }
+.ui-resize:hover::after { background: var(--border-strong); }
+.ui-resize.is-active::after, .ui-resize:focus-visible::after { background: var(--accent); }
+body.ui-resizing { user-select: none; }
+body.ui-resizing-x, body.ui-resizing-x * { cursor: col-resize !important; }
+body.ui-resizing-y, body.ui-resizing-y * { cursor: row-resize !important; }
+body.ui-resizing .ui-split, body.ui-resizing #rail, body.ui-resizing .ota-main { transition: none !important; }
+body.ui-resizing iframe, body.ui-resizing .leaflet-container { pointer-events: none; }
+
 /* ---- Dashboard ---------------------------------------------------------------------------------- */
-#dash-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--pane-r, 340px); }
+/* a pane's column: folded → the strip (--pane-l/-r), else the width dragged to (--pane-l-w/-r-w) */
+#dash-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--pane-r, var(--pane-r-w, 340px)); }
 #sidebar, #detail, #center, #sig-list-pane, #proto-list-pane, #sig-view, #proto-view,
 .fields, .parser-right { min-height: 0; overflow: auto; }
 #sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 12px 14px; }
@@ -375,8 +445,8 @@ dialog.ui-dlg.upd-dlg { width: min(560px, calc(100vw - 32px)); }
 #map { flex: 1; min-height: 260px; background: var(--map-bg); }
 
 /* bottom strip: devices beside the packet table (same border/margins as the list view) */
-#bottom { height: 36%; min-height: 170px; display: flex; border-top: 1px solid var(--border); }
-#bottom #sidebar { width: 240px; flex: none; border-right: 1px solid var(--border); }
+#bottom { height: var(--dash-bottom-h, 36%); min-height: 140px; flex: none; display: flex; border-top: 1px solid var(--border); }
+#bottom #sidebar { width: var(--dash-dev-w, 240px); flex: none; border-right: 1px solid var(--border); }
 #packets { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 .packets-bar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px 0 14px;
   border-bottom: 1px solid var(--border); background: var(--panel); font-size: 13px; color: var(--text); }
@@ -480,7 +550,7 @@ button.modal-x:hover { color: var(--text); background: var(--hover); border-colo
 .sig-item button.icon-only, .proto-item button.icon-only { width: 28px; padding: 0; }
 #sig-file-name, #proto-file-name { font-size: 12.5px; color: var(--dim); }
 
-#sig-main, #proto-main { flex: 1; display: grid; grid-template-columns: var(--pane-l, 320px) minmax(0, 1fr); min-height: 0; }
+#sig-main, #proto-main { flex: 1; display: grid; grid-template-columns: var(--pane-l, var(--pane-l-w, 320px)) minmax(0, 1fr); min-height: 0; }
 #sig-list-pane, #proto-list-pane { border-right: 1px solid var(--border); background: var(--panel);
   display: flex; flex-direction: column; overflow: hidden; }
 .list-search { flex: none; padding: 10px 12px 6px; }
@@ -534,17 +604,19 @@ input, select, button {
 textarea { color: var(--text); background: var(--panel-2); border: 1px solid var(--frame); border-radius: 6px; font-size: 13px; }
 input:where([type=checkbox], [type=radio]) { width: auto; accent-color: var(--accent); }
 input[type=file] { padding: 5px; }
+/* Supabase's buttons: the primary a deep green with a green edge and light text (not a bright
+   slab), every other one a quiet fill with a hairline; weight 500, never bold */
 button {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px; line-height: 1.25;
-  cursor: pointer; font-weight: 600; border-color: var(--accent);
-  background: var(--accent); color: var(--on-accent); margin-top: 10px;
+  cursor: pointer; font-weight: 500; border-color: var(--primary-border);
+  background: var(--primary-bg); color: var(--primary-text); margin-top: 10px;
 }
-button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button:hover { background: var(--primary-hover); border-color: var(--accent); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: .5; cursor: default; }
-button.ghost { background: transparent; color: var(--text); border-color: var(--frame); font-weight: 500; }
-button.ghost:hover { background: var(--hover); border-color: color-mix(in srgb, var(--frame) 70%, var(--text)); color: var(--text); }
-button.ghost:disabled:hover { background: transparent; border-color: var(--frame); }
+button.ghost { background: var(--btn-bg); color: var(--text); border-color: var(--border-strong); font-weight: 500; }
+button.ghost:hover { background: var(--hover); border-color: color-mix(in srgb, var(--border-strong) 80%, var(--text)); color: var(--text); }
+button.ghost:disabled:hover { background: var(--btn-bg); border-color: var(--border-strong); }
 button.ghost.danger:not(:disabled) { color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 button.ghost.danger:not(:disabled):hover { background: var(--danger-bg); border-color: var(--danger); }
 button.mini { width: auto; height: 28px; margin: 0; padding: 0 10px; gap: 5px; font-size: 12.5px; }
@@ -576,17 +648,26 @@ button.mini { width: auto; height: 28px; margin: 0; padding: 0 10px; gap: 5px; f
 #devices .meta { font-size: 12px; color: var(--dim); display: flex; justify-content: space-between; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); margin-right: 6px; }
 
-/* ---- every table: the data grid — a header band, rows a shade apart, a hover band ------------ */
+/* ---- every table: Supabase's grid — a quiet header band, hairlines between rows, no stripes ---- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th, .conv-table th, .sig-table th, .proto-table th, .tcp-feed-table th, .can-tbl th {
-  position: sticky; top: 0; z-index: 1; background: var(--panel-2); color: var(--text);
-  text-align: left; padding: 8px 10px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
-  border-bottom: 0; box-shadow: inset 0 -2px 0 var(--border); letter-spacing: 0;
+  position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--dim);
+  text-align: left; padding: 8px 10px; font-size: 12.5px; font-weight: 500; white-space: nowrap;
+  border-bottom: 0; box-shadow: inset 0 -1px 0 var(--border); letter-spacing: 0;
 }
-tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+/* a column's edge: a hairline between header cells, and the grip that resizes it (shell.js) */
+thead th::after {
+  content: ""; position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; z-index: 2; cursor: col-resize;
+  background: linear-gradient(var(--border), var(--border)) center / 1px 56% no-repeat;
+}
+thead th:last-child::after { right: 0; }
+thead th:hover::after { background-image: linear-gradient(var(--border-strong), var(--border-strong)); background-size: 1px 100%; }
+/* once a column is resized the table keeps those widths; what no longer fits ends in an ellipsis */
+table.ui-cols { table-layout: fixed; }
+table.ui-cols > thead > tr > th, table.ui-cols > tbody > tr > td { overflow: hidden; text-overflow: ellipsis; }
+tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 tbody tr { cursor: pointer; }
-tbody tr:nth-child(even) > td { background: color-mix(in srgb, var(--panel-2) 42%, transparent); }
-tbody tr:hover > td { background: var(--hover); }
+tbody tr:hover > td { background: color-mix(in srgb, var(--hover) 70%, transparent); }
 tbody tr.sel > td { background: var(--sel); }
 .badge { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 5px;
          background: var(--badge-bg); color: var(--accent-ink); }
@@ -653,7 +734,7 @@ button.qc-summary:hover { background: color-mix(in srgb, var(--c) 22%, transpare
 .qc-summary.qc-summary-fail { --c: var(--danger-ink); }
 .qc-summary.qc-summary-in_progress { --c: var(--warn-ink); }
 .qc-summary.qc-summary-timeout { --c: var(--warn-ink); }
-.qc-summary.qc-summary-conditional_pass { --c: var(--accent-ink); }
+.qc-summary.qc-summary-conditional_pass { --c: var(--info-ink); }
 /* QC details modal: small section sub-labels between the chip rows */
 .qcd-sub { font-size: 12px; font-weight: 600; color: var(--dim); margin: 10px 0 4px; }
 /* live idle timer in the session strip; turns amber past the ~10-min timeout threshold */
@@ -753,7 +834,7 @@ button.ghost.mini.cap-send-btn { width: 28px; padding: 0; }
 .tcp-reach { font-family: var(--mono); color: var(--ok-ink); }
 
 #tcp-main, #qc-main, #cap-main { flex: 1; min-height: 0; display: grid;
-  grid-template-columns: var(--pane-l, minmax(340px, 440px)) minmax(0, 1fr); }
+  grid-template-columns: var(--pane-l, var(--pane-l-w, minmax(340px, 440px))) minmax(0, 1fr); }
 #cap-main { --pane-open: 400px; }
 #tcp-devices-pane, #qc-devices-pane, #cap-devices-pane { border-right: 1px solid var(--border); overflow: auto; background: var(--panel);
   display: flex; flex-direction: column; min-height: 0; }
@@ -771,13 +852,13 @@ button.ghost.mini.cap-send-btn { width: 28px; padding: 0; }
 #cap-feed-count { font-size: 12.5px; }
 
 /* session tabs: one per listener, like browser tabs — the active one joins the page below */
-#tcp-tabs, #qc-tabs, #cap-tabs { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
-  background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
-#tcp-tabs .empty, #qc-tabs .empty, #cap-tabs .empty { padding: 9px 6px; margin: 0; }
+#tcp-tabs, #qc-tabs, #cap-tabs, #an-tabs { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
+  background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+#tcp-tabs .empty, #qc-tabs .empty, #cap-tabs .empty, #an-tabs .empty { padding: 9px 6px; margin: 0; }
 /* per-tab mode (QC / Test) on the Capture page */
 .cap-tab-mode { height: 19px; padding: 0 7px; font-size: 11px; }
 .cap-tab-mode.is-qc { --c: var(--ok-ink); }
-.cap-tab-mode.is-test { --c: var(--accent-ink); }
+.cap-tab-mode.is-test { --c: var(--info-ink); }
 /* the QC | Testing mode toggle in the draft config form spans the pane width */
 .cap-mode-seg { display: flex; }
 .cap-mode-seg .seg { flex: 1; }
@@ -787,7 +868,8 @@ button.ghost.mini.cap-send-btn { width: 28px; padding: 0; }
   color: var(--dim); cursor: pointer; font-size: 13px; font-weight: 500; white-space: nowrap; user-select: none;
 }
 .tcp-tab:hover { background: var(--hover); color: var(--text); }
-.tcp-tab.active { background: var(--bg); color: var(--text); border-color: var(--border); height: 37px; margin-bottom: -1px; }
+.tcp-tab.active { background: var(--raised); color: var(--text); border-color: var(--border-strong); height: 37px; margin-bottom: -1px;
+  box-shadow: var(--raised-shadow); z-index: 1; }
 .tcp-tab.active::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px;
   background: var(--accent); border-radius: 8px 8px 0 0; }
 .tcp-tab-port { font-family: var(--mono); font-weight: 600; font-size: 12.5px; }
@@ -917,7 +999,7 @@ button.cap-reconn:hover { background: var(--hover); border-color: transparent; }
 .qc-verdict-fail { --c: var(--danger-ink); }
 .qc-verdict-in_progress { --c: var(--warn-ink); }
 .qc-verdict-timeout { --c: var(--warn-ink); }
-.qc-verdict-conditional_pass { --c: var(--accent-ink); }
+.qc-verdict-conditional_pass { --c: var(--info-ink); }
 .qc-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
 .qc-chip { cursor: default; }
 .qc-chip-pass { --c: var(--ok-ink); }
@@ -1006,27 +1088,48 @@ button.ghost.mini.tcp-x:hover { color: #fff; background: var(--danger); border-c
 #tcp-log-modal .tcp-fld select { flex: 1; }
 
 /* ---- the rail: brand and version on top, modules as groups, pages as items ------------------- */
-#rail { width: 240px; flex: none; background: var(--panel); border-right: 1px solid var(--border);
+/* Supabase's side menu: the sidebar a step off the canvas, items in soft grey, the open page a
+   quiet raised fill in full white (no coloured bar), group names small and muted */
+#rail { width: var(--rail-w, 240px); flex: none; background: var(--panel); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; transition: width .18s ease-out; }
-.rail-brand { flex: none; display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 14px;
-  border-bottom: 1px solid var(--border); }
-.rail-logo { width: 30px; height: 30px; flex: none; border-radius: 7px; background: var(--accent-soft);
-  color: var(--accent); display: flex; align-items: center; justify-content: center; }
-.rail-logo svg { display: block; }
-.rail-brand-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.rail-name { font-size: 15px; font-weight: 700; color: var(--text); }
-.rail-name b { color: var(--accent); font-weight: 700; }
-.rail-version { font-size: 12px; color: var(--dim); white-space: nowrap; }
 #rail-nav { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 0 0 10px; }
-.rail-section { display: flex; align-items: center; padding: 14px 16px 6px; }
-.rail-section-t { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+/* Sidebar control at the rail's foot, as Supabase's: an icon button that opens the mode menu */
+.rail-foot { flex: none; display: flex; padding: 8px 12px; border-top: 1px solid var(--border); }
+button.rail-fold { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px;
+  margin: 0; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); }
+button.rail-fold:hover, button.rail-fold[aria-expanded="true"] { background: var(--hover); color: var(--text); border-color: transparent; }
+@media (max-width: 1000px) { .rail-foot { display: none; } }   /* always Expand on hover there */
+
+/* Expand on hover: the icon rail keeps its place; on hover it opens over the page, not beside it */
+body.rail-hover #app { padding-left: 58px; }
+body.rail-hover #rail { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; }
+body.rail-hover.rail-peek #rail { width: var(--rail-w, 240px); box-shadow: 14px 0 36px rgba(0, 0, 0, .38); }
+:root[data-theme="light"] body.rail-hover.rail-peek #rail { box-shadow: 14px 0 36px rgba(0, 0, 0, .14); }
+
+/* a small menu of choices (Sidebar control): a muted title, a rule, the options with a dot on the
+   chosen one */
+.ui-menu {
+  position: fixed; z-index: 120; min-width: 210px; padding: 4px 0;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow-md);
+}
+.ui-menu-h { padding: 8px 14px 9px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+button.ui-menu-item {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; height: 34px;
+  margin: 0; padding: 0 14px; border: 0; border-radius: 0; background: transparent; color: var(--text);
+  font-size: 13.5px; font-weight: 400; text-align: left;
+}
+button.ui-menu-item:hover, button.ui-menu-item:focus-visible { background: var(--hover); border-color: transparent; outline: none; }
+.ui-menu-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: transparent; }
+.ui-menu-item.is-on .ui-menu-dot { background: var(--text); }
+.rail-section { display: flex; align-items: center; padding: 16px 18px 6px; }
+.rail-section-t { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .rail-section-rule { display: none; flex: 1; height: 1px; background: var(--border); }
-a.rail-item { display: flex; align-items: center; gap: 11px; height: 38px; margin: 1px 8px; padding: 0 10px;
-  border-radius: 6px; border-left: 2px solid transparent; color: var(--dim); text-decoration: none;
-  font-size: 13.5px; font-weight: 500; }
+a.rail-item { display: flex; align-items: center; gap: 11px; height: 34px; margin: 1px 8px; padding: 0 10px;
+  border-radius: 6px; color: var(--dim); text-decoration: none; font-size: 13.5px; font-weight: 400; }
 a.rail-item:hover { background: var(--hover); color: var(--text); }
-a.rail-item.active { background: var(--accent-soft); border-left-color: var(--accent); color: var(--text); font-weight: 600; }
-a.rail-item.active .rail-ico { color: var(--accent); }
+a.rail-item.active { background: var(--hover); color: var(--text); font-weight: 500; }
+a.rail-item .rail-ico { color: var(--muted); }
+a.rail-item:hover .rail-ico, a.rail-item.active .rail-ico { color: var(--text); }
 a.rail-item.disabled { opacity: .5; cursor: default; }
 a.rail-item.disabled:hover { background: transparent; color: var(--dim); }
 .rail-ico { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
@@ -1041,24 +1144,40 @@ a.rail-item.disabled:hover { background: transparent; color: var(--dim); }
 
 /* ---- folded rail (icons only), and always under 1000px ------------------------------------------ */
 body.rail-collapsed #rail { width: 58px; }
-body.rail-collapsed .rail-brand { padding: 0 13px; }
-body.rail-collapsed .rail-brand-txt,
 body.rail-collapsed .rail-section-t,
 body.rail-collapsed .rail-label,
 body.rail-collapsed .rail-soon { display: none; }
 body.rail-collapsed .rail-section { padding: 10px 14px; }
+/* More: the pages used now and then, folded under a heading that opens them */
+button.rail-section.rail-more { width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer;
+  justify-content: flex-start; gap: 6px; font: inherit; }
+button.rail-section.rail-more:hover .rail-section-t { color: var(--text); }
+.rail-more-ico { display: inline-flex; color: var(--muted); transition: transform .15s ease; }
+.rail-more-ico svg { width: 14px; height: 14px; }
+.rail-more:not(.open) .rail-more-ico { transform: rotate(-90deg); }
+body.rail-collapsed .rail-more-ico { display: none; }
+/* Settings → Sidebar: the owner's switch, locked; a page's default said beside its name */
+.feat-note { margin-left: 4px; }
+.feat-row.is-locked { opacity: .7; cursor: default; }
+/* a page the owner switched off */
+.feature-off { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px; }
+.feature-off .ui-ico svg { width: 34px; height: 34px; color: var(--muted); }
+.feature-off-t { margin: 0; font-size: 15px; color: var(--text); }
+a.feature-off-a { color: var(--accent-ink); font-size: 13px; }
 body.rail-collapsed .rail-section-rule { display: block; }
 body.rail-collapsed a.rail-item { justify-content: center; padding: 0; margin: 1px 8px; }
 @media (prefers-reduced-motion: reduce) { #rail { transition: none; } }
 
 /* ---- Parser's session tabs: the same tabs as Capture and Device OTA ----------------------------- */
-#tabbar { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0; background: var(--panel);
+#tabbar { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0; background: var(--bg);
   border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
 .tab { position: relative; display: flex; align-items: center; gap: 8px; flex: none; height: 36px; max-width: 260px;
   padding: 0 5px 0 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
   color: var(--dim); cursor: pointer; font-size: 13px; font-weight: 500; white-space: nowrap; user-select: none; }
 .tab:hover { background: var(--hover); color: var(--text); }
-.tab.active { color: var(--text); font-weight: 600; background: var(--bg); border-color: var(--border); height: 37px; margin-bottom: -1px; }
+/* the open tab stands up off the bar: a raised fill, a stronger edge and a shadow (Supabase's) */
+.tab.active { color: var(--text); font-weight: 600; background: var(--raised); border-color: var(--border-strong); height: 37px; margin-bottom: -1px;
+  box-shadow: var(--raised-shadow); z-index: 1; }
 .tab.active::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 2px;
   background: var(--accent); border-radius: 8px 8px 0 0; }
 .tab .tab-close { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
@@ -1114,12 +1233,12 @@ body.rail-collapsed a.rail-item { justify-content: center; padding: 0; margin: 1
 .parse-msg.ok { color: var(--ok-ink); }
 .parse-msg.err { color: var(--danger-ink); }
 
-.parser-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--pane-r, 380px); min-height: 0; }
+.parser-main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--pane-r, var(--pane-r-w, 380px)); min-height: 0; }
 .fields { overflow: auto; background: var(--bg); }
 .fields table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
 .fields td.num { text-align: right; color: var(--dim); }
 .fields td.name { white-space: nowrap; }
-.fields td.hex { color: var(--accent-ink); }
+.fields td.hex { color: var(--info-ink); }
 /* one line per value: a long one (an IMU payload and its hex) ends in an ellipsis, full on hover */
 .fields .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fields table.breakdown td.val .clip { max-width: 40ch; }
@@ -1129,7 +1248,7 @@ body.rail-collapsed a.rail-item { justify-content: center; padding: 0; margin: 1
 .fields td.bit { color: var(--dim); font-size: 12px; }
 .fields tr.group td { background: var(--panel); color: var(--ok-ink); font-weight: 700; position: sticky; }
 .fields tr.crc-bad td { color: var(--danger-ink); }
-.fields tr.group td.group-sub { color: var(--accent-ink); font-weight: 600; }
+.fields tr.group td.group-sub { color: var(--info-ink); font-weight: 600; }
 /* signal matrix: signals down a frozen left column, packets across a frozen header */
 .fields table.grid { border-collapse: separate; border-spacing: 0; font-family: var(--mono); }
 .fields table.grid th, .fields table.grid td {
@@ -1141,7 +1260,7 @@ body.rail-collapsed a.rail-item { justify-content: center; padding: 0; margin: 1
   color: var(--dim); text-align: left; vertical-align: top; box-shadow: inset 0 -2px 0 var(--border);
 }
 .fields table.grid thead th .colhead { color: var(--ok-ink); font-weight: 700; font-size: 13px; }
-.fields table.grid thead th .colhead.sig { color: var(--accent-ink); }   /* signature sub-signal column */
+.fields table.grid thead th .colhead.sig { color: var(--info-ink); }   /* signature sub-signal column */
 .fields table.grid thead th small { display: block; color: var(--dim); font-weight: 400; font-size: 11.5px; }
 .fields table.grid td.rowname, .fields table.grid th.corner {
   position: sticky; left: 0; z-index: 1; background: var(--panel);
@@ -1152,7 +1271,7 @@ body.rail-collapsed a.rail-item { justify-content: center; padding: 0; margin: 1
 .fields table.grid td.val { color: var(--text); cursor: pointer; }
 .fields table.grid td.muted { color: var(--dim); }
 .fields table.grid td.chg { background: var(--warn-bg); color: var(--warn-ink); }  /* value changed vs prev column */
-.fields table.grid td.rowname.sig-sub { padding-left: 22px; color: var(--accent-ink); font-weight: 500; }
+.fields table.grid td.rowname.sig-sub { padding-left: 22px; color: var(--info-ink); font-weight: 500; }
 .parsebar button.sig-apply.on { color: var(--ok-ink); border-color: var(--ok); }
 
 /* export-columns dialog (CSV) — the dialog itself is the shared .modal above */
@@ -1285,7 +1404,7 @@ a.btn-link .ui-ico svg { width: 14px; height: 14px; }
 .arch-fill.done { background: var(--accent-2); }
 .arch-fill.error { background: var(--danger); }
 .arch-fill.stopped { background: var(--muted); }
-.arch-pill.running { --c: var(--accent-ink); }
+.arch-pill.running { --c: var(--info-ink); }
 .arch-pill.done { --c: var(--ok-ink); }
 .arch-pill.error { --c: var(--danger-ink); }
 .arch-pill.stopped { --c: var(--muted); }
