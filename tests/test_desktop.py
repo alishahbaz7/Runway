@@ -63,6 +63,40 @@ async def test_the_page_tells_the_window_its_theme(monkeypatch):
     assert config.get("ui_theme") == "dark"
 
 
+async def test_a_window_in_the_other_mode_reopens_on_the_same_page(monkeypatch):
+    """The user, 17-11-2026: in the light theme the title bar stayed dark. Edge fixes its dark mode
+    for the window's process when it opens, so a theme switched in Runway's own window reopens it on
+    the same page; a browser tab, or a window already in that mode, is left alone."""
+    import time
+
+    from httpx import ASGITransport, AsyncClient
+
+    from runway.api.app import app
+
+    calls = []
+    monkeypatch.setattr(desktop, "color_title_bars", lambda bg, fg, dark: 1)
+    monkeypatch.setattr(desktop, "window_dark", lambda profile: True)            # opened dark
+    monkeypatch.setattr(desktop, "reopen_window", lambda url, profile, dark: calls.append((url, dark)))
+    page = "http://127.0.0.1:8080/analysis.html?id=x"
+    light = {"background": "#ffffff", "text": "#171717", "dark": False}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/desktop/titlebar", json={**light, "app": True, "url": page})
+        assert r.json()["reopen"] is True
+        tab = await c.post("/api/desktop/titlebar", json={**light, "app": False, "url": page})
+        assert tab.json()["reopen"] is False                                    # a browser tab: not its window
+        same = await c.post("/api/desktop/titlebar", json={"background": "#171918", "text": "#edefee", "dark": True,
+                                                           "app": True, "url": page})
+        assert same.json()["reopen"] is False                                   # already dark
+    time.sleep(0.2)
+    assert calls == [(page, False)]
+
+
+def test_a_window_already_in_the_mode_is_not_reopened(monkeypatch):
+    monkeypatch.setattr(desktop, "window_process", lambda profile: (4242, False))
+    monkeypatch.setattr(desktop, "_last_reopen", [0.0])
+    assert desktop.reopen_window("http://127.0.0.1:8080/", "x", False) is False
+
+
 def test_a_browser_is_found_where_one_is_installed():
     path = desktop.find_browser()
     assert path is None or os.path.isfile(path)

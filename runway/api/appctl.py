@@ -11,6 +11,8 @@ skills). The work lives in ``runway/usage.py`` and ``runway/update/``; this only
     POST /api/update/install   download, verify, install beside, restart through the launcher
     POST /api/desktop/titlebar the banner's colour for Runway's own window's title bar
     GET  /api/features         which pages this copy shows: the owner's policy, defaults, IMU by data
+    POST /api/app/quit         stop this Runway, as the tray's Quit does — from this computer only (main.py,
+                               starting the latest code, stops the older copy on its port this way)
 """
 
 from __future__ import annotations
@@ -90,6 +92,18 @@ class TitleBarBody(BaseModel):
     background: str
     text: str
     dark: bool
+    app: bool = False          # the page is Runway's own window (no toolbar), not a browser tab
+    url: str = ""              # where it is, to reopen on
+
+
+@router.post("/api/app/quit")
+async def app_quit(request: Request):
+    """Stop this Runway: listeners close, reports flush, the port frees. Only from this computer."""
+    if not request.client or request.client.host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "only from this computer")
+    from ..update.service import shut_down
+    asyncio.get_running_loop().call_later(0.3, shut_down)      # answer first, then stop
+    return {"stopping": True}
 
 
 @router.post("/api/desktop/titlebar")
@@ -112,7 +126,19 @@ async def desktop_titlebar(body: TitleBarBody, request: Request):
     except Exception:
         pass                                     # remembering it is a nicety, never an error
     n = await asyncio.to_thread(desktop.color_title_bars, body.background, body.text, body.dark)
-    return {"windows": n}
+    # the window's own dark mode is fixed when it opens: a different theme reopens it on the same page
+    reopen = False
+    if body.app and body.url.startswith(("http://127.0.0.1", "http://localhost")):
+        from ..cli import _window
+        w = _window()
+        if w.get("profile_dir"):
+            mode = await asyncio.to_thread(desktop.window_dark, w["profile_dir"])
+            if mode is not None and mode != body.dark:
+                reopen = True
+                import threading
+                threading.Thread(target=desktop.reopen_window, args=(body.url, w["profile_dir"], body.dark),
+                                 daemon=True, name="window-reopen").start()
+    return {"windows": n, "reopen": reopen}
 
 
 @router.get("/api/update")

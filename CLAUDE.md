@@ -31,6 +31,17 @@ runway listen --codec teltonika --port 5050              # live TCP listener
 runway codecs                 # list registered codecs
 ```
 
+**`python main.py` (the user runs it from VS Code) is the one copy, always the latest code**
+(`serve --take-over`): a Runway on its port running older code — a release, another checkout, this
+checkout before the last edit (`/api/health` `root` + `started` against the newest source file) — is
+stopped (`POST /api/app/quit`, loopback only; a release before 1.1.28 lacks it, so the process owning
+the port is ended) and its running listeners are started again in the new copy with their relay
+rules and store. The same code running is only brought forward. So never leave a second Runway of
+your own running for the user (a demo on another port) — point them at `main.py`; check things in
+isolated copies on scratch ports and stop them. A run from source shows "Branch v<x.y.z>" in the
+banner (`install.branch()`, read from `.git/HEAD`); a release "Version <x.y.z>". Its data folder is
+the repo's `data/`, not a release install's.
+
 `pytest` is configured with `asyncio_mode=auto` (in `pyproject.toml`), so async tests need no
 decorator. `python-multipart` is required for the upload endpoint and `pytest-asyncio` for the
 pipeline tests — both come with the `[dev]`/runtime install.
@@ -71,6 +82,13 @@ parenthesized field; `CUSTOM_PACKETS` maps `(packet_type, alert_id)` → payload
 must stay inside the session's codec, never a codec of their own — they share the connection
 with normal packets and a session's codec is chosen once. Add a layout or a custom packet as a
 table row / one decorated function, not a branch (guide: [docs/ADDING_A_PROTOCOL.md](docs/ADDING_A_PROTOCOL.md)).
+The login is a table too (`LOGIN_LAYOUTS`, by field count: the doc's 9, the 8 of the Locate 140 4G
+and Zenithra — no vendor; any other shape is read by content). The Packet parser's names come from
+the grammar (`data/protocols/<codec>.json`), not the codec: a new layout needs its `variants` entry
+there too (keyed by field count), or the parser shows it as `field_1` … — or, worse, with another
+layout's names one field off. A release copies these definitions into `data/protocols` and
+refreshes each untouched copy on later starts (`install.seed_definitions`, with the hash of every
+shipped version from `build_release.protocol_history`); an edited one is the person's and stays.
 
 **Relay + store: device data lands on Runway, forked two ways** (`sources/tcp_server.py`,
 `storage/outbox.py`, `storage/telemetry.py`, `sinks/telemetry_store.py`): a listener with relay
@@ -113,6 +131,61 @@ minutes 365, archive forever by default). Purges go device by device through the
 `(device_id, time)` indexes, in batches — a bare time filter scans every row each hour. Any new
 per-packet table needs a retention rule here and an index that serves its purge.
 
+**Firmware test** (`runway/fwtest/`, `api/fwtest.py`, `web/firmware.*`): a device on a new firmware,
+every packet held against its sheet. The sheet is a *spec* (`fwtest/specs/<name>.json`; the person's
+own in `data/fwtest/specs` win by file name): per header the field count and a field list (index, -1 =
+the last field; `rules` by name from `rules.py` — a new rule is one decorated function; `allow` for the
+standard's `x` / `99`), the checksum algorithm, the terminator, and the tables the sequence checks read
+(`status_by_alert`, `alert_ids`, `ignition_by_type`) — a device whose sheet differs changes its spec,
+never `gate.py`. How much a check weighs for a device is the spec's `levels` (check → warn / fail over
+`CHECKS`); a flag it lowers keeps `was`, and a plan case that names the check judges `was` — a
+warning on the packets never passes the case that tests exactly that behaviour. Fields are taken by index from the start (and -1 from the end), so a packet with an
+extra field is flagged once for its count and still checked field by field. `Gate.feed(raw,
+received, conn)` returns the packet's row with its flags; each flag's `key` groups it into one row
+of the checks table (`CHECKS` holds every non-field check's label, meaning and level). A run on disk
+(`runs.py`, `data/fwtest/<id>/`) keeps only `meta.json` and the packets as received (`packets.log`):
+the gate is rebuilt from them at start, never stored judged. A live run is fed by a
+`FirmwareTestSink` that `api/fwtest.py` adds to the pipeline of the listener on the run's port (a
+watcher every 3 s, so it survives a listener restarted in Capture or a Runway restart); it only
+reads — relay and ACKs stay the listener's. A file run frames the capture with the spec's codec, and
+is not held to CR LF (`Gate(wire=False)`): a file's line endings are its editor's. `insights.py` turns
+the gate into the rail's Insights (plain words, worst first, each with the filter that shows its
+packets) — a check flags *why* where it can (`flag(why=…)`, e.g. a checksum `kept_live`), and an
+insight is built from that, never from a flag's wording; a check without wording of its own still
+gets a generic insight. A running test's verdict is `in_progress` (`Run.view`; `outcome` holds the
+result so far). The page is Log analysis's frame: tabs (`runway.fwtest.tabs`), the list, the rail.
+**The device's configuration** (`spec.clean_config`: ign_on_s, ign_off_s, sleep_after_min, sleep_s,
+history_order fifo/lifo, formats per header — a spec offers its formats, a field may belong to one)
+is asked when a test starts and kept in its meta; `Run.reconfigure` judges again from packets.log.
+Anything not given is not checked — never assume a device's setting. The interval check needs the
+whole timeline (history arrives late and fills gaps), so it is not judged in `feed`: `_derive()`
+recomputes it (flags marked `derived`) whenever packets came, and checks and scenarios' failed
+counts are counted from the rows each time (`_checks()`), not kept as running totals. Margins are
+Log analysis's (`analysis.modes.margin_for`).
+**The test plan** (`fwtest/plans/<name>.json`, `plan.py`, `tracker.py`, built from the device's tracker
+sheet — progress in [docs/FWTEST_PLAN.md](docs/FWTEST_PLAN.md)): areas → cases, each *automatic*,
+*assisted*, *command* or *manual*, with a `judge` (checks, states, needs, scenarios, config, measure);
+`plan.check_plan` fails a test when a plan names a check, scenario or measure that does not exist. A
+plan belongs to a firmware version: every test whose packets report it (`api/fwtest._firmware_of`);
+entries per version live in `data/fwtest/tracker/`. An automatic case is judged on each test and
+combined (any failing fails); a step is judged over its window only (`tracker.Window`), so a packet
+before *Run* never passes it. Runway's ACK can be held back during a step (`Pipeline.ack_filter`;
+only where Runway, not a relayed platform, acknowledges). New case = a plan row; a new kind of
+evidence = a `MEASURES` function. **The gate's promise is that nothing wrong passes** — keep it when
+changing anything here: bytes the codec skips reach the test (`Pipeline.skip_taps` → `Gate.feed(skipped=True)`,
+a `not_packet` failure; a file's too); the sink tests every packet on the device's connections, not only
+those carrying its IMEI; a header outside the sheet fails; consistency rules are spec rows (`when`);
+`summary()` never says pass while `unchecked` settings remain; `plan.judge` passes a scenario case only
+when its evidence packets pass. A false pass is a worse bug than a false failure — and a false failure
+costs trust: `tests/test_fwtest_devices.py` runs a simulated correct device (`tests/fwsim.py`, a full day)
+that must raise no flag at all, and each known fault alone that must be found and explained. A new
+check needs both: the correct day still clean, and a fault switch that it catches.
+`diagnosis.py` turns flags into defects (DIAG rows: area, severity, cause, proved, where, fix, impact);
+judge over the whole timeline anything history can change after arrival (`_derive`: intervals, live frame
+numbers). Suites are plan rows (`suites`), advanced as the plan is read (`Tracker._advance`). The shipped spec
+is the Locate 140 4G; its findings on V7.06.10 are in the CHANGELOG (1.1.28). Tests build packets in
+code with the real XOR and a made-up IMEI.
+
 **Log analysis** (`runway/analysis/`, `api/analysis.py`, `web/analysis.*`): a platform report read
 back and judged. `drivelog.py` reads the drive-log CSV — its layout varies (12 to 92 columns), so
 `COLUMNS` maps column name → row field and reader, and rows are sorted by device time.
@@ -133,6 +206,23 @@ writes it, REST reads it) and `hub` (fan-out bus; the `ws_broadcast` sink publis
 WebSocket subscribes). The API (`runway/api/app.py`) runs replay/listen as background asyncio jobs
 wired to the default sinks `[memory_store, ws_broadcast]`, and serves the static dashboard
 (`runway/web/`) plus REST + `/ws`.
+
+**One map for a track** (`web/trackmap.js` + `trackmap.css`, `window.RunwayMap.track`): Log
+analysis's map as a component — one track or many (`{id, name, colour, series, driving, settings}`,
+the analysis report's own `series` / `driving`). The Dashboard feeds it live: `/api/live/track`
+reads each device's live-store records as drive-log rows (`analysis/live.py` `log_of`) and runs the one
+`analyse` — never a second trip/gap logic in the page. A point's row `k` leads back to its record by
+`seqs[k]`. Log analysis draws its log with it too: the page keeps its state (`mapTrip`, `mapPoint`,
+`mapGap`) and its rail; the component hands clicks back (`onPoint`, `onGap`, `onTrip` — a trip rescopes
+the page, which then sets it with `tm.trip`). A map feature is added to the component once, for every
+page that shows a track. The device comparison keeps its own map on purpose (one vehicle: each device a
+narrower stripe over the one beneath, so overlapping tracks all show). **Never thin what is shown or judged**
+(the user: "we cannot deviate from the information received from the device"): the track carries
+every packet; the map keeps quick by level of detail in drawing only — per zoom the points that move a
+line by more than half a pixel (`importance` per run, `lodPts`, `smoothFactor: 0`), dots in the view
+one per pixel — and `tm.accuracy()` measures the half-pixel promise. Where a chart must reduce, it keeps
+each stretch's extremes (min and max, as the power chart and IMU minutes do), and a measure (a maximum,
+a percentile) is taken over every value, never a sample.
 
 ## Conventions specific to this codebase
 

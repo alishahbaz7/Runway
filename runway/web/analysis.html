@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="analysis.css" />
+  <link rel="stylesheet" href="trackmap.css" />
 </head>
 <body data-page="analysis">
   <!-- the banner and rail are built around #content by shell.js -->
@@ -84,21 +85,7 @@
           <div id="an-summary">
             <div class="an-tiles" id="an-tiles"></div>
             <div class="an-card an-map-card">
-                <div class="an-card-head"><span class="an-card-title">Track</span>
-                  <div class="tcp-seg an-map-mode" role="tablist" aria-label="Colour the track by">
-                    <button class="seg on" type="button" data-mode="trips">Trips</button>
-                    <button class="seg" type="button" data-mode="speed">Speed</button>
-                  </div>
-                  <div class="tcp-seg an-map-draw" role="tablist" aria-label="Draw the track as">
-                    <button class="seg on" type="button" data-draw="lines">Lines</button>
-                    <button class="seg" type="button" data-draw="dots" data-tip="One dot per packet — a click shows that packet">Dots</button>
-                  </div>
-                  <span class="an-legend" id="an-map-legend"></span></div>
-                <div class="an-trip-bar" id="an-trip-bar" hidden></div>
-                <div class="an-map-wrap">
-                  <div id="an-map"></div>
-                  <div class="an-map-tiles" id="an-map-tiles"></div>
-                </div>
+              <div class="an-map-host" id="an-map-host"></div>
             </div>
             <div class="an-card">
               <div class="an-card-head">
@@ -233,6 +220,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="shell.js"></script>
+  <script src="trackmap.js"></script>
   <script src="analysis.js"></script>
 </body>
 </html>

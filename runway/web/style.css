@@ -7,6 +7,8 @@
 }
 
 :root {
+  --brand: #5ab0f0;                 /* the logo's blue (Runway's mark since 1.1.26) — the brand, not an accent */
+  --brand-soft: color-mix(in srgb, var(--brand) 16%, transparent);
   /* ---- palette (dark, default): Supabase Studio's — a near-black canvas with a breath of green,
      surfaces a step lighter, hairline borders, soft white text and the green brand (values
      measured from supabase.com's own theme, 12-11-2026) ---- */
@@ -89,6 +91,7 @@
 
 /* ---- light theme (toggle in the top bar; remembered in localStorage) ------ */
 :root[data-theme="light"] {
+  --brand: #1f7fd6;
   /* Supabase's light theme: white surfaces on an almost-white canvas, grey hairlines, near-black text */
   --bg: #fcfcfc;
   --panel: #ffffff;
@@ -226,12 +229,13 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   min-width: 0;
 }
 a.bn-brand { display: inline-flex; align-items: center; gap: 10px; flex: none; color: var(--text); text-decoration: none; }
-.bn-logo { width: 26px; height: 26px; flex: none; border-radius: 7px; background: var(--primary-bg);
-  border: 1px solid var(--primary-border); color: var(--primary-text); box-sizing: border-box;
+.bn-logo { width: 28px; height: 28px; flex: none; border-radius: 7px; background: var(--brand-soft);
+  color: var(--brand); box-sizing: border-box;
   display: flex; align-items: center; justify-content: center; }
 .bn-logo svg { display: block; width: 16px; height: 16px; }
 .bn-id { display: flex; flex-direction: column; justify-content: center; line-height: 1.15; min-width: 0; }
-.bn-name { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.bn-name { font-size: 14.5px; font-weight: 700; white-space: nowrap; }
+.bn-name b { color: var(--brand); font-weight: 700; }      /* "Run" in the text colour, "way" in the brand's blue */
 .bn-version { color: var(--dim); font-size: 11.5px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bn-version:empty { display: none; }
 /* Supabase's separator: a thin slanted stroke */
@@ -320,6 +324,7 @@ button.mini .ui-ico svg, .ui-pill .ui-ico svg { width: 14px; height: 14px; }
   position: fixed; z-index: 1100; max-width: 380px; padding: 8px 11px;   /* above a full-screen map (Log analysis) */
   border: 1px solid var(--frame); border-radius: 7px; background: var(--panel-2); color: var(--text);
   font-size: 12.5px; line-height: 1.5; box-shadow: var(--shadow-md); pointer-events: none;
+  white-space: pre-line;                 /* a tip may have parts on their own lines */
 }
 
 /* ---- the house confirm / prompt (shell.js RunwayUI.confirm / .prompt) ------------------------- */
@@ -443,6 +448,9 @@ body.ui-resizing iframe, body.ui-resizing .leaflet-container { pointer-events: n
 #center { display: flex; flex-direction: column; }
 
 #map { flex: 1; min-height: 260px; background: var(--map-bg); }
+/* the map full screen (trackmap.js): the packet detail pane stays at the right edge, over it */
+body.tm-full #detail:not(.is-folded) { position: fixed; top: 0; right: 0; bottom: 0; z-index: 901;
+  width: var(--pane-r, var(--pane-r-w, 340px)); }
 
 /* bottom strip: devices beside the packet table (same border/margins as the list view) */
 #bottom { height: var(--dash-bottom-h, 36%); min-height: 140px; flex: none; display: flex; border-top: 1px solid var(--border); }
@@ -852,9 +860,9 @@ button.ghost.mini.cap-send-btn { width: 28px; padding: 0; }
 #cap-feed-count { font-size: 12.5px; }
 
 /* session tabs: one per listener, like browser tabs — the active one joins the page below */
-#tcp-tabs, #qc-tabs, #cap-tabs, #an-tabs { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
+#tcp-tabs, #qc-tabs, #cap-tabs, #an-tabs, #fw-tabs { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 8px 12px 0;
   background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
-#tcp-tabs .empty, #qc-tabs .empty, #cap-tabs .empty, #an-tabs .empty { padding: 9px 6px; margin: 0; }
+#tcp-tabs .empty, #qc-tabs .empty, #cap-tabs .empty, #an-tabs .empty, #fw-tabs .empty { padding: 9px 6px; margin: 0; }
 /* per-tab mode (QC / Test) on the Capture page */
 .cap-tab-mode { height: 19px; padding: 0 7px; font-size: 11px; }
 .cap-tab-mode.is-qc { --c: var(--ok-ink); }
@@ -1121,10 +1129,13 @@ button.ui-menu-item {
 button.ui-menu-item:hover, button.ui-menu-item:focus-visible { background: var(--hover); border-color: transparent; outline: none; }
 .ui-menu-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: transparent; }
 .ui-menu-item.is-on .ui-menu-dot { background: var(--text); }
-.rail-section { display: flex; align-items: center; padding: 16px 18px 6px; }
+.ui-menu-sub { margin-left: auto; padding-left: 18px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* A group heading is as tall folded (a rule) as open (its name), and an icon sits at the same x in
+   both: opening the folded rail on hover must not move the item under the pointer. */
+.rail-section { display: flex; align-items: center; box-sizing: border-box; height: 40px; padding: 16px 18px 6px; }
 .rail-section-t { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .rail-section-rule { display: none; flex: 1; height: 1px; background: var(--border); }
-a.rail-item { display: flex; align-items: center; gap: 11px; height: 34px; margin: 1px 8px; padding: 0 10px;
+a.rail-item { display: flex; align-items: center; gap: 11px; height: 34px; margin: 1px 8px; padding: 0 12px;
   border-radius: 6px; color: var(--dim); text-decoration: none; font-size: 13.5px; font-weight: 400; }
 a.rail-item:hover { background: var(--hover); color: var(--text); }
 a.rail-item.active { background: var(--hover); color: var(--text); font-weight: 500; }
@@ -1147,7 +1158,7 @@ body.rail-collapsed #rail { width: 58px; }
 body.rail-collapsed .rail-section-t,
 body.rail-collapsed .rail-label,
 body.rail-collapsed .rail-soon { display: none; }
-body.rail-collapsed .rail-section { padding: 10px 14px; }
+body.rail-collapsed .rail-section { padding: 16px 14px 6px; }
 /* More: the pages used now and then, folded under a heading that opens them */
 button.rail-section.rail-more { width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer;
   justify-content: flex-start; gap: 6px; font: inherit; }

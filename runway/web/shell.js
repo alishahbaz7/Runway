@@ -99,6 +99,7 @@
     "maximize": svg('<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>'),
     "minimize": svg('<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/>'),
     "zoom-out": svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/>'),
+    "zoom-in": svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6"/><path d="M11 8v6"/>'),
     "clipboard": svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h3"/>'),
     "file": svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>'),
     "map": svg('<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2Z"/><path d="M9 4v14"/><path d="M15 6v14"/>'),
@@ -140,6 +141,7 @@
     ] },
     { title: "Tools", items: [
       { id: "parser", label: "Packet parser", icon: "parser", href: "parser.html" },
+      { id: "firmware", label: "Firmware test", icon: "chip", href: "firmware.html" },   // a new firmware, every packet against its sheet
       { id: "converter", label: "Converter", icon: "converter", href: "converter.html" },
       { id: "ota", label: "Device OTA", icon: "ota", href: "ota.html" },   // act as a TCU vs the OTA cloud
     ] },
@@ -415,7 +417,7 @@
   topbar.innerHTML =
     // the name and its version nested, one above the other — the brand stays as narrow as the name
     '<a class="bn-brand" href="index.html" title="Dashboard"><span class="bn-logo">' + BRAND + "</span>" +
-      '<span class="bn-id"><span class="bn-name">Runway</span><span class="bn-version" id="app-version"></span></span></a>' +
+      '<span class="bn-id"><span class="bn-name">Run<b>way</b></span><span class="bn-version" id="app-version"></span></span></a>' +
     '<span class="bn-sep" aria-hidden="true"></span>' +
     '<span class="bn-crumb bn-hello" id="banner-hello" hidden>' + icon("user") + '<span id="banner-hello-t"></span></span>' +
     '<span class="bn-sep" id="banner-hello-sep" aria-hidden="true" hidden></span>' +
@@ -457,7 +459,9 @@
     m.content = bg;
     fetch("/api/desktop/titlebar", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ background: bg, text: fg, dark: theme === "dark" }),
+      // Runway's own window has no toolbar; a browser tab does — only the window reopens in the new mode
+      body: JSON.stringify({ background: bg, text: fg, dark: theme === "dark", url: location.href,
+                             app: !(window.toolbar && window.toolbar.visible) || matchMedia("(display-mode: standalone)").matches }),
     }).catch(() => { /* not on Windows, or the server is away: the title bar stays as it is */ });
   }
 
@@ -930,7 +934,67 @@
   // Updates). Each is a function that fills the element it is given.
   const settingsSections = [];
 
-  window.RunwayUI = { icons: ICONS, icon, paint, setLabel, foldable, resizable, esc, confirm: confirmDlg, notice: noticeDlg, prompt: promptDlg,
+  // ---- a small menu under a button: choices with a figure beside each (the Sidebar control's look) ----
+  // items: [{label, sub?, on?, run}] — Esc, a click elsewhere or a choice closes it; arrows move.
+  function menuAt(anchor, title, items) {
+    const old = document.getElementById("ui-menu-open");
+    if (old) { const same = old._anchor === anchor; old._close(); if (same) return; }
+    const m = document.createElement("div");
+    m.id = "ui-menu-open";
+    m.className = "ui-menu";
+    m.setAttribute("role", "menu");
+    m._anchor = anchor;
+    if (title) {
+      const h = document.createElement("div");
+      h.className = "ui-menu-h";
+      h.textContent = title;
+      m.appendChild(h);
+    }
+    const close = () => {
+      m.remove();
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", key, true);
+      anchor.setAttribute("aria-expanded", "false");
+    };
+    m._close = close;
+    const outside = (e) => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
+    const key = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(); anchor.focus(); return; }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      const all = Array.from(m.querySelectorAll(".ui-menu-item"));
+      const i = all.indexOf(document.activeElement);
+      all[(i + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length].focus();
+    };
+    for (const it of items) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ui-menu-item" + (it.on ? " is-on" : "");
+      b.setAttribute("role", "menuitem");
+      b.innerHTML = '<span class="ui-menu-dot" aria-hidden="true"></span>';
+      b.appendChild(document.createTextNode(it.label));
+      if (it.sub != null) {
+        const s = document.createElement("span");
+        s.className = "ui-menu-sub";
+        s.textContent = it.sub;
+        b.appendChild(s);
+      }
+      b.addEventListener("click", () => { close(); it.run(); });
+      m.appendChild(b);
+    }
+    document.body.appendChild(m);
+    const r = anchor.getBoundingClientRect();
+    const below = r.bottom + 6 + m.offsetHeight <= window.innerHeight - 8;
+    m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + "px";
+    m.style.top = (below ? r.bottom + 6 : Math.max(8, r.top - m.offsetHeight - 6)) + "px";
+    anchor.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", key, true);
+    const first = m.querySelector(".ui-menu-item.is-on") || m.querySelector(".ui-menu-item");
+    if (first) first.focus();
+  }
+
+  window.RunwayUI = { icons: ICONS, icon, paint, setLabel, foldable, resizable, esc, menu: menuAt, confirm: confirmDlg, notice: noticeDlg, prompt: promptDlg,
                       settingsSections, openSettings: () => openSettings() };
 
   // ---- settings (show / hide rail items) -------------------------------------------------------
@@ -1008,8 +1072,8 @@
   (function setFavicon() {
     const mark =
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
-      '<rect width="24" height="24" rx="6" fill="#3ecf8e"/>' +
-      '<g fill="none" stroke="#0b1a12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect width="24" height="24" rx="6" fill="#5ab0f0"/>' +
+      '<g fill="none" stroke="#04121d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 19h6"/><path d="M6.5 15.5 18.5 6"/><path d="M13.5 6h5v5"/></g></svg>';
     let link = document.querySelector('link[rel="icon"]');
     if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
@@ -1023,6 +1087,7 @@
   // (openpyxl). Say both up top. This page's version is the code that was on disk when it loaded
   // (/api/health's code_version from the first answer), so there is no literal here to bump.
   let UI_VERSION = null;
+  let SERVER_STARTED = null;               // a run from source restarted (main.py again): load the latest pages
   const cmpVersion = (a, b) => {           // 1.1.9 vs 1.1.24: part by part, as numbers
     const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
     for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
@@ -1037,11 +1102,16 @@
       document.body.classList.remove("api-offline");
       offline = false;
       if (UI_VERSION === null) UI_VERSION = d.code_version || d.version || null;
+      if (d.started) {
+        if (SERVER_STARTED === null) SERVER_STARTED = d.started;
+        else if (d.branch && d.started !== SERVER_STARTED) { location.reload(); return; }
+      }
       const v = document.getElementById("app-version");
       if (v && d.version) {
-        v.textContent = "Version " + d.version;
-        v.title = "Server " + d.version + (d.code_version && d.code_version !== d.version
-          ? " · code on disk " + d.code_version : "");
+        // a run from source names its branch, so it is never taken for a released copy of that version
+        v.textContent = d.branch ? "Branch " + d.branch : "Version " + d.version;
+        v.title = (d.branch ? "Running from source · version " : "Server ") + d.version +
+          (d.code_version && d.code_version !== d.version ? " · code on disk " + d.code_version : "");
       }
       if (d.mode && d.mode !== mode) mode = d.mode;
       if (d.features_key && d.features_key !== featuresKey) loadFeatures();

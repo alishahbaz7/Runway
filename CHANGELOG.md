@@ -4,6 +4,247 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.28] — 2026-11-23
+
+### Added
+- **The Dashboard's map is Log analysis's map, live, for one device or many.** Each shown device's
+  latest packets are analysed on the server as a log is (`/api/live/track`, the same `analyse`):
+  its track coloured by device, trip or speed, as lines or dots, with direction arrows; history
+  dimmed; data lost and asleep dotted; stale positions and jumps dashed; trips numbered at their
+  start and ringed at their end; driving events and the last position marked; a card on hover; full
+  screen. A bar above the map chooses a device (the rest fade) and then one of its trips. A click
+  on the map opens that packet in the detail pane, and a row picked in the table is ringed on the
+  map. It follows the live feed (asked again at most every 2 s) and keeps the view while it does.
+  The map is one component (`web/trackmap.js`), and Log analysis draws its track with it too — a
+  trip clicked on the map still rescopes the whole page, a packet or gap still opens in the rail, full
+  screen still floats the area tiles — so both maps are one and stay alike. (The device comparison
+  keeps its own map: one vehicle, each device a narrower stripe over the one beneath.)
+- **Trips say what they were.** A trip's chip carries its distance with its start (`1 · 13:52 ·
+  12.4 km`), and *List* opens every trip in a table above the map: start, end, how long, how far,
+  top and average speed, and what happened on it — device alerts, driving events, overspeed, history
+  packets, data lost while driving — with the totals at the foot. A row picks its trip (on Log
+  analysis the whole page then shows that trip); the list stays in full screen. On both maps.
+- **Firmware test** — a new page (Tools → Firmware test) for the detailed test a new firmware gets
+  before release. Point the device at a Runway listener (its relay to the platform carries on
+  untouched) or drop in a capture, and every packet is held against the device's sheet:
+  - **framing and checksum** — `$` … `*CC` and CR LF; the checksum is the XOR of every byte from
+    `$` up to `*`, and a wrong one says what it does match;
+  - **every field** — the sheet's datatype and format: dates DDMMYYYY, times hhmmss, the IMEI's
+    check digit, ranges, the field count;
+  - **the order of packets** — login first on every connection, the same IMEI, firmware and number
+    plate as the login (or as the test expects), live frame numbers stepping by one, no frame
+    number used twice, live times forward and arriving live, history oldest first, status and
+    alert ID agreeing, ignition agreeing with IN / IF;
+  - **scenarios** — which packet types and alerts the device has sent (ignition on and off,
+    battery out and back, alerts), so the bench knows what is left to trigger.
+  Each deviation is a flag on its packet, grouped into one row per check; each scenario counts its
+  packets received, passed and failed; the test ends with an Excel report. A test still taking
+  packets is *In progress* — its verdict (Fail, Incomplete, Pass) is given when it stops; the
+  failures so far show all along. Laid out like Log analysis: one tab per open test, several at
+  once, and a side rail — **Insights** (what the test found, in words, worst first: how many packets,
+  which, and why — "every history PVT keeps the checksum it had live" — each opening its packets)
+  and **Packet** (the one clicked, field by field). A test is told **how the device is set** — ping
+  interval with ignition on, with ignition off, when it sleeps and its interval asleep, history
+  FIFO or LIFO, and the packet format (the Locate 140 4G's PVT: 50 fields as the sheet, or 51) —
+  and holds it to that: every location packet at its interval within the margin for it (judged over
+  every packet in the order of its time, live and history together, so history filling a gap
+  clears it; hours without a packet are a silence, not packets missing), history in the order set.
+  A setting not given is not checked, and Insights says so; *Configuration* on a test corrects
+  them and judges the test again from the packets it holds.
+- **Test plan — the Locate 140 4G tracker inside Runway.** The tracker's 287 cases in 25 areas
+  (location, time sync, sleep and wake, LEDs, driver behaviour, SOS, OTA, EOL, ignition, power,
+  battery, inputs and outputs, tamper, cellular, storage, movement, CAN, RS232 / RFID, BLE,
+  configuration, watchdog, InTouch, government and emergency servers) are a *Test plan* view of
+  each firmware version — every test of that version together:
+  - **from the packets** (43 cases): fix validity, position wandering and distance added while
+    parked, time to first fix, clock at boot and ahead of Runway, the interval in each state, alarms
+    and every Amendment 3 packet type seen, login on every reconnection, format and checksum,
+    history order, versions reported, restarts and reset loops, a multi-day soak — each with the
+    packets that show it;
+  - **bench steps** (88): *Run*, do the step (press SOS, cut main power, ignition on…), and the case
+    is judged from the packets that came in its window; Runway can hold back its acknowledgement of
+    emergency packets so the device must send them again;
+  - **by command** (26): the step sends the device the command typed for the case first;
+  - **by hand** (130): status and remarks; the device on several servers' ports at once is compared
+    for packets missing between them.
+  The tracker sheet comes out in its own layout with the results filled in, and goes back in, so the
+  developers' columns and results kept elsewhere carry over. A **Scorecard** in the side rail shows
+  the plan at a glance — cases run, the pass rate of those, and pass / fail / partial by how they
+  are tested and by each of the tracker's 25 categories; a category opens its cases. The tracker
+  sheet carries the same scorecard. One tab per device (IMEI): another test of the same device opens
+  in its tab, with a picker between the device's tests, and a device whose tab is closed comes back
+  from *Open a test*; the left pane lists the plan's categories, each with how far it has got.
+- **From what is wrong to how to fix it.** Every failure becomes a *defect* with its firmware area
+  (packet builder, history buffer, GNSS and time, connection manager, alert engine, timers), its
+  severity, the likely cause — *proved* where Runway tests it itself (a history packet's checksum
+  matches its live version; the XOR matches with the '*' included) — where to look, the fix, the
+  impact if shipped, the cases that verify it and the rule's source (sheet field or AIS-140). A
+  *Defects* tab in the side rail leads with *fix first*: the fewest causes that explain most
+  failing packets; each defect copies as a ready report and is a sheet in the Excel files.
+  A **release gate** per firmware version (no failure in SOS, InTouch, government or emergency
+  cases; no critical defect; 80% of the plan run) and **firmware against firmware** (fixed,
+  regressed, still failing, newly failing; defects fixed and new).
+- **Guiding the bench.** **Suites** run bench steps one after another (main power, ignition, SOS,
+  tamper, wake from sleep, driving, network loss), each starting when the one before is judged.
+  Insights say what is **not exercised yet** and how to make it happen (drive, toggle an input, press
+  SOS…). A **timeline** shows the test on one line — live, history, failures (a click opens the
+  packet), ignition and reconnections — and a **live coach** names a new failure the moment it comes,
+  or a device gone quiet. The timeline **zooms** (the buttons, Ctrl and the wheel where the pointer
+  is, the + / − / 0 keys) down to a minute across its width and **scrolls sideways** (scroll bar,
+  drag, or sideways scroll) with a clock along it. Zoomed in, it shows every packet that came in the
+  window on screen rather than the thinned whole, so a gap seen there is a real gap. A live
+  test that is followed at its newest end keeps following as packets come. The side rail's **Live** tab shows the packets as they land on the
+  listener, newest first — the time, kind, live or history, frame number, the result, the bytes and
+  the first flag; new ones flash once, *Pause* holds the list, a click opens the packet.
+  Every case has its **test case, expected behaviour and acceptance
+  criteria** on a 5-second hold, and in the tracker sheet; categories show total, pass, fail, in
+  progress and pending.
+- **Reach.** A device's **protocol sheet** (xlsx with Field and Datatype columns) rebuilds a packet's
+  spec and says what changed. A test is held against **the platform's own record** — its drive log
+  from Log analysis — so case 23.06 is judged: every packet stored, read the same. A live test
+  **writes its report by itself** every 24 hours and when it stops.
+- **Checked against whole devices**: a simulated correct Locate 140 4G (a full day: driving, offline
+  and history, SOS, tamper, health and emergency packets, standby and sleep, power out and back)
+  passes with no flag at all; with each of 16 known faults it is caught and explained. Two false
+  failures found that way were fixed: live frame numbers that jump over packets sent later as
+  history, and parked positions pooled across different parking places.
+- **Packets for the developers.** *Download* on the Packets card gives an Excel file of all the
+  packets, the failed ones or those with warnings: each packet with everything wrong in it in
+  words; each finding with the field, the value expected and the one sent, the likely cause,
+  where to look and the fix; each kind of finding explained once (what the rule says, where it
+  comes from, the impact if shipped); and every field of every packet under its sheet name, a
+  broken one coloured. Written row by row, so a week-long soak downloads too.
+- **TL packets, and what a check weighs per device.** The Locate 140 4G's **TL** packet (live or
+  history) is an event packet of the sheet, with a *TL packet* scenario — it failed as an unknown
+  packet type. TL and MoveE are different events that share ID 22 for now: a TL on 22 is a
+  **warning** (and a minor defect: TL needs an ID of its own), any other ID on TL fails — the
+  spec's `alert_ids_interim`, one row to drop when TL gets its ID. A spec can now set how much a check weighs for its device (`levels`):
+  for the Locate 140 4G, frame numbers (stepping by one, used once) and a connection that opens
+  without its login are **warnings**, not failures. The test-plan cases that test exactly that —
+  a login on every connect and reconnect (15.05, 23.01, 24.01) — still fail on it, so the release
+  gate still sees it. Movement detection without an ignition wire (FSD-ALL-002): **MoveS** (event
+  21, movement start) and **MoveE** (event 22, movement end) are event packets of the sheet, each
+  with its scenario — MoveS failed as an unknown packet type.
+- **The cases that are part of testing.** *Edit scope* on the Test plan: tick the cases (or a whole
+  category) that are part of testing; the rest leave the plan, the categories, the scorecard, the
+  release gate, the counts and the tracker sheet — kept aside, not deleted, and put back any time.
+  One scope per plan, every firmware version alike; an update of the shipped plan keeps it.
+- **Nothing slips through the gate.** Every byte the device sends is judged: bytes the protocol
+  cannot read (a broken sentence, a packet cut off, stray bytes) fail as *not a packet* instead of
+  vanishing; every packet on the device's connection is tested, so one with a wrong IMEI is caught
+  rather than dropped as another device's; a packet type the sheet does not describe fails;
+  different history packets with one time fail; fields must agree with the alert (main power on a
+  disconnect / reconnect, emergency status on emergency on / off, the cover open on a tamper alert,
+  at least 3 satellites with a fix); a packet marked live but over 10 minutes old fails as history
+  marked live. A test cannot read *Pass* while its intervals or history order were never given — it
+  is *Incomplete* — and a test-plan case passes only on packets that themselves pass the sheet. The spec gained the AIS-140 emergency
+  (EPB) and health (HLM) packets and the Amendment 3 packet types DT, OA and BC, by their codes. A live test carries on across a listener restarted
+  in Capture and a Runway restart. The first sheet is the **Locate 140 4G** (`runway/fwtest/specs`);
+  another device is another spec file. Run against a Locate 140 4G on firmware V7.06.10, it found
+  the history packets keeping their live checksum, a 51st field, a six-digit date and a broken
+  time in history packets, a login checksum taken over the `*` too, and a health packet without one.
+- **Locate 140 4G in the Packet parser**: its login and PVT packets show every field by its name
+  from the device's sheets, under *Locate 140 4G · Login packet* and *Locate 140 4G · PVT packet*
+  — the PVT's 50 fields showed as `field_1` … `field_50`, and the login's names sat one field off
+  (the IMEI shown as the device name, the firmware as the IMEI), because its login has no vendor
+  field. The 51-field PVT the device actually sends (V7.06.10, a field 50 before the OTA
+  response) is named too, and so is the Locate 140B's 48-field PVT.
+
+### Changed
+- **`main.py` runs one copy, always the latest code.** Started from VS Code, it used to find the
+  Runway already on port 8080 — a release, or this checkout before the last edit — and only bring
+  it forward, so the latest code never ran. Now a copy on older code is stopped and the latest
+  starts in its place, with the listeners it ran (relay rules and store) started again in it; the
+  same code already running is just brought forward, and no second copy starts. An open page from
+  source reloads itself when that server restarts. (`serve --take-over`; a copy is asked to stop
+  through `POST /api/app/quit`, from this computer only — a release older than 1.1.28 has no such
+  way, so its process is ended.)
+- **A copy run from source shows its branch** under the name — *Branch v1.1.28* — where a release
+  shows *Version 1.1.27*, so a copy run from a branch is never taken for a released one.
+- **Runway's logo is blue again**, as in 1.1.26: the blue tile with its mark, and the name as
+  "Run" in the text colour with "way" in blue — the program's icon, the tray icon and the window's
+  icon too. The rest of the app keeps the green of 1.1.27.
+
+### Fixed
+- **The map draws every packet, where the device put it.** A log over 4,000 positions kept only every
+  Nth point of its track, so the line ran straight between them — cutting corners at roundabouts,
+  looking broken, and missing the very packet picked on it. Now every packet with a clean position is
+  on the track at its own position, however long the log, and a lone packet between two breaks is a
+  dot instead of nothing. What is not joined into the line is drawn as what it is: gaps dotted, stale
+  positions and jumps dashed. To stay quick at any length the map draws by **level of detail, never by
+  leaving data out**: at each zoom a line carries the points that move it by more than half a screen
+  pixel — every packet lies within half a pixel of the line drawn, measured (`accuracy()`), and at
+  street level all of them are there — and dots are drawn in the view, one per pixel (one sits exactly
+  under another). 100,000 packets: 1,859 points drawn at the fitted zoom, a zoom step in 0.2-0.3 s
+  (was 0.7 s), dots in 0.2 s; a click still picks the nearest real packet.
+- **No chart or measure hides a reading.** The power chart of a long log kept each stretch's lowest
+  supply only — a spike vanished; it keeps each stretch's lowest and highest supply and internal
+  battery now. The device comparison judged how far apart the devices put the vehicle on a sample
+  past 20,000 positions — the worst moment could fall between; it judges every position now.
+- **Log analysis's Packet panel shows the internal battery** — its voltage and its level, under the
+  supply (the row view now carries both).
+- **One moment, one packet** (Firmware test): *History times differ* compared only history packets
+  in a row, so a live packet repeating a time, a time coming back later, or a moment sent live and
+  again as history passed. *Packet times differ* now holds every packet of one kind (a location
+  update, or each alert) to its own time — live or history, in a row or not; a moment sent live and
+  again as history is a warning of its own (the platform gets it twice). The two causes are told
+  apart field by field: **duplicate packets** (the same data again, only a new frame number — the
+  device makes a packet twice) and **different packets at one time** (the clock did not move); both
+  are critical defects, fail plan cases 16.01 and 23.04 (InTouch, release-critical) and so block the
+  release gate. On the maps a pile of packets at one time is a ring with how many (its card: when,
+  where, the frame numbers, the same data or not) — duplicates read as one point otherwise, and the
+  frame numbers they used as packets missing; the Dashboard's packet table tags each row that repeats
+  a device time (*Same time*). Run on the Locate 140 4G (V7.06.11): 6,553 duplicate packets, 461 at a
+  stuck clock — 92 copies of one second alone — and 73 live packets sent again as history.
+- **The Dashboard's packet table shows the date with the time** (DD-MM-YYYY HH:MM:SS) — a capture
+  over several days read as one; and the device's own battery is named as such: *Internal battery
+  level (%)* (from health packets) and *Internal battery (V)* (every location packet), the voltage
+  now shown beside the level and in the packet's detail with the input voltage.
+  A **Message type** column says what each packet is as the packet says it — its type and alert ID
+  (`NR,1`, `MoveS,21`, `TL,22`) — and *Columns* offers every field the packets carried (packet
+  status, frame number, number plate, firmware, PDOP, HDOP, operator, main power, cell, digital
+  and analog inputs, checksum…), named from the field, in the order first seen.
+- **Every time on the Dashboard reads one way — local, 24-hour.** The device list gave a device's last
+  packet as *2:49:02 pm*, and a packet's detail its event and received times in raw UTC
+  (`2026-11-18T12:10:30Z`); both now read as the table does (`18-11-2026 17:40:30`), and ignition as
+  *On* / *Off*. The exact values stay in the decoded packet below.
+- **A file test has a timeline** (Firmware test): a capture carries no arrival times, so its timeline
+  said *Not enough packets yet* whatever it held. Its packets now stand at the device's own time, in
+  that order, history among them — marked *device time*. The Test plan's filters (*Any result*,
+  *Every case*) no longer clip their text, and a bench step's *Run* and result fit their column.
+- **A broken packet makes no device of its own**: a sentence cut off and glued to the next
+  (`$PVT,GTRP,V7.06.11,LB$ ,` then the next packet) had the firmware version where the IMEI goes, and
+  the Dashboard showed a device called "V7.06.11". An AIS-140 device is named only by digits; such a
+  packet stays the connection's device.
+- **Exports never fail on a damaged packet**: a control byte inside a field (the device sent a few
+  broken packets) reached a check's example, Excel refused it and *Report* answered an internal
+  error. Every Excel file Runway writes — firmware test report, tracker, defects, Log analysis, QC —
+  now shows such a byte as `\x02`, so the evidence stays readable.
+- **The folded sidebar opens without moving anything**: with *Expand on hover* (and always under
+  1000 px), each group heading was a thin rule when folded and a name when open, so opening it on
+  hover pushed every page 20-95 px down and the pointer landed on another one — a click opened the
+  wrong page. A heading now has one height in both, and an icon the same place.
+- **The Test plan never fails as a whole**: a copy started before a newer plan file named a check it
+  did not know, and the plan (and with it the categories) answered HTTP 500. A case that cannot be
+  judged now says why — *restart Runway to load the latest code* — and the rest are judged.
+- **A login's firmware and number plate are read**: the Locate 140 4G writes its firmware as
+  `V7.6.0`, which the login reader did not take for a version, so devices showed no firmware.
+  Login layouts are now a table by field count, like the PVT's.
+- **An update brings new protocol definitions to a copy that has the old ones.** A release copied
+  its definitions into `data/protocols` on the first start and never again, so the Locate 140 4G
+  names would have reached fresh installs only. Now each start replaces a definition a release
+  put there and nobody changed; one edited in Configuration → Protocols is kept.
+- **The title bar follows the theme** when you switch it inside Runway's window. Edge fixes its dark
+  mode when the window opens — a window opened while Runway was dark kept a black title bar over a
+  light Runway, even after a restart (a new window joins the running one). Now a switch in Runway's
+  own window reopens it on the same page in the new mode (about a second); a browser tab is left
+  alone, and so is any other Runway window.
+- **Runway's window no longer offers to sync**: its own Edge profile now opens with sync off, so a
+  first start shows Runway, not Edge's "We are now syncing your browsing data".
+- **The release build no longer ends on an error** when its messages go to a file or a console in
+  the Windows code page: the closing lines carry an arrow, which that code page cannot write. The
+  1.1.27 build stopped there after its zip, `latest.json` and notes were already made.
+
 ## [1.1.27] — 2026-11-17
 
 ### Added

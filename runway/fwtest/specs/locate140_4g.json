@@ -1,0 +1,214 @@
+{
+  "schema": "1",
+  "name": "Locate 140 4G",
+  "codec": "ais140",
+  "about": "The Locate 140 4G's login and PVT sheets, with the AIS-140 standard where the sheets are silent. Fields are numbered after the header; -1 is the last field.",
+
+  "checksum": {
+    "algorithm": "xor",
+    "about": "Two hex digits after '*': the XOR of every byte from '$' up to, not including, '*' — what the device's live PVT packets carry."
+  },
+  "terminator": "\r\n",
+
+  "settings": {
+    "live_max_delay_s": 60,
+    "live_stale_s": 600,
+    "future_tolerance_s": 60
+  },
+
+  "config": {
+    "ign_on_s": null,
+    "ign_off_s": null,
+    "sleep_after_min": null,
+    "sleep_s": null,
+    "history_order": "",
+    "formats": {"PVT": "50"}
+  },
+  "formats": {
+    "PVT": {"50": "50 fields, as the sheet", "51": "51 fields, field 50 before the OTA response"}
+  },
+
+  "expect": {
+    "imei": "The IMEI under test; else the login's",
+    "vehicle_reg_no": "The number plate; else the login's",
+    "firmware_version": "The firmware under test; else the login's"
+  },
+
+  "status_by_alert": {"NR": {"1": "L", "2": "H"}},
+  "alert_ids": {
+    "NR": [1, 2], "BD": [3], "BL": [4, 5], "BR": [6], "IN": [7], "IF": [8], "EA": [10, 11],
+    "OT": [12], "HB": [13], "HA": [14], "RT": [15], "TA": [9, 16],
+    "TL": [22], "MoveS": [21], "MoveE": [22]
+  },
+  "alert_ids_interim": {
+    "TL": {"22": "event ID 22 is MoveE's (FSD-ALL-002) — TL uses it until it gets an ID of its own"}
+  },
+  "levels_about": "How much a check weighs for this device, over the gate's own: frame numbers and a connection that opens without its login are warnings for the Locate 140 4G (the person's call, 20-11-2026). A test-plan case that names the check still judges it in full.",
+  "levels": {"frame_live": "warn", "frame_repeat": "warn", "login_first": "warn"},
+  "ignition_by_type": {"IN": "1", "IF": "0"},
+  "when": [
+    {"if": {"packet_type": "BD"}, "then": {"main_power_status": {"equals": "0"}}, "says": "a main-power-disconnect packet says main power 0"},
+    {"if": {"packet_type": "BR"}, "then": {"main_power_status": {"equals": "1"}}, "says": "a main-power-reconnect packet says main power 1"},
+    {"if": {"packet_type": "EA", "alert_id": 10}, "then": {"emergency_status": {"equals": "1"}}, "says": "an emergency-on packet says emergency 1"},
+    {"if": {"packet_type": "EA", "alert_id": 11}, "then": {"emergency_status": {"equals": "0"}}, "says": "an emergency-off packet says emergency 0"},
+    {"if": {"packet_type": "TA"}, "then": {"tamper_alert": {"equals": "O"}}, "says": "a tamper packet says the cover open"},
+    {"if": {"gps_fix": "1"}, "then": {"satellites": {"range": [3, 60]}}, "says": "a fix needs at least 3 satellites"}
+  ],
+
+  "packets": {
+    "LGN": {
+      "source": "Locate 140 4G login sheet",
+      "label": "Login",
+      "fields": 8,
+      "field_list": [
+        {"index": 1, "name": "vehicle_reg_no", "label": "Vehicle reg. no", "rules": {"expect": "vehicle_reg_no"}},
+        {"index": 2, "name": "imei", "label": "IMEI", "rules": {"imei": true, "expect": "imei"}},
+        {"index": 3, "name": "firmware_version", "label": "Firmware version", "rules": {"pattern": {"regex": "V\\d+(\\.\\d+)+", "says": "V and a version, as V7.6.0"}, "expect": "firmware_version"}},
+        {"index": 4, "name": "protocol_version", "label": "Protocol", "rules": {"equals": "AIS140"}},
+        {"index": 5, "name": "latitude", "label": "Latitude", "rules": {"decimal": true, "range": [0, 90]}},
+        {"index": 6, "name": "latitude_dir", "label": "Latitude dir", "rules": {"one_of": ["N", "S"]}},
+        {"index": 7, "name": "longitude", "label": "Longitude", "rules": {"decimal": true, "range": [0, 180]}},
+        {"index": 8, "name": "longitude_dir", "label": "Longitude dir", "rules": {"one_of": ["E", "W"]}}
+      ]
+    },
+
+    "PVT": {
+      "source": "Locate 140 4G PVT sheet",
+      "label": "PVT",
+      "fields": 50,
+      "field_list": [
+        {"index": 1, "name": "vendor_id", "label": "Vendor ID", "rules": {"equals": "GTRP"}},
+        {"index": 2, "name": "firmware_version", "label": "Firmware version", "rules": {"pattern": {"regex": "V\\d+(\\.\\d+)+", "says": "V and a version, as V7.6.0"}, "expect": "firmware_version"}},
+        {"index": 3, "name": "packet_type", "label": "Packet type", "rules": {"one_of": ["NR", "EA", "TA", "HP", "IN", "IF", "BD", "BR", "BL", "OT", "RT", "HB", "HA", "DT", "OA", "BC", "TL", "MoveS", "MoveE", "IMU"]}},
+        {"index": 4, "name": "alert_id", "label": "Alert ID", "rules": {"int": true}},
+        {"index": 5, "name": "packet_status", "label": "Packet status", "rules": {"one_of": ["L", "H"]}},
+        {"index": 6, "name": "imei", "label": "IMEI", "rules": {"imei": true, "expect": "imei"}},
+        {"index": 7, "name": "vehicle_reg_no", "label": "Vehicle reg. no", "rules": {"expect": "vehicle_reg_no"}},
+        {"index": 8, "name": "gps_fix", "label": "GNSS fix", "rules": {"one_of": ["0", "1"]}},
+        {"index": 9, "name": "date", "label": "Date", "rules": {"date": "DDMMYYYY"}},
+        {"index": 10, "name": "time", "label": "Time", "rules": {"time": "hhmmss"}},
+        {"index": 11, "name": "latitude", "label": "Latitude", "rules": {"decimal": true, "range": [0, 90]}},
+        {"index": 12, "name": "latitude_dir", "label": "Latitude dir", "rules": {"one_of": ["N", "S"]}},
+        {"index": 13, "name": "longitude", "label": "Longitude", "rules": {"decimal": true, "range": [0, 180]}},
+        {"index": 14, "name": "longitude_dir", "label": "Longitude dir", "rules": {"one_of": ["E", "W"]}},
+        {"index": 15, "name": "speed_kph", "label": "Speed", "rules": {"decimal": true, "range": [0, 300]}},
+        {"index": 16, "name": "heading_deg", "label": "Heading", "rules": {"int": true, "range": [0, 359]}},
+        {"index": 17, "name": "satellites", "label": "No of satellites", "rules": {"int": true, "range": [0, 60]}},
+        {"index": 18, "name": "altitude_m", "label": "Altitude", "rules": {"decimal": true, "range": [-1000, 100000]}},
+        {"index": 19, "name": "pdop", "label": "PDOP", "rules": {"decimal": true, "range": [0, 99]}},
+        {"index": 20, "name": "hdop", "label": "HDOP", "rules": {"decimal": true, "range": [0, 99]}},
+        {"index": 21, "name": "network_operator", "label": "Operator name", "rules": {}},
+        {"index": 22, "name": "ignition", "label": "Ignition status", "rules": {"one_of": ["0", "1"]}},
+        {"index": 23, "name": "main_power_status", "label": "Main power status", "rules": {"one_of": ["0", "1"]}},
+        {"index": 24, "name": "main_input_voltage", "label": "Main input voltage", "rules": {"decimal": true, "range": [0, 60]}},
+        {"index": 25, "name": "internal_battery_voltage", "label": "Internal battery voltage", "rules": {"decimal": true, "range": [0, 5]}},
+        {"index": 26, "name": "emergency_status", "label": "Emergency status", "rules": {"one_of": ["0", "1"]}},
+        {"index": 27, "name": "tamper_alert", "label": "Tamper alert", "rules": {"one_of": ["C", "O"]}},
+        {"index": 28, "name": "gsm_signal", "label": "GSM signal strength", "rules": {"int": true, "range": [0, 31]}, "allow": ["99"]},
+        {"index": 29, "name": "mcc", "label": "MCC", "rules": {"digits": 3}, "allow": ["x"]},
+        {"index": 30, "name": "mnc", "label": "MNC", "rules": {"int": true}, "allow": ["x"]},
+        {"index": 31, "name": "lac", "label": "LAC", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 32, "name": "cell_id", "label": "Cell ID", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 33, "name": "nmr1_signal_strength", "label": "NMR 1 strength", "rules": {"int": true, "range": [0, 31]}, "allow": ["x"]},
+        {"index": 34, "name": "nmr1_lac", "label": "NMR 1 LAC", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 35, "name": "nmr1_cell_id", "label": "NMR 1 cell ID", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 36, "name": "nmr2_signal_strength", "label": "NMR 2 strength", "rules": {"int": true, "range": [0, 31]}, "allow": ["x"]},
+        {"index": 37, "name": "nmr2_lac", "label": "NMR 2 LAC", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 38, "name": "nmr2_cell_id", "label": "NMR 2 cell ID", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 39, "name": "nmr3_signal_strength", "label": "NMR 3 strength", "rules": {"int": true, "range": [0, 31]}, "allow": ["x"]},
+        {"index": 40, "name": "nmr3_lac", "label": "NMR 3 LAC", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 41, "name": "nmr3_cell_id", "label": "NMR 3 cell ID", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 42, "name": "nmr4_signal_strength", "label": "NMR 4 strength", "rules": {"int": true, "range": [0, 31]}, "allow": ["x"]},
+        {"index": 43, "name": "nmr4_lac", "label": "NMR 4 LAC", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 44, "name": "nmr4_cell_id", "label": "NMR 4 cell ID", "rules": {"hex": true}, "allow": ["x"]},
+        {"index": 45, "name": "digital_input_status", "label": "Digital input status", "rules": {"bits": 4}},
+        {"index": 46, "name": "digital_output_status", "label": "Digital output status", "rules": {"bits": 0}},
+        {"index": 47, "name": "frame_number", "label": "Frame number", "rules": {"int": true, "range": [0, 999999]}},
+        {"index": 48, "name": "analog_input_1", "label": "Analog input 1", "rules": {"decimal": true}},
+        {"index": 49, "name": "analog_input_2", "label": "Analog input 2", "rules": {"decimal": true}},
+        {"index": 50, "name": "odometer_m", "label": "Odometer", "rules": {"decimal": true}, "formats": ["51"]},
+        {"index": -1, "name": "ota_update_details", "label": "OTA response", "rules": {"parenthesized": true}}
+      ]
+    },
+
+    "HEL": {
+      "source": "The device's own health packet (no sheet yet)",
+      "label": "Health",
+      "fields": null,
+      "field_list": [
+        {"index": 1, "name": "vendor_id", "label": "Vendor ID", "rules": {"equals": "GTRP"}},
+        {"index": 2, "name": "firmware_version", "label": "Firmware version", "rules": {"expect": "firmware_version"}},
+        {"index": 3, "name": "imei", "label": "IMEI", "rules": {"imei": true, "expect": "imei"}}
+      ]
+    },
+
+    "HLM": {
+      "source": "AIS-140 standard, health packet (HLP / HLM)",
+      "label": "Health (HLM)",
+      "fields": null,
+      "field_list": [
+        {"index": 1, "name": "vendor_id", "label": "Vendor ID", "rules": {"equals": "GTRP"}},
+        {"index": 2, "name": "firmware_version", "label": "Firmware version", "rules": {"expect": "firmware_version"}},
+        {"index": 3, "name": "imei", "label": "IMEI", "rules": {"imei": true, "expect": "imei"}},
+        {"index": 4, "name": "battery_pct", "label": "Battery %", "rules": {"int": true, "range": [0, 100]}},
+        {"index": 5, "name": "low_battery_threshold_pct", "label": "Low-battery threshold %", "rules": {"int": true, "range": [0, 100]}},
+        {"index": 6, "name": "memory_pct", "label": "Memory %", "rules": {"decimal": true, "range": [0, 100]}},
+        {"index": 7, "name": "update_rate_ignition_on_s", "label": "Update rate, ignition on", "rules": {"int": true}},
+        {"index": 8, "name": "update_rate_ignition_off_s", "label": "Update rate, ignition off", "rules": {"int": true}}
+      ]
+    },
+
+    "EPB": {
+      "source": "AIS-140 standard, emergency packet (EPB)",
+      "label": "Emergency",
+      "fields": null,
+      "field_list": [
+        {"index": 1, "name": "packet_type", "label": "Message", "rules": {"one_of": ["EMR", "SEM"]}},
+        {"index": 2, "name": "imei", "label": "IMEI", "rules": {"imei": true, "expect": "imei"}},
+        {"index": 3, "name": "packet_status", "label": "Packet status", "rules": {"one_of": ["NM", "SP"]}},
+        {"index": 4, "name": "date_time", "label": "Date and time", "rules": {"pattern": {"regex": "\\d{14}", "says": "DDMMYYYYhhmmss"}}},
+        {"index": 5, "name": "gps_valid", "label": "GNSS validity", "rules": {"one_of": ["A", "V"]}},
+        {"index": 6, "name": "latitude", "label": "Latitude", "rules": {"decimal": true, "range": [0, 90]}},
+        {"index": 7, "name": "latitude_dir", "label": "Latitude dir", "rules": {"one_of": ["N", "S"]}},
+        {"index": 8, "name": "longitude", "label": "Longitude", "rules": {"decimal": true, "range": [0, 180]}},
+        {"index": 9, "name": "longitude_dir", "label": "Longitude dir", "rules": {"one_of": ["E", "W"]}},
+        {"index": 10, "name": "altitude_m", "label": "Altitude", "rules": {"decimal": true}},
+        {"index": 11, "name": "speed_kph", "label": "Speed", "rules": {"decimal": true, "range": [0, 300]}},
+        {"index": 12, "name": "provider", "label": "Provider", "rules": {"one_of": ["G", "N"]}},
+        {"index": 13, "name": "distance_m", "label": "Distance", "rules": {"decimal": true}},
+        {"index": 14, "name": "vehicle_reg_no", "label": "Vehicle reg. no", "rules": {"expect": "vehicle_reg_no"}}
+      ]
+    }
+  },
+
+  "scenarios": [
+    {"key": "login", "label": "Login", "match": {"header": "LGN"}},
+    {"key": "live", "label": "Location (live)", "match": {"header": "PVT", "packet_type": "NR", "packet_status": "L"}},
+    {"key": "history", "label": "Location (history)", "match": {"header": "PVT", "packet_type": "NR", "packet_status": "H"}},
+    {"key": "health", "label": "Health packet (HEL)", "match": {"header": "HEL"}},
+    {"key": "hp", "label": "Health (HP)", "match": {"header": "PVT", "packet_type": "HP"}},
+    {"key": "in", "label": "Ignition on", "match": {"header": "PVT", "packet_type": "IN"}},
+    {"key": "if", "label": "Ignition off", "match": {"header": "PVT", "packet_type": "IF"}},
+    {"key": "bd", "label": "Battery disconnected", "match": {"header": "PVT", "packet_type": "BD"}},
+    {"key": "br", "label": "Battery reconnected", "match": {"header": "PVT", "packet_type": "BR"}},
+    {"key": "bl", "label": "Internal battery low", "match": {"header": "PVT", "packet_type": "BL"}},
+    {"key": "ea", "label": "Emergency alert", "match": {"header": "PVT", "packet_type": "EA"}},
+    {"key": "ta", "label": "Tamper alert", "match": {"header": "PVT", "packet_type": "TA"}},
+    {"key": "ot", "label": "OTA update", "match": {"header": "PVT", "packet_type": "OT"}},
+    {"key": "hb", "label": "Harsh braking", "match": {"header": "PVT", "packet_type": "HB"}},
+    {"key": "ha", "label": "Harsh acceleration", "match": {"header": "PVT", "packet_type": "HA"}},
+    {"key": "rt", "label": "Rash turn", "match": {"header": "PVT", "packet_type": "RT"}},
+    {"key": "dt", "label": "DT packet", "match": {"header": "PVT", "packet_type": "DT"}},
+    {"key": "oa", "label": "OA packet", "match": {"header": "PVT", "packet_type": "OA"}},
+    {"key": "bc", "label": "BC packet", "match": {"header": "PVT", "packet_type": "BC"}},
+    {"key": "tl", "label": "TL packet", "match": {"header": "PVT", "packet_type": "TL"}},
+    {"key": "moves", "label": "Movement start (MoveS)", "match": {"header": "PVT", "packet_type": "MoveS"}},
+    {"key": "movee", "label": "Movement end (MoveE)", "match": {"header": "PVT", "packet_type": "MoveE"}},
+    {"key": "hlm", "label": "Health packet (HLM)", "match": {"header": "HLM"}},
+    {"key": "epb", "label": "Emergency packet", "match": {"header": "EPB"}},
+    {"key": "emr", "label": "Emergency message (EMR)", "match": {"header": "EPB", "packet_type": "EMR"}},
+    {"key": "sem", "label": "Stop message (SEM)", "match": {"header": "EPB", "packet_type": "SEM"}},
+    {"key": "epb_nm", "label": "Emergency, normal (NM)", "match": {"header": "EPB", "packet_status": "NM"}},
+    {"key": "epb_sp", "label": "Emergency, stored (SP)", "match": {"header": "EPB", "packet_status": "SP"}}
+  ]
+}

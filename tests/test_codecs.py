@@ -661,7 +661,7 @@ def test_imu_interleaved_with_normal_packets_on_one_connection():
         assert out.consumed > 0
         seen += [(r.message_type, r.io.get("layout")) for r in out.records]
         data = data[out.consumed:]
-    assert seen == [("login", None), ("normal", "zenithra_mmi_nr"),
+    assert seen == [("login", "ais140_no_vendor"), ("normal", "zenithra_mmi_nr"),
                     ("normal", "zenithra_mmi_nr"), ("imu", "ais140_vb")]
 
 

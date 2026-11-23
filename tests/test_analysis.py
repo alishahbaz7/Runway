@@ -195,6 +195,7 @@ async def test_upload_report_rows_settings_excel_delete():
         assert rep["areas"] and "_flags" not in rep
         stale = (await c.get(f"/api/analysis/{aid}/rows", params={"flag": "stale"})).json()
         assert stale["total"] == 1 and stale["rows"][0]["sats"] == 0
+        assert stale["rows"][0]["ibatt_v"] == 4100.0                # the internal battery, for the Packet panel
         k = stale["rows"][0]["k"]
         page = (await c.get(f"/api/analysis/{aid}/rows", params={"at": k, "limit": 50})).json()
         assert any(x["k"] == k for x in page["rows"])
@@ -673,3 +674,68 @@ def test_every_measure_and_area_says_what_it_is_for(report):
     from runway.analysis import scorecard
     assert not [k for k, *_ in scorecard.METRICS if not scorecard.ABOUT.get(k)]
     assert all(x["about"] for x in report["scorecard"]) and all(a["about"] for a in report["areas"])
+
+
+def test_each_trip_says_what_happened_on_it(report):
+    """The map's trip list: each trip with its alerts, driving events, overspeed episodes, history packets
+    and data lost while driving — counted over the trip's own rows."""
+    first = report["driving"]["trips"][0]
+    assert first["overspeed"] == 1 and first["events"] == 1 and first["history"] == 12 and first["lost_s"] == 0
+    assert all({"alerts", "events", "overspeed", "history", "lost_s"} <= set(t) for t in report["driving"]["trips"])
+
+
+def test_the_track_carries_every_packet_as_sent():
+    """The map draws what the device sent: every packet with a clean position is a point of the track, at
+    its own position — a long log is never thinned, and a lone packet between two breaks is kept too."""
+    from datetime import timedelta as _td
+    rows, t, lat = [], T0, LAT
+    for i in range(6000):                                     # longer than any thinning used to allow
+        lat += STEP
+        rows.append({"timestampStr": f"{t:%Y-%m-%d %H:%M:%S}", "speed": "40.0", "latitude": f"{lat:.6f}",
+                     "longitude": f"{LON + (i % 7) * 0.00001:.6f}", "numberOfSatellites": "12", "digitalInput1": "1"})
+        t += _td(seconds=1)
+    t += _td(minutes=30)                                       # a lone packet between two long gaps
+    rows.append({"timestampStr": f"{t:%Y-%m-%d %H:%M:%S}", "speed": "0.0", "latitude": f"{lat:.6f}", "longitude": f"{LON:.6f}",
+                 "numberOfSatellites": "12", "digitalInput1": "0"})
+    t += _td(minutes=30)
+    rows.append({"timestampStr": f"{t:%Y-%m-%d %H:%M:%S}", "speed": "0.0", "latitude": f"{lat + 0.001:.6f}", "longitude": f"{LON:.6f}",
+                 "numberOfSatellites": "12", "digitalInput1": "0"})
+    head = ["timestampStr", "speed", "latitude", "longitude", "numberOfSatellites", "digitalInput1"]
+    text = ",".join(head) + chr(10) + chr(10).join(",".join(r[h] for h in head) for r in rows)
+    log = drivelog.read(text.encode(), "long.csv")
+    rep = an.analyse(log)
+    on_map = {p[3]: p for seg in rep["series"]["track"] for p in seg}
+    assert len(on_map) == len(log.rows)
+    assert all((on_map[r["k"]][0], on_map[r["k"]][1]) == (round(r["lat"], 6), round(r["lon"], 6)) for r in log.rows)
+    assert any(len(seg) == 1 for seg in rep["series"]["track"])          # the lone packet, kept
+
+
+def test_the_worst_disagreement_is_found_among_every_position():
+    """How far apart two devices put the vehicle is judged at every moment: the one moment they disagree
+    most is found, however long the log (a sample used to step over it past 20,000 positions)."""
+    from runway.analysis import compare as cmpmod
+    n = 45000                                                  # the old sample took every 2nd: 12,345 fell between
+    ref = [{"t": T0 + timedelta(seconds=i), "lat": LAT + 0.00001 * i, "lon": LON, "speed": 40.0} for i in range(n)]
+    other = [dict(r) for r in ref]
+    other[12345] = dict(other[12345], lon=LON + 0.01)        # ~1 km off at one moment only
+    ag = cmpmod.agreement(ref, other)
+    assert ag["matched"] == n and ag["apart_max_m"] > 900
+
+
+def test_the_power_chart_keeps_dips_and_spikes():
+    """A long log's power chart keeps each stretch's lowest and highest supply and internal battery: a
+    spike shows as surely as a dip (the lowest alone hid every peak)."""
+    rows, ffill = [], []
+    for k in range(9000):
+        supply = 14000.0
+        if k == 4321:
+            supply = 31000.0                                  # one spike
+        if k == 6000:
+            supply = 9000.0                                   # one dip
+        rows.append({"t": T0 + timedelta(seconds=k), "k": k, "supply": supply, "ibatt_v": 4100.0 if k != 7000 else 3300.0})
+        ffill.append(1)
+    line = an._power_line(rows, ffill)
+    assert len(line) < 9000
+    supplies = [p[1] for p in line]
+    assert max(supplies) == 31.0 and min(supplies) == 9.0 and min(p[2] for p in line) == 3.3
+    assert [p[0] for p in line] == sorted(p[0] for p in line)          # still in time order

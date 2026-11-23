@@ -1,0 +1,2619 @@
+{
+ "schema": "1",
+ "name": "Locate 140 4G",
+ "spec": "Locate 140 4G",
+ "source": "New Locate140 4G - Tracker, 18-11-2026",
+ "kinds": {
+  "automatic": "judged from the packets",
+  "assisted": "a step on the bench, then judged from the packets",
+  "command": "Runway sends the device a command, then judges its answer and what follows",
+  "manual": "seen by the tester; status and remarks by hand"
+ },
+ "areas": [
+  {
+   "id": "01",
+   "title": "Location service",
+   "goal": "Get a fast, reliable fix in all conditions and report position without false movement.",
+   "cases": [
+    {
+     "id": "01.01",
+     "group": "Functional",
+     "what": "First fix after cold start",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.02",
+     "group": "Functional",
+     "what": "First fix after warm start",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.03",
+     "group": "Functional",
+     "what": "First fix after hot start",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.04",
+     "group": "Functional",
+     "what": "Position accuracy in open sky",
+     "kind": "manual"
+    },
+    {
+     "id": "01.05",
+     "group": "Functional",
+     "what": "Constellations tracked, including NavIC",
+     "kind": "manual"
+    },
+    {
+     "id": "01.06",
+     "group": "Functional",
+     "what": "Fix validity shown in every packet",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.gps_fix"
+      ],
+      "needs": {
+       "headers": [
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "01.07",
+     "group": "Conditions",
+     "what": "Fix after wake from each sleep state",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.08",
+     "group": "Conditions",
+     "what": "Tunnel crossing and fix on exit",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.09",
+     "group": "Conditions",
+     "what": "Covered or underground parking, short and long stay",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.10",
+     "group": "Conditions",
+     "what": "Urban area with tall buildings",
+     "kind": "manual"
+    },
+    {
+     "id": "01.11",
+     "group": "Conditions",
+     "what": "Device in its installed position inside the enclosure",
+     "kind": "manual"
+    },
+    {
+     "id": "01.12",
+     "group": "Stationary behaviour (GPS hopping)",
+     "what": "Parked with ignition off",
+     "kind": "automatic",
+     "judge": {
+      "measure": "parked_drift",
+      "ignition": "0"
+     }
+    },
+    {
+     "id": "01.13",
+     "group": "Stationary behaviour (GPS hopping)",
+     "what": "Parked with engine idling",
+     "kind": "automatic",
+     "judge": {
+      "measure": "parked_drift",
+      "ignition": "1"
+     }
+    },
+    {
+     "id": "01.14",
+     "group": "Stationary behaviour (GPS hopping)",
+     "what": "Parked in poor sky",
+     "kind": "assisted",
+     "judge": {
+      "measure": "parked_drift",
+      "ignition": "0"
+     }
+    },
+    {
+     "id": "01.15",
+     "group": "Stationary behaviour (GPS hopping)",
+     "what": "No distance added while parked",
+     "kind": "automatic",
+     "judge": {
+      "measure": "parked_distance"
+     }
+    },
+    {
+     "id": "01.16",
+     "group": "Failure and recovery",
+     "what": "No fix for a long period",
+     "kind": "assisted",
+     "judge": {
+      "measure": "time_to_fix"
+     }
+    },
+    {
+     "id": "01.17",
+     "group": "Failure and recovery",
+     "what": "GNSS module not responding, and recovery",
+     "kind": "assisted"
+    },
+    {
+     "id": "01.18",
+     "group": "Configuration",
+     "what": "Constellation selection",
+     "kind": "command"
+    },
+    {
+     "id": "01.19",
+     "group": "Configuration",
+     "what": "Stationary filter on/off and its source",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "02",
+   "title": "Device time sync",
+   "goal": "Keep the device clock correct from the best available source.",
+   "cases": [
+    {
+     "id": "02.01",
+     "group": "Functional",
+     "what": "Sync from GNSS",
+     "kind": "manual"
+    },
+    {
+     "id": "02.02",
+     "group": "Functional",
+     "what": "Sync from network time (NITZ)",
+     "kind": "manual"
+    },
+    {
+     "id": "02.03",
+     "group": "Functional",
+     "what": "Sync from NTP",
+     "kind": "manual"
+    },
+    {
+     "id": "02.04",
+     "group": "Functional",
+     "what": "Source priority when more than one is available",
+     "kind": "manual"
+    },
+    {
+     "id": "02.05",
+     "group": "Functional",
+     "what": "Sync event reported",
+     "kind": "manual"
+    },
+    {
+     "id": "02.06",
+     "group": "Conditions",
+     "what": "Time at boot, before any sync",
+     "kind": "automatic",
+     "judge": {
+      "measure": "clock_boot"
+     }
+    },
+    {
+     "id": "02.07",
+     "group": "Conditions",
+     "what": "After wake from sleep",
+     "kind": "assisted"
+    },
+    {
+     "id": "02.08",
+     "group": "Conditions",
+     "what": "After a long offline period",
+     "kind": "assisted"
+    },
+    {
+     "id": "02.09",
+     "group": "Conditions",
+     "what": "Drift during sleep over a day and across temperature",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "future_time"
+      ],
+      "needs": {
+       "headers": [
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "02.10",
+     "group": "Failure and recovery",
+     "what": "Sources disagreeing",
+     "kind": "manual"
+    },
+    {
+     "id": "02.11",
+     "group": "Failure and recovery",
+     "what": "Clock change while stored data is queued (order kept)",
+     "kind": "assisted"
+    },
+    {
+     "id": "02.12",
+     "group": "Configuration",
+     "what": "Sync interval",
+     "kind": "command"
+    },
+    {
+     "id": "02.13",
+     "group": "Configuration",
+     "what": "Source selection",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "03",
+   "title": "Sleep and wake-up cycle",
+   "goal": "Move correctly between Active, Stand-by, Sleep and Deep sleep, saving battery while staying reachable.",
+   "cases": [
+    {
+     "id": "03.01",
+     "group": "States",
+     "what": "Entry into and exit from Active",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "ignition on"
+      ],
+      "config": [
+       "ign_on_s"
+      ]
+     }
+    },
+    {
+     "id": "03.02",
+     "group": "States",
+     "what": "Entry into and exit from Stand-by",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "ignition off",
+       "going to sleep"
+      ],
+      "config": [
+       "ign_off_s"
+      ]
+     }
+    },
+    {
+     "id": "03.03",
+     "group": "States",
+     "what": "Entry into and exit from Sleep",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "asleep",
+       "going to sleep"
+      ],
+      "config": [
+       "sleep_after_min",
+       "sleep_s"
+      ]
+     }
+    },
+    {
+     "id": "03.04",
+     "group": "States",
+     "what": "Entry into and exit from Deep sleep",
+     "kind": "manual"
+    },
+    {
+     "id": "03.05",
+     "group": "States",
+     "what": "Reporting interval in each state",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "config": [
+       "ign_on_s",
+       "ign_off_s"
+      ]
+     }
+    },
+    {
+     "id": "03.06",
+     "group": "States",
+     "what": "Sleep start event as the last packet before sleep",
+     "kind": "manual"
+    },
+    {
+     "id": "03.07",
+     "group": "Wake triggers",
+     "what": "Wake on ignition",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "in"
+      ]
+     }
+    },
+    {
+     "id": "03.08",
+     "group": "Wake triggers",
+     "what": "Wake on timer",
+     "kind": "assisted"
+    },
+    {
+     "id": "03.09",
+     "group": "Wake triggers",
+     "what": "Wake on motion",
+     "kind": "assisted"
+    },
+    {
+     "id": "03.10",
+     "group": "Wake triggers",
+     "what": "Wake on SOS",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ea"
+      ]
+     }
+    },
+    {
+     "id": "03.11",
+     "group": "Wake triggers",
+     "what": "Wake on external power connect or disconnect",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "bd",
+       "br"
+      ]
+     }
+    },
+    {
+     "id": "03.12",
+     "group": "Wake triggers",
+     "what": "Wake on tamper",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ta"
+      ]
+     }
+    },
+    {
+     "id": "03.13",
+     "group": "Wake triggers",
+     "what": "Wake on CAN (CAN variant)",
+     "kind": "manual"
+    },
+    {
+     "id": "03.14",
+     "group": "Wake triggers",
+     "what": "Wake on SMS or call",
+     "kind": "manual"
+    },
+    {
+     "id": "03.15",
+     "group": "Power",
+     "what": "Current in each state",
+     "kind": "manual"
+    },
+    {
+     "id": "03.16",
+     "group": "Power",
+     "what": "Power cut in each state",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "bd"
+      ]
+     }
+    },
+    {
+     "id": "03.17",
+     "group": "Power",
+     "what": "Low internal battery",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "bl"
+      ]
+     }
+    },
+    {
+     "id": "03.18",
+     "group": "Power",
+     "what": "Power restore",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "br"
+      ]
+     }
+    },
+    {
+     "id": "03.19",
+     "group": "Robustness",
+     "what": "Rapid ignition on/off",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "in",
+       "if"
+      ],
+      "checks": [
+       "ignition_alert"
+      ]
+     }
+    },
+    {
+     "id": "03.20",
+     "group": "Robustness",
+     "what": "Vibration while parked (no false wake)",
+     "kind": "assisted"
+    },
+    {
+     "id": "03.21",
+     "group": "Robustness",
+     "what": "Reset in each state",
+     "kind": "assisted"
+    },
+    {
+     "id": "03.22",
+     "group": "Robustness",
+     "what": "Multi-day parked soak",
+     "kind": "automatic",
+     "judge": {
+      "measure": "soak"
+     }
+    },
+    {
+     "id": "03.23",
+     "group": "Configuration",
+     "what": "Ignition-on interval",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "ignition on"
+      ],
+      "config": [
+       "ign_on_s"
+      ]
+     }
+    },
+    {
+     "id": "03.24",
+     "group": "Configuration",
+     "what": "Ignition-off interval",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "ignition off",
+       "going to sleep"
+      ],
+      "config": [
+       "ign_off_s"
+      ]
+     }
+    },
+    {
+     "id": "03.25",
+     "group": "Configuration",
+     "what": "Sleep time",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "asleep",
+       "going to sleep"
+      ],
+      "config": [
+       "sleep_after_min",
+       "sleep_s"
+      ]
+     }
+    },
+    {
+     "id": "03.26",
+     "group": "Configuration",
+     "what": "Sleep interval",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "asleep",
+       "going to sleep"
+      ],
+      "config": [
+       "sleep_after_min",
+       "sleep_s"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "04",
+   "title": "LED patterns",
+   "goal": "Show device status clearly and consistently.",
+   "cases": [
+    {
+     "id": "04.01",
+     "group": "Functional",
+     "what": "Pattern for each state on the Power LED",
+     "kind": "manual"
+    },
+    {
+     "id": "04.02",
+     "group": "Functional",
+     "what": "Pattern for each state on the GPRS LED",
+     "kind": "manual"
+    },
+    {
+     "id": "04.03",
+     "group": "Functional",
+     "what": "Pattern for each state on the GNSS LED",
+     "kind": "manual"
+    },
+    {
+     "id": "04.04",
+     "group": "Functional",
+     "what": "Pattern for each state on the SOS LED",
+     "kind": "manual"
+    },
+    {
+     "id": "04.05",
+     "group": "Functional",
+     "what": "Blink timing",
+     "kind": "manual"
+    },
+    {
+     "id": "04.06",
+     "group": "Functional",
+     "what": "Error patterns",
+     "kind": "manual"
+    },
+    {
+     "id": "04.07",
+     "group": "Transitions",
+     "what": "LED follows state changes",
+     "kind": "manual"
+    },
+    {
+     "id": "04.08",
+     "group": "Transitions",
+     "what": "Priority when two states apply to one LED",
+     "kind": "manual"
+    },
+    {
+     "id": "04.09",
+     "group": "Conditions",
+     "what": "LEDs at boot",
+     "kind": "manual"
+    },
+    {
+     "id": "04.10",
+     "group": "Conditions",
+     "what": "LEDs in sleep",
+     "kind": "manual"
+    },
+    {
+     "id": "04.11",
+     "group": "Conditions",
+     "what": "LEDs during firmware update",
+     "kind": "manual"
+    },
+    {
+     "id": "04.12",
+     "group": "Conditions",
+     "what": "Visibility through the housing, day and night",
+     "kind": "manual"
+    },
+    {
+     "id": "04.13",
+     "group": "Configuration",
+     "what": "Status LED on/off",
+     "kind": "command"
+    },
+    {
+     "id": "04.14",
+     "group": "Configuration",
+     "what": "Whether that setting affects the SOS LED",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "05",
+   "title": "Driver behaviour",
+   "goal": "Detect harsh acceleration, braking and cornering accurately, without false alerts.",
+   "cases": [
+    {
+     "id": "05.01",
+     "group": "Functional",
+     "what": "Harsh acceleration at threshold",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ha"
+      ]
+     }
+    },
+    {
+     "id": "05.02",
+     "group": "Functional",
+     "what": "Harsh braking at threshold",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "hb"
+      ]
+     }
+    },
+    {
+     "id": "05.03",
+     "group": "Functional",
+     "what": "Harsh cornering (left and right) at threshold",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "rt"
+      ]
+     }
+    },
+    {
+     "id": "05.04",
+     "group": "Functional",
+     "what": "Event recorded with time and location",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.latitude",
+       "field.longitude",
+       "field.date",
+       "field.time"
+      ],
+      "needs": {
+       "scenarios": [
+        "hb",
+        "ha",
+        "rt"
+       ]
+      }
+     }
+    },
+    {
+     "id": "05.05",
+     "group": "Functional",
+     "what": "Crash alert, if in scope",
+     "kind": "manual"
+    },
+    {
+     "id": "05.06",
+     "group": "False alerts",
+     "what": "Normal driving",
+     "kind": "assisted",
+     "judge": {
+      "measure": "no_harsh"
+     }
+    },
+    {
+     "id": "05.07",
+     "group": "False alerts",
+     "what": "Speed breakers and potholes",
+     "kind": "assisted",
+     "judge": {
+      "measure": "no_harsh"
+     }
+    },
+    {
+     "id": "05.08",
+     "group": "False alerts",
+     "what": "Rough roads",
+     "kind": "assisted",
+     "judge": {
+      "measure": "no_harsh"
+     }
+    },
+    {
+     "id": "05.09",
+     "group": "False alerts",
+     "what": "Door slam",
+     "kind": "assisted",
+     "judge": {
+      "measure": "no_harsh"
+     }
+    },
+    {
+     "id": "05.10",
+     "group": "Installation",
+     "what": "Different mounting orientations",
+     "kind": "manual"
+    },
+    {
+     "id": "05.11",
+     "group": "Installation",
+     "what": "Calibration",
+     "kind": "manual"
+    },
+    {
+     "id": "05.12",
+     "group": "Conditions",
+     "what": "No GNSS fix",
+     "kind": "assisted"
+    },
+    {
+     "id": "05.13",
+     "group": "Conditions",
+     "what": "No network (event stored and sent later)",
+     "kind": "assisted"
+    },
+    {
+     "id": "05.14",
+     "group": "Conditions",
+     "what": "After wake",
+     "kind": "assisted"
+    },
+    {
+     "id": "05.15",
+     "group": "Failure and recovery",
+     "what": "Motion sensor not responding",
+     "kind": "manual"
+    },
+    {
+     "id": "05.16",
+     "group": "Configuration",
+     "what": "Thresholds and sensitivity, changed remotely",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "06",
+   "title": "SOS button and handling",
+   "goal": "Deliver an emergency alert reliably in every condition.",
+   "cases": [
+    {
+     "id": "06.01",
+     "group": "Functional",
+     "what": "Press detected",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ea",
+       "epb"
+      ]
+     }
+    },
+    {
+     "id": "06.02",
+     "group": "Functional",
+     "what": "Alert received at the server",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ea",
+       "epb"
+      ]
+     }
+    },
+    {
+     "id": "06.03",
+     "group": "Functional",
+     "what": "Emergency on and off events",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ea",
+       "emr",
+       "sem"
+      ]
+     }
+    },
+    {
+     "id": "06.04",
+     "group": "Functional",
+     "what": "Acknowledgement from the server",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.05",
+     "group": "Functional",
+     "what": "SOS LED states",
+     "kind": "manual"
+    },
+    {
+     "id": "06.06",
+     "group": "Conditions",
+     "what": "No network",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.07",
+     "group": "Conditions",
+     "what": "No GNSS fix",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.08",
+     "group": "Conditions",
+     "what": "On internal battery",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.09",
+     "group": "Conditions",
+     "what": "In each sleep state",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.10",
+     "group": "Conditions",
+     "what": "During OTA or heavy data",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.11",
+     "group": "Robustness",
+     "what": "Short and long press",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.12",
+     "group": "Robustness",
+     "what": "Repeated presses",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.13",
+     "group": "Robustness",
+     "what": "Button held or stuck",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.14",
+     "group": "Robustness",
+     "what": "Wiring open or shorted",
+     "kind": "assisted"
+    },
+    {
+     "id": "06.15",
+     "group": "Delivery",
+     "what": "Retry until acknowledged",
+     "kind": "assisted",
+     "judge": {
+      "measure": "sos_retry",
+      "hold_ack": true
+     }
+    },
+    {
+     "id": "06.16",
+     "group": "Delivery",
+     "what": "Priority over other data",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ea"
+      ]
+     }
+    },
+    {
+     "id": "06.17",
+     "group": "Delivery",
+     "what": "SMS fallback, if required",
+     "kind": "manual"
+    },
+    {
+     "id": "06.18",
+     "group": "Delivery",
+     "what": "State-specific emergency packet",
+     "kind": "assisted"
+    }
+   ]
+  },
+  {
+   "id": "07",
+   "title": "OTA functionality",
+   "goal": "Update firmware and settings remotely and safely, with full control from the OTA platform.",
+   "cases": [
+    {
+     "id": "07.01",
+     "group": "Packet flow",
+     "what": "Version report",
+     "kind": "automatic",
+     "judge": {
+      "measure": "version_report"
+     }
+    },
+    {
+     "id": "07.02",
+     "group": "Packet flow",
+     "what": "Update command",
+     "kind": "manual"
+    },
+    {
+     "id": "07.03",
+     "group": "Packet flow",
+     "what": "Download",
+     "kind": "manual"
+    },
+    {
+     "id": "07.04",
+     "group": "Packet flow",
+     "what": "File check",
+     "kind": "manual"
+    },
+    {
+     "id": "07.05",
+     "group": "Packet flow",
+     "what": "Install",
+     "kind": "manual"
+    },
+    {
+     "id": "07.06",
+     "group": "Packet flow",
+     "what": "Result report",
+     "kind": "automatic",
+     "judge": {
+      "measure": "version_change"
+     }
+    },
+    {
+     "id": "07.07",
+     "group": "Interruptions",
+     "what": "Network loss during download",
+     "kind": "manual"
+    },
+    {
+     "id": "07.08",
+     "group": "Interruptions",
+     "what": "Power loss during download",
+     "kind": "manual"
+    },
+    {
+     "id": "07.09",
+     "group": "Interruptions",
+     "what": "Power loss during install",
+     "kind": "manual"
+    },
+    {
+     "id": "07.10",
+     "group": "Protection",
+     "what": "Corrupt or incomplete file rejected",
+     "kind": "manual"
+    },
+    {
+     "id": "07.11",
+     "group": "Protection",
+     "what": "File for the wrong device rejected",
+     "kind": "manual"
+    },
+    {
+     "id": "07.12",
+     "group": "Protection",
+     "what": "Rollback when the new firmware fails to start",
+     "kind": "manual"
+    },
+    {
+     "id": "07.13",
+     "group": "Protection",
+     "what": "Settings kept after update",
+     "kind": "assisted"
+    },
+    {
+     "id": "07.14",
+     "group": "Conditions",
+     "what": "Install only when the vehicle is stopped",
+     "kind": "manual"
+    },
+    {
+     "id": "07.15",
+     "group": "Conditions",
+     "what": "Low battery",
+     "kind": "manual"
+    },
+    {
+     "id": "07.16",
+     "group": "Conditions",
+     "what": "During sleep",
+     "kind": "manual"
+    },
+    {
+     "id": "07.17",
+     "group": "Conditions",
+     "what": "SOS during an update",
+     "kind": "assisted"
+    },
+    {
+     "id": "07.18",
+     "group": "Control",
+     "what": "Update a single device and a group",
+     "kind": "manual"
+    },
+    {
+     "id": "07.19",
+     "group": "Control",
+     "what": "Cancel from the server",
+     "kind": "manual"
+    },
+    {
+     "id": "07.20",
+     "group": "Control",
+     "what": "Failure reason reported",
+     "kind": "manual"
+    },
+    {
+     "id": "07.21",
+     "group": "Scope",
+     "what": "Firmware update",
+     "kind": "manual"
+    },
+    {
+     "id": "07.22",
+     "group": "Scope",
+     "what": "Settings update",
+     "kind": "manual"
+    },
+    {
+     "id": "07.23",
+     "group": "Scope",
+     "what": "Security key update",
+     "kind": "manual"
+    },
+    {
+     "id": "07.24",
+     "group": "Scope",
+     "what": "Log upload",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "08",
+   "title": "EOL, labels and PDI",
+   "goal": "Every unit tested, configured and onboarded before dispatch.",
+   "cases": [
+    {
+     "id": "08.01",
+     "group": "Programming",
+     "what": "Firmware flashing",
+     "kind": "manual"
+    },
+    {
+     "id": "08.02",
+     "group": "Programming",
+     "what": "Keys and certificates loaded",
+     "kind": "manual"
+    },
+    {
+     "id": "08.03",
+     "group": "Programming",
+     "what": "Default configuration",
+     "kind": "manual"
+    },
+    {
+     "id": "08.04",
+     "group": "Hardware checks",
+     "what": "Power and current",
+     "kind": "manual"
+    },
+    {
+     "id": "08.05",
+     "group": "Hardware checks",
+     "what": "Modem and eSIM",
+     "kind": "manual"
+    },
+    {
+     "id": "08.06",
+     "group": "Hardware checks",
+     "what": "GNSS",
+     "kind": "manual"
+    },
+    {
+     "id": "08.07",
+     "group": "Hardware checks",
+     "what": "Motion sensor",
+     "kind": "manual"
+    },
+    {
+     "id": "08.08",
+     "group": "Hardware checks",
+     "what": "Inputs and outputs",
+     "kind": "manual"
+    },
+    {
+     "id": "08.09",
+     "group": "Hardware checks",
+     "what": "SOS",
+     "kind": "manual"
+    },
+    {
+     "id": "08.10",
+     "group": "Hardware checks",
+     "what": "LEDs",
+     "kind": "manual"
+    },
+    {
+     "id": "08.11",
+     "group": "Hardware checks",
+     "what": "RS232 and CAN",
+     "kind": "manual"
+    },
+    {
+     "id": "08.12",
+     "group": "Hardware checks",
+     "what": "BLE",
+     "kind": "manual"
+    },
+    {
+     "id": "08.13",
+     "group": "Hardware checks",
+     "what": "Tamper",
+     "kind": "manual"
+    },
+    {
+     "id": "08.14",
+     "group": "Hardware checks",
+     "what": "Flash memory",
+     "kind": "manual"
+    },
+    {
+     "id": "08.15",
+     "group": "Hardware checks",
+     "what": "Battery and charging",
+     "kind": "manual"
+    },
+    {
+     "id": "08.16",
+     "group": "Onboarding",
+     "what": "Identity recorded (IMEI, serial number, eSIM ID)",
+     "kind": "manual"
+    },
+    {
+     "id": "08.17",
+     "group": "Onboarding",
+     "what": "Device visible on the OTA server and the platform",
+     "kind": "manual"
+    },
+    {
+     "id": "08.18",
+     "group": "Labels",
+     "what": "Device label matches the device",
+     "kind": "manual"
+    },
+    {
+     "id": "08.19",
+     "group": "Labels",
+     "what": "Carton label matches the device",
+     "kind": "manual"
+    },
+    {
+     "id": "08.20",
+     "group": "Labels",
+     "what": "Label legibility",
+     "kind": "manual"
+    },
+    {
+     "id": "08.21",
+     "group": "PDI",
+     "what": "Visual check",
+     "kind": "manual"
+    },
+    {
+     "id": "08.22",
+     "group": "PDI",
+     "what": "Firmware version",
+     "kind": "automatic",
+     "judge": {
+      "measure": "version_report"
+     }
+    },
+    {
+     "id": "08.23",
+     "group": "PDI",
+     "what": "Platform visibility",
+     "kind": "manual"
+    },
+    {
+     "id": "08.24",
+     "group": "PDI",
+     "what": "Packing contents",
+     "kind": "manual"
+    },
+    {
+     "id": "08.25",
+     "group": "Traceability",
+     "what": "Result stored per serial number",
+     "kind": "manual"
+    },
+    {
+     "id": "08.26",
+     "group": "Traceability",
+     "what": "Failed units blocked from dispatch",
+     "kind": "manual"
+    },
+    {
+     "id": "08.27",
+     "group": "Programming",
+     "what": "Device ID in the clause 3.1.1.12 format (manufacturer, model, test agency, MMYY, serial number), stored read-only",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "09",
+   "title": "Ignition detection",
+   "goal": "Detect ignition on and off correctly on 12 V and 24 V vehicles, and wake the device on ignition.",
+   "cases": [
+    {
+     "id": "09.01",
+     "group": "Functional",
+     "what": "Ignition on and off detected, with events",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "in",
+       "if"
+      ],
+      "checks": [
+       "ignition_alert",
+       "alert_type"
+      ]
+     }
+    },
+    {
+     "id": "09.02",
+     "group": "Functional",
+     "what": "Ignition wake from sleep (IGN_PRE path)",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "in"
+      ]
+     }
+    },
+    {
+     "id": "09.03",
+     "group": "Conditions",
+     "what": "12 V and 24 V vehicles",
+     "kind": "manual"
+    },
+    {
+     "id": "09.04",
+     "group": "Conditions",
+     "what": "Engine cranking voltage dip",
+     "kind": "assisted"
+    },
+    {
+     "id": "09.05",
+     "group": "Robustness",
+     "what": "Rapid on/off toggling (debounce)",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "in",
+       "if"
+      ],
+      "checks": [
+       "ignition_alert"
+      ]
+     }
+    },
+    {
+     "id": "09.06",
+     "group": "Robustness",
+     "what": "Noisy or floating ignition wire",
+     "kind": "assisted"
+    }
+   ]
+  },
+  {
+   "id": "10",
+   "title": "External power monitoring",
+   "goal": "Report main power connection, disconnection and voltage across the 9 to 36 V range.",
+   "cases": [
+    {
+     "id": "10.01",
+     "group": "Functional",
+     "what": "Main power disconnect and reconnect alerts (EP_SENSE)",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "bd",
+       "br"
+      ],
+      "checks": [
+       "alert_type"
+      ]
+     }
+    },
+    {
+     "id": "10.02",
+     "group": "Functional",
+     "what": "Supply voltage reading (EBV_SENSE)",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.main_input_voltage"
+      ],
+      "needs": {
+       "headers": [
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "10.03",
+     "group": "Conditions",
+     "what": "Low and high supply voltage",
+     "kind": "assisted"
+    },
+    {
+     "id": "10.04",
+     "group": "Conditions",
+     "what": "Supply out of range",
+     "kind": "assisted"
+    },
+    {
+     "id": "10.05",
+     "group": "Conditions",
+     "what": "Cranking dips",
+     "kind": "assisted"
+    },
+    {
+     "id": "10.06",
+     "group": "Robustness",
+     "what": "No false alerts from short dips",
+     "kind": "assisted"
+    },
+    {
+     "id": "10.07",
+     "group": "Configuration",
+     "what": "Voltage thresholds",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "11",
+   "title": "Internal battery and charging",
+   "goal": "Keep the device running on its internal battery when main power is lost, and charge the battery safely.",
+   "cases": [
+    {
+     "id": "11.01",
+     "group": "Functional",
+     "what": "Charging starts and stops correctly (STC4054, CHG_ON/OFF)",
+     "kind": "manual"
+    },
+    {
+     "id": "11.02",
+     "group": "Functional",
+     "what": "Battery voltage reading (IBV_SEN)",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.internal_battery_voltage"
+      ],
+      "needs": {
+       "headers": [
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "11.03",
+     "group": "Conditions",
+     "what": "Charging blocked outside safe temperature",
+     "kind": "manual"
+    },
+    {
+     "id": "11.04",
+     "group": "Conditions",
+     "what": "Backup runtime on battery",
+     "kind": "assisted"
+    },
+    {
+     "id": "11.05",
+     "group": "Conditions",
+     "what": "Low-battery alert",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "bl"
+      ]
+     }
+    },
+    {
+     "id": "11.06",
+     "group": "Conditions",
+     "what": "Shutdown when the battery is nearly empty",
+     "kind": "assisted"
+    },
+    {
+     "id": "11.07",
+     "group": "Robustness",
+     "what": "Battery missing or faulty",
+     "kind": "manual"
+    },
+    {
+     "id": "11.08",
+     "group": "Robustness",
+     "what": "Long storage before installation",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "12",
+   "title": "Digital and analog inputs",
+   "goal": "Read two digital and two analog inputs correctly for connected sensors.",
+   "cases": [
+    {
+     "id": "12.01",
+     "group": "Digital inputs",
+     "what": "High and low detection on DIN1 and DIN2",
+     "kind": "assisted"
+    },
+    {
+     "id": "12.02",
+     "group": "Digital inputs",
+     "what": "Switching threshold",
+     "kind": "manual"
+    },
+    {
+     "id": "12.03",
+     "group": "Digital inputs",
+     "what": "12 V and 24 V signals",
+     "kind": "manual"
+    },
+    {
+     "id": "12.04",
+     "group": "Analog inputs",
+     "what": "Voltage reading on AIN1 and AIN2 across the range",
+     "kind": "assisted"
+    },
+    {
+     "id": "12.05",
+     "group": "Analog inputs",
+     "what": "Accuracy and resolution",
+     "kind": "manual"
+    },
+    {
+     "id": "12.06",
+     "group": "Robustness",
+     "what": "Continuous high input at 24 V and above",
+     "kind": "manual"
+    },
+    {
+     "id": "12.07",
+     "group": "Robustness",
+     "what": "Noise and debounce",
+     "kind": "assisted"
+    },
+    {
+     "id": "12.08",
+     "group": "Robustness",
+     "what": "Wiring faults",
+     "kind": "manual"
+    },
+    {
+     "id": "12.09",
+     "group": "Configuration",
+     "what": "Input enable",
+     "kind": "command"
+    },
+    {
+     "id": "12.10",
+     "group": "Configuration",
+     "what": "Input event reporting",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "13",
+   "title": "Digital outputs and immobilization",
+   "goal": "Drive outputs reliably and immobilize the vehicle safely on command.",
+   "cases": [
+    {
+     "id": "13.01",
+     "group": "Outputs",
+     "what": "DOUT1 and DOUT2 on and off by command",
+     "kind": "command"
+    },
+    {
+     "id": "13.02",
+     "group": "Outputs",
+     "what": "Relay load",
+     "kind": "manual"
+    },
+    {
+     "id": "13.03",
+     "group": "Outputs",
+     "what": "Output state after reset",
+     "kind": "assisted"
+    },
+    {
+     "id": "13.04",
+     "group": "Immobilization",
+     "what": "Command from platform and SMS",
+     "kind": "command"
+    },
+    {
+     "id": "13.05",
+     "group": "Immobilization",
+     "what": "Speed check before cutting",
+     "kind": "command"
+    },
+    {
+     "id": "13.06",
+     "group": "Immobilization",
+     "what": "Warning before cut",
+     "kind": "command"
+    },
+    {
+     "id": "13.07",
+     "group": "Immobilization",
+     "what": "State kept after power loss",
+     "kind": "assisted"
+    },
+    {
+     "id": "13.08",
+     "group": "Accessories",
+     "what": "Hooter and buzzer on DOUT1/2 on SOS",
+     "kind": "assisted"
+    },
+    {
+     "id": "13.09",
+     "group": "Accessories",
+     "what": "Hooter and buzzer on DOUT1/2 on Overspeed",
+     "kind": "assisted"
+    }
+   ]
+  },
+  {
+   "id": "14",
+   "title": "Tamper (cover open)",
+   "goal": "Detect when the device housing is opened.",
+   "cases": [
+    {
+     "id": "14.01",
+     "group": "Functional",
+     "what": "Cover-open alert from the light sensor (LDR)",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ta"
+      ]
+     }
+    },
+    {
+     "id": "14.02",
+     "group": "Functional",
+     "what": "Cover-closed recovery",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "ta"
+      ]
+     }
+    },
+    {
+     "id": "14.03",
+     "group": "Conditions",
+     "what": "In daylight and at night",
+     "kind": "manual"
+    },
+    {
+     "id": "14.04",
+     "group": "Conditions",
+     "what": "In each sleep state",
+     "kind": "assisted"
+    },
+    {
+     "id": "14.05",
+     "group": "Robustness",
+     "what": "No false alerts from light leaking through the housing",
+     "kind": "assisted"
+    },
+    {
+     "id": "14.06",
+     "group": "Functional",
+     "what": "Tamper alert means GNSS box opened, distinct from emergency button tamper (DT)",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "ta"
+      ],
+      "checks": [
+       "alert_type",
+       "field.tamper_alert"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "15",
+   "title": "Cellular connectivity and eSIM",
+   "goal": "Stay connected to the network and server, and recover on its own from failures.",
+   "cases": [
+    {
+     "id": "15.01",
+     "group": "Functional",
+     "what": "Network registration and data session",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "login",
+       "live"
+      ]
+     }
+    },
+    {
+     "id": "15.02",
+     "group": "Functional",
+     "what": "SMS send and receive",
+     "kind": "manual"
+    },
+    {
+     "id": "15.03",
+     "group": "Functional",
+     "what": "Signal strength reporting",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.gsm_signal",
+       "field.mcc",
+       "field.mnc",
+       "field.lac",
+       "field.cell_id"
+      ],
+      "needs": {
+       "headers": [
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "15.04",
+     "group": "Conditions",
+     "what": "Weak signal",
+     "kind": "assisted"
+    },
+    {
+     "id": "15.05",
+     "group": "Conditions",
+     "what": "Network loss and return",
+     "kind": "assisted",
+     "judge": {
+      "checks": [
+       "login_first"
+      ],
+      "scenarios": [
+       "login",
+       "history"
+      ]
+     }
+    },
+    {
+     "id": "15.06",
+     "group": "Conditions",
+     "what": "Roaming",
+     "kind": "manual"
+    },
+    {
+     "id": "15.07",
+     "group": "Conditions",
+     "what": "Multiple eSIM profiles (M8)",
+     "kind": "manual"
+    },
+    {
+     "id": "15.08",
+     "group": "Failure and recovery",
+     "what": "Modem not responding, recovered by power cycle (GPRS_ON)",
+     "kind": "manual"
+    },
+    {
+     "id": "15.09",
+     "group": "Failure and recovery",
+     "what": "eSIM not detected",
+     "kind": "manual"
+    },
+    {
+     "id": "15.10",
+     "group": "Failure and recovery",
+     "what": "Server not responding",
+     "kind": "assisted"
+    },
+    {
+     "id": "15.11",
+     "group": "eSIM",
+     "what": "Network switching over OTA, on demand and automatically in real time",
+     "kind": "command"
+    },
+    {
+     "id": "15.12",
+     "group": "eSIM",
+     "what": "Download and activate a new network profile",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "16",
+   "title": "Data storage and offline buffer",
+   "goal": "Store data when offline and send it in order once the connection returns.",
+   "cases": [
+    {
+     "id": "16.01",
+     "group": "Functional",
+     "what": "Data stored in the 16 MB flash while offline and sent when the connection returns",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "history"
+      ],
+      "checks": [
+       "status_alert",
+       "time_repeat"
+      ]
+     }
+    },
+    {
+     "id": "16.02",
+     "group": "Functional",
+     "what": "Order kept",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "history_order"
+      ],
+      "needs": {
+       "scenarios": [
+        "history"
+       ]
+      },
+      "config": [
+       "history_order"
+      ]
+     }
+    },
+    {
+     "id": "16.03",
+     "group": "Conditions",
+     "what": "Long offline period",
+     "kind": "assisted",
+     "judge": {
+      "scenarios": [
+       "history"
+      ],
+      "checks": [
+       "status_alert"
+      ]
+     }
+    },
+    {
+     "id": "16.04",
+     "group": "Conditions",
+     "what": "Memory full",
+     "kind": "manual"
+    },
+    {
+     "id": "16.05",
+     "group": "Failure and recovery",
+     "what": "Power loss while writing",
+     "kind": "assisted"
+    },
+    {
+     "id": "16.06",
+     "group": "Failure and recovery",
+     "what": "Flash memory error",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "17",
+   "title": "Movement and towing detection",
+   "goal": "Detect vehicle movement and towing from the motion sensor.",
+   "cases": [
+    {
+     "id": "17.01",
+     "group": "Functional",
+     "what": "Movement start and stop events",
+     "kind": "assisted"
+    },
+    {
+     "id": "17.02",
+     "group": "Functional",
+     "what": "Movement as a wake source (LSM6DSL INT1/INT2)",
+     "kind": "assisted"
+    },
+    {
+     "id": "17.03",
+     "group": "Towing",
+     "what": "Towing alert when the vehicle moves with ignition off",
+     "kind": "assisted"
+    },
+    {
+     "id": "17.04",
+     "group": "Robustness",
+     "what": "No false movement from vibration, wind or nearby traffic",
+     "kind": "assisted"
+    },
+    {
+     "id": "17.05",
+     "group": "Configuration",
+     "what": "Sensitivity and delays",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "18",
+   "title": "CAN interface (CAN variant)",
+   "goal": "Read vehicle CAN data without disturbing the vehicle bus.",
+   "cases": [
+    {
+     "id": "18.01",
+     "group": "Functional",
+     "what": "CAN bus speed detection",
+     "kind": "manual"
+    },
+    {
+     "id": "18.02",
+     "group": "Functional",
+     "what": "Listen-only by default",
+     "kind": "manual"
+    },
+    {
+     "id": "18.03",
+     "group": "Functional",
+     "what": "CAN data in packets",
+     "kind": "manual"
+    },
+    {
+     "id": "18.04",
+     "group": "Conditions",
+     "what": "Different vehicles and bus speeds",
+     "kind": "manual"
+    },
+    {
+     "id": "18.05",
+     "group": "Conditions",
+     "what": "Bus termination effect",
+     "kind": "manual"
+    },
+    {
+     "id": "18.06",
+     "group": "Conditions",
+     "what": "Wake on CAN in sleep (CAN_ON)",
+     "kind": "manual"
+    },
+    {
+     "id": "18.07",
+     "group": "Failure and recovery",
+     "what": "Bus off",
+     "kind": "manual"
+    },
+    {
+     "id": "18.08",
+     "group": "Failure and recovery",
+     "what": "Wiring fault",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "19",
+   "title": "RS232 interface and RFID reader",
+   "goal": "Connect external accessories, mainly the RFID reader, over RS232.",
+   "cases": [
+    {
+     "id": "19.01",
+     "group": "Functional",
+     "what": "RFID reader data received and reported",
+     "kind": "manual"
+    },
+    {
+     "id": "19.02",
+     "group": "Functional",
+     "what": "RS232 used for configuration and EOL",
+     "kind": "manual"
+    },
+    {
+     "id": "19.03",
+     "group": "Conditions",
+     "what": "Reader and configuration sharing the same port",
+     "kind": "manual"
+    },
+    {
+     "id": "19.04",
+     "group": "Conditions",
+     "what": "Long cable runs",
+     "kind": "manual"
+    },
+    {
+     "id": "19.05",
+     "group": "Failure and recovery",
+     "what": "Reader disconnected",
+     "kind": "manual"
+    },
+    {
+     "id": "19.06",
+     "group": "Failure and recovery",
+     "what": "Corrupt data",
+     "kind": "manual"
+    },
+    {
+     "id": "19.07",
+     "group": "RFID (Amendment 3)",
+     "what": "RFID transceiver as per IS 16722:2018",
+     "kind": "manual"
+    },
+    {
+     "id": "19.08",
+     "group": "RFID (Amendment 3)",
+     "what": "Tag read every 5 minutes and stored",
+     "kind": "manual"
+    },
+    {
+     "id": "19.09",
+     "group": "RFID (Amendment 3)",
+     "what": "Tag value pushed at a configurable frequency",
+     "kind": "manual"
+    },
+    {
+     "id": "19.10",
+     "group": "RFID (Amendment 3)",
+     "what": "Tag value read on command 023",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "20",
+   "title": "Bluetooth (BLE)",
+   "goal": "Allow local configuration, log download and firmware update over Bluetooth.",
+   "cases": [
+    {
+     "id": "20.01",
+     "group": "Functional",
+     "what": "Connection with username and password",
+     "kind": "manual"
+    },
+    {
+     "id": "20.02",
+     "group": "Functional",
+     "what": "Get, set and clear settings",
+     "kind": "manual"
+    },
+    {
+     "id": "20.03",
+     "group": "Functional",
+     "what": "Log download",
+     "kind": "manual"
+    },
+    {
+     "id": "20.04",
+     "group": "Functional",
+     "what": "Firmware update over BLE",
+     "kind": "manual"
+    },
+    {
+     "id": "20.05",
+     "group": "Power",
+     "what": "BLE on and off (BLE_ON)",
+     "kind": "manual"
+    },
+    {
+     "id": "20.06",
+     "group": "Power",
+     "what": "Current impact",
+     "kind": "manual"
+    },
+    {
+     "id": "20.07",
+     "group": "Security",
+     "what": "Wrong password rejected",
+     "kind": "manual"
+    },
+    {
+     "id": "20.08",
+     "group": "Security",
+     "what": "Unauthorised access blocked",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "21",
+   "title": "Device configuration",
+   "goal": "Read and change every setting through SMS, GPRS, BLE and RS232, with the same result on each.",
+   "cases": [
+    {
+     "id": "21.01",
+     "group": "Functional",
+     "what": "Get, set and clear over SMS",
+     "kind": "manual"
+    },
+    {
+     "id": "21.02",
+     "group": "Functional",
+     "what": "Get, set and clear over GPRS",
+     "kind": "command"
+    },
+    {
+     "id": "21.03",
+     "group": "Functional",
+     "what": "Get, set and clear over BLE",
+     "kind": "manual"
+    },
+    {
+     "id": "21.04",
+     "group": "Functional",
+     "what": "Get, set and clear over RS232",
+     "kind": "manual"
+    },
+    {
+     "id": "21.05",
+     "group": "Functional",
+     "what": "Response format",
+     "kind": "command"
+    },
+    {
+     "id": "21.06",
+     "group": "Robustness",
+     "what": "Invalid or out-of-range values rejected",
+     "kind": "command"
+    },
+    {
+     "id": "21.07",
+     "group": "Robustness",
+     "what": "Settings kept after reset and after a firmware update",
+     "kind": "command"
+    },
+    {
+     "id": "21.08",
+     "group": "Security",
+     "what": "Unauthorised commands rejected",
+     "kind": "command"
+    }
+   ]
+  },
+  {
+   "id": "22",
+   "title": "Watchdog and recovery",
+   "goal": "Recover by itself from any hang or crash, without staying offline.",
+   "cases": [
+    {
+     "id": "22.01",
+     "group": "Functional",
+     "what": "MCU watchdog reset",
+     "kind": "assisted"
+    },
+    {
+     "id": "22.02",
+     "group": "Functional",
+     "what": "Modem watchdog reset",
+     "kind": "assisted"
+    },
+    {
+     "id": "22.03",
+     "group": "Functional",
+     "what": "GNSS restart",
+     "kind": "assisted"
+    },
+    {
+     "id": "22.04",
+     "group": "Functional",
+     "what": "Restart events reported",
+     "kind": "automatic",
+     "judge": {
+      "measure": "restarts"
+     }
+    },
+    {
+     "id": "22.05",
+     "group": "Robustness",
+     "what": "Long-run stability over several days",
+     "kind": "automatic",
+     "judge": {
+      "measure": "soak"
+     }
+    },
+    {
+     "id": "22.06",
+     "group": "Robustness",
+     "what": "No reset loops",
+     "kind": "automatic",
+     "judge": {
+      "measure": "reset_loops"
+     }
+    }
+   ]
+  },
+  {
+   "id": "23",
+   "title": "InTouch packet integration",
+   "goal": "The device reports to InTouch over the MMI protocol, with login, PVT and alarm packets.",
+   "cases": [
+    {
+     "id": "23.01",
+     "group": "Packets",
+     "what": "Login packet on first connection and on every reconnection",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "login_first"
+      ],
+      "needs": {
+       "scenarios": [
+        "login"
+       ]
+      }
+     }
+    },
+    {
+     "id": "23.02",
+     "group": "Packets",
+     "what": "PVT packet at the ignition-on and ignition-off intervals",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "interval"
+      ],
+      "state": [
+       "ignition on",
+       "ignition off",
+       "going to sleep"
+      ],
+      "config": [
+       "ign_on_s",
+       "ign_off_s"
+      ]
+     }
+    },
+    {
+     "id": "23.03",
+     "group": "Packets",
+     "what": "Alarm packet for every alarm in the alarm list",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "in",
+       "if",
+       "bd",
+       "br",
+       "bl",
+       "ea",
+       "ta",
+       "hb",
+       "ha",
+       "rt",
+       "ot"
+      ],
+      "checks": [
+       "alert_type",
+       "status_alert"
+      ]
+     }
+    },
+    {
+     "id": "23.04",
+     "group": "Packets",
+     "what": "Live and history packets, with history sent in order after a reconnect",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "history_order",
+       "time_repeat"
+      ],
+      "needs": {
+       "scenarios": [
+        "history"
+       ]
+      },
+      "config": [
+       "history_order"
+      ]
+     }
+    },
+    {
+     "id": "23.05",
+     "group": "Packets",
+     "what": "Packet format and checksum as per the MMI protocol",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "framing",
+       "checksum",
+       "field_count",
+       "field.*"
+      ],
+      "needs": {
+       "headers": [
+        "LGN",
+        "PVT"
+       ]
+      }
+     }
+    },
+    {
+     "id": "23.06",
+     "group": "Packets",
+     "what": "Packets parsed correctly on InTouch",
+     "kind": "automatic",
+     "judge": {
+      "measure": "platform_match"
+     }
+    },
+    {
+     "id": "23.07",
+     "group": "Multi-server",
+     "what": "Sending to InTouch, the government server and the emergency server in parallel, with no loss or delay",
+     "kind": "assisted",
+     "judge": {
+      "measure": "multi_server"
+     }
+    }
+   ]
+  },
+  {
+   "id": "24",
+   "title": "Government server (State/UT backend) packets",
+   "goal": "Login, PVT, alarm and health packets sent to the state backend as specified in AIS-140 Amendment 3.",
+   "cases": [
+    {
+     "id": "24.01",
+     "group": "Packets",
+     "what": "Login packet (LGN) on every connect and reconnect",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "login_first"
+      ],
+      "needs": {
+       "scenarios": [
+        "login"
+       ]
+      }
+     }
+    },
+    {
+     "id": "24.02",
+     "group": "Packets",
+     "what": "Each packet type: NR, EA, TA, HP, IN, IF, BD, BR, BL, HB, HA, RT, DT, OA, BC",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "live",
+       "ea",
+       "ta",
+       "hp",
+       "in",
+       "if",
+       "bd",
+       "br",
+       "bl",
+       "hb",
+       "ha",
+       "rt",
+       "dt",
+       "oa",
+       "bc"
+      ]
+     }
+    },
+    {
+     "id": "24.03",
+     "group": "Packets",
+     "what": "Health packet (HLM)",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "hlm"
+      ],
+      "checks": [
+       "checksum"
+      ]
+     }
+    },
+    {
+     "id": "24.04",
+     "group": "Packets",
+     "what": "Health check and activation response over SMS, on request",
+     "kind": "manual"
+    }
+   ]
+  },
+  {
+   "id": "25",
+   "title": "Emergency server and SMS fallback",
+   "goal": "Emergency alerts reach the emergency server, and fall back to SMS to the Control Centre number if the server can't be reached.",
+   "cases": [
+    {
+     "id": "25.01",
+     "group": "Packets",
+     "what": "Emergency packet (EPB)",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "epb"
+      ],
+      "checks": [
+       "checksum",
+       "framing"
+      ]
+     }
+    },
+    {
+     "id": "25.02",
+     "group": "Packets",
+     "what": "Emergency message (EMR) and stop message (SEM)",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "emr",
+       "sem"
+      ]
+     }
+    },
+    {
+     "id": "25.03",
+     "group": "Packets",
+     "what": "Normal (NM) and stored (SP) packets",
+     "kind": "automatic",
+     "judge": {
+      "scenarios": [
+       "epb_nm",
+       "epb_sp"
+      ]
+     }
+    },
+    {
+     "id": "25.04",
+     "group": "Packets",
+     "what": "GNSS validity (A/V) and provider (G/N) fields",
+     "kind": "automatic",
+     "judge": {
+      "checks": [
+       "field.gps_valid",
+       "field.provider"
+      ],
+      "needs": {
+       "scenarios": [
+        "epb"
+       ]
+      }
+     }
+    },
+    {
+     "id": "25.05",
+     "group": "Delivery",
+     "what": "Emergency data to the emergency IP and PVT data to the state backend at the same time",
+     "kind": "assisted",
+     "judge": {
+      "measure": "multi_server"
+     }
+    },
+    {
+     "id": "25.06",
+     "group": "Delivery",
+     "what": "SMS fallback when the emergency server is unreachable, in the Table 4C ii) format",
+     "kind": "manual"
+    },
+    {
+     "id": "25.07",
+     "group": "Settings",
+     "what": "Emergency interval, command 016",
+     "kind": "command"
+    },
+    {
+     "id": "25.08",
+     "group": "Settings",
+     "what": "Emergency auto-clear timeout, command 017",
+     "kind": "command"
+    },
+    {
+     "id": "25.09",
+     "group": "Settings",
+     "what": "Clear emergency from the emergency server or the Control Centre number, command 020",
+     "kind": "command"
+    },
+    {
+     "id": "25.10",
+     "group": "Settings",
+     "what": "Emergency control SMS centre number, command 021",
+     "kind": "command"
+    }
+   ]
+  }
+ ],
+ "suites": [
+  {
+   "key": "power",
+   "label": "Main power",
+   "steps": [
+    {
+     "case": "03.16",
+     "do": "Disconnect the vehicle's main power from the device.",
+     "window_s": 120
+    },
+    {
+     "case": "03.18",
+     "do": "Connect the main power again.",
+     "window_s": 120
+    }
+   ]
+  },
+  {
+   "key": "ignition",
+   "label": "Ignition",
+   "steps": [
+    {
+     "case": "03.07",
+     "do": "With the device asleep or idle, switch the ignition on.",
+     "window_s": 120
+    },
+    {
+     "case": "03.19",
+     "do": "Switch the ignition off and on five times within a minute, ending on.",
+     "window_s": 120
+    }
+   ]
+  },
+  {
+   "key": "sos",
+   "label": "SOS",
+   "steps": [
+    {
+     "case": "06.01",
+     "do": "Press the SOS button.",
+     "window_s": 120
+    },
+    {
+     "case": "06.03",
+     "do": "Press SOS again to end the emergency (or clear it from the server).",
+     "window_s": 180
+    },
+    {
+     "case": "06.15",
+     "do": "Press SOS once more — Runway holds back its acknowledgement; do nothing else.",
+     "window_s": 180
+    }
+   ]
+  },
+  {
+   "key": "tamper",
+   "label": "Tamper",
+   "steps": [
+    {
+     "case": "14.01",
+     "do": "Open the device's cover.",
+     "window_s": 120
+    },
+    {
+     "case": "14.02",
+     "do": "Close the cover again.",
+     "window_s": 120
+    }
+   ]
+  },
+  {
+   "key": "wake",
+   "label": "Wake from sleep",
+   "steps": [
+    {
+     "case": "03.10",
+     "do": "With the device asleep, press SOS.",
+     "window_s": 120
+    },
+    {
+     "case": "03.11",
+     "do": "With the device asleep, disconnect then reconnect main power.",
+     "window_s": 180
+    },
+    {
+     "case": "03.12",
+     "do": "With the device asleep, open the cover.",
+     "window_s": 120
+    }
+   ]
+  },
+  {
+   "key": "driving",
+   "label": "Driving",
+   "steps": [
+    {
+     "case": "05.01",
+     "do": "Accelerate hard from standstill.",
+     "window_s": 180
+    },
+    {
+     "case": "05.02",
+     "do": "Brake hard.",
+     "window_s": 180
+    },
+    {
+     "case": "05.03",
+     "do": "Take a sharp turn left, then right.",
+     "window_s": 180
+    },
+    {
+     "case": "05.06",
+     "do": "Drive normally for ten minutes — no harsh alert may come.",
+     "window_s": 600
+    }
+   ]
+  },
+  {
+   "key": "network",
+   "label": "Network loss",
+   "steps": [
+    {
+     "case": "15.05",
+     "do": "Take the device out of coverage (or remove the antenna) for five minutes, then back.",
+     "window_s": 600
+    },
+    {
+     "case": "16.03",
+     "do": "Keep it offline for half an hour, then let it reconnect.",
+     "window_s": 2400
+    }
+   ]
+  }
+ ]
+}

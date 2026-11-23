@@ -24,6 +24,8 @@ import zipfile
 from datetime import datetime
 from typing import Optional
 
+from ..xlsx_text import cell as _xc
+
 VERDICT_LABELS = {
     "in_progress": "IN PROGRESS",
     "timeout": "TIMEOUT",
@@ -385,7 +387,7 @@ def build_xlsx(view: dict, devices: list, profile: Optional[dict]) -> bytes:
             is_head = (ri - 1) in header_rows and not in_footer
             in_table = (any((ri - 1) > h for h in header_rows) or is_head) and not in_footer
             for ci, val in enumerate(row, start=1):
-                cell = ws.cell(row=ri, column=ci, value=val)
+                cell = ws.cell(row=ri, column=ci, value=_xc(val))
                 if ri == 1:
                     cell.font = title_font
                 elif is_head:

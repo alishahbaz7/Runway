@@ -14,7 +14,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 # The release name is spelled once, in build_release.py (from runway.__version__).
 sys.path.insert(0, SPECPATH)
-from build_release import RELEASE_NAME  # noqa: E402
+from build_release import RELEASE_NAME, protocol_history  # noqa: E402
 
 # Paths in a .spec are relative to the spec's folder (packaging/), so reach up with ../.
 # Bundle the static web UI at runway/web (app.py looks for it under _MEIPASS/runway/web)
@@ -23,10 +23,18 @@ from build_release import RELEASE_NAME  # noqa: E402
 datas = [
     ("../runway/web", "runway/web"),
     ("../runway/qc/profiles", "runway/qc/profiles"),
+    # the firmware test specs (fwtest/spec.py reads them beside the module: _MEIPASS/runway/fwtest/specs)
+    ("../runway/fwtest/specs", "runway/fwtest/specs"),
+    # and the test plans beside them (fwtest/plan.py: _MEIPASS/runway/fwtest/plans) — without them a
+    # release has no Test plan
+    ("../runway/fwtest/plans", "runway/fwtest/plans"),
     # Protocol definitions (ota_commands catalogue etc.) — seeded into data/protocols on
     # first run by app.py:_seed_protocols so the send-command catalogue works from a bare
     # exe. Kept OUT of runway/ so it can't be mistaken for an importable package.
     ("../data/protocols", "_defaults/protocols"),
+    # every version of each definition a release has carried, so a copy's untouched definition
+    # is brought up to date and an edited one is kept (install.py: seed_definitions)
+    (str(protocol_history()), "_defaults"),
     # the tray icon's picture (runway/desktop.py loads it from _MEIPASS)
     ("runway.ico", "."),
 ]

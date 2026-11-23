@@ -180,6 +180,30 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
+def protocol_history() -> Path:
+    """The hash of every version of each protocol definition a release has carried, as
+    ``build/protocols_shipped.json`` — packed beside the definitions (``Runway.spec``), so a copy
+    can tell a definition a release seeded and nobody touched (replaced by the new one) from the
+    person's own edit (kept). See ``install.seed_definitions``."""
+    from runway.install import SHIPPED_DEFINITIONS, definition_hash
+    out: dict[str, list[str]] = {}
+    for f in sorted((ROOT / "data" / "protocols").iterdir()):
+        if not f.is_file():
+            continue
+        rel = f"data/protocols/{f.name}"
+        hashes = {definition_hash(f.read_bytes())}
+        revs = subprocess.run(["git", "log", "--format=%H", "--", rel], cwd=ROOT, capture_output=True, text=True)
+        for rev in revs.stdout.split() if revs.returncode == 0 else []:
+            blob = subprocess.run(["git", "show", f"{rev}:{rel}"], cwd=ROOT, capture_output=True)
+            if blob.returncode == 0:                  # not the commit that deleted it
+                hashes.add(definition_hash(blob.stdout))
+        out[f.name] = sorted(hashes)
+    path = BUILD / SHIPPED_DEFINITIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    return path
+
+
 def build_manifest(*, notes: str, sha: str, size: int, minimum: str | None) -> dict:
     from runway.update import config
 
@@ -209,6 +233,13 @@ def _build_program(rebuild: bool) -> None:
 
 
 def main() -> int:
+    # its messages carry arrows and dashes; a console or a redirected file in the Windows code page
+    # cannot encode them, and v1.1.27's build ended on that print (after the zip was made)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     args = sys.argv[1:]
     rebuild = "--rebuild" in args
     no_carry = "--no-carry" in args
