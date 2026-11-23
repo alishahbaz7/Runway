@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runway · Firmware test</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="firmware.css" />
+</head>
+<body data-page="firmware">
+  <!-- the banner and rail are built around #content by shell.js -->
+  <div id="content">
+    <header>
+      <h1>Firmware test</h1>
+      <span class="tag">Every packet of a device on a new firmware held against its sheet — framing, checksum, each field, and the order of packets</span>
+    </header>
+
+    <!-- one tab per open test, like Log analysis; the dashed + starts a new one -->
+    <div id="fw-tabs"></div>
+
+    <main id="fw-main" class="ui-split">
+      <!-- the tests so far -->
+      <div id="fw-list-pane" data-fold="fwtest-list" data-fold-title="Categories" data-fold-min="240" data-fold-max="440">
+        <div class="pane-head">
+          <span class="pane-title" data-tip="The test plan's categories, as the tracker has them, with how far each has got — a click opens its cases">Categories</span>
+          <span class="spacer"></span>
+          <button class="ui-icon-btn" type="button" data-fold-toggle></button>
+        </div>
+        <div id="fw-cats" class="fw-cats"></div>
+      </div>
+
+      <!-- the selected test -->
+      <div id="fw-work">
+        <div id="fw-empty" class="fw-empty" hidden>
+          <span class="fw-empty-ico" data-icon="chip"></span>
+          <p class="fw-empty-t">No firmware test yet</p>
+          <button type="button" id="fw-new"><span data-icon="plus"></span>New test</button>
+        </div>
+
+        <div id="fw-run" hidden>
+          <div class="fw-card fw-head">
+            <div class="fw-head-main">
+              <div class="fw-title-row">
+                <span class="fw-title mono" id="fw-title"></span>
+                <span class="ui-pill sm" id="fw-spec"></span>
+                <span class="ui-pill" id="fw-verdict"></span>
+                <span class="ui-pill sm" id="fw-state"></span>
+                <select id="fw-test-sel" class="fw-test-sel" aria-label="Test of this device" data-tip="This device's tests — one tab per device" hidden></select>
+              </div>
+              <div class="fw-sub" id="fw-sub"></div>
+              <div class="fw-coach" id="fw-coach" hidden></div>
+            </div>
+            <span class="spacer"></span>
+            <div class="tcp-seg fw-views" role="tablist" aria-label="View">
+              <button class="seg on" type="button" data-view="results">Results</button>
+              <button class="seg" type="button" data-view="plan" data-tip="The device's test tracker for this firmware version — every test of it together: results from the packets, bench steps, and the cases checked by hand">Test plan</button>
+            </div>
+            <button class="ghost mini" type="button" id="fw-config" data-tip="How the device is set — its ping intervals, history order, packet format — and the values expected; a change judges the test again"><span data-icon="settings"></span>Configuration</button>
+            <button class="ghost mini" type="button" id="fw-stop"><span data-icon="stop"></span>Stop</button>
+            <button class="ghost mini" type="button" id="fw-resume" hidden><span data-icon="play"></span>Resume</button>
+            <button class="ghost mini" type="button" id="fw-plat" data-tip="Hold this test against what the platform stored — its drive log from Log analysis: every packet there, read the same (23.06)"><span data-icon="analysis"></span>Platform log</button>
+            <a class="fw-btn-link ghost mini" id="fw-xlsx" href="#"><span data-icon="download"></span>Report</a>
+            <button class="ghost mini danger" type="button" id="fw-delete"><span data-icon="trash"></span>Delete</button>
+          </div>
+
+          <div id="fw-planview" class="fw-planview" hidden>
+            <div class="fw-card fw-plan-bar">
+              <span class="fw-card-title" id="fw-plan-title">Test plan</span>
+              <span class="ui-pill" id="fw-gate" hidden></span>
+              <span class="fw-plan-tally" id="fw-plan-tally"></span>
+              <span class="spacer"></span>
+              <select id="fw-plan-kind" aria-label="How">
+                <option value="">Every case</option>
+                <option value="automatic">From packets</option>
+                <option value="assisted">Bench steps</option>
+                <option value="command">By command</option>
+                <option value="manual">By hand</option>
+              </select>
+              <select id="fw-plan-status" aria-label="Result">
+                <option value="">Any result</option>
+                <option value="fail">Fail</option>
+                <option value="partial">Partial</option>
+                <option value="running">Running</option>
+                <option value="not_run">Not run</option>
+                <option value="pass">Pass</option>
+              </select>
+              <input id="fw-plan-q" class="fw-plan-q" type="search" placeholder="Search" />
+              <select id="fw-suite-sel" aria-label="Suite" data-tip="Bench steps one after another: each starts when the one before is judged"><option value="">Suites…</option></select>
+              <button class="ghost mini" type="button" id="fw-suite-run" hidden><span data-icon="play"></span>Run suite</button>
+              <select id="fw-plan-cmp" aria-label="Compare with" data-tip="Another firmware version's results beside this one: what this one fixed, broke, still fails"><option value="">Compare with…</option></select>
+              <input type="file" id="fw-plan-file" accept=".xlsx" hidden />
+              <button class="ghost mini" type="button" id="fw-scope-edit" data-tip="Choose the cases that are part of testing — the rest leave the plan, its counts and the release gate, kept aside to put back any time"><span data-icon="edit"></span>Edit scope</button>
+              <button class="ghost mini" type="button" id="fw-plan-import" data-tip="A tracker sheet in: the developers' columns, and results of the cases not judged from packets"><span data-icon="upload"></span>Import</button>
+              <a class="fw-btn-link ghost mini" id="fw-plan-xlsx" href="#"><span data-icon="download"></span>Tracker</a>
+            </div>
+            <div id="fw-scopebar" class="fw-card fw-scopebar" hidden>
+              <span class="fw-scope-t" id="fw-scope-t"></span>
+              <span class="spacer"></span>
+              <button class="ghost mini" type="button" id="fw-scope-cancel">Cancel</button>
+              <button class="mini" type="button" id="fw-scope-save"><span data-icon="check"></span>Save scope</button>
+            </div>
+            <div id="fw-suite" class="fw-card fw-suite" hidden></div>
+            <div id="fw-cmp" class="fw-card fw-cmp" hidden></div>
+            <div id="fw-plan-areas"></div>
+          </div>
+
+          <div class="fw-tiles" id="fw-tiles"></div>
+
+          <div class="fw-card fw-tl-card" id="fw-tl-card">
+            <div class="fw-card-head">
+              <span class="fw-card-title" data-tip="The test on one line: each packet as it came — live, history, failing in red — the ignition, and every reconnection. A click on a red mark opens that packet">Timeline</span>
+              <span class="ui-count" id="fw-tl-n"></span>
+              <span class="spacer"></span>
+              <span class="fw-tl-legend"><i class="l-live"></i>Live <i class="l-hist"></i>History <i class="l-fail"></i>Failing <i class="l-ign"></i>Ignition on <i class="l-conn"></i>Reconnect</span>
+              <span class="fw-tl-zoom">
+                <span class="ui-count" id="fw-tl-span" data-tip="The time the timeline shows across its width"></span>
+                <button class="ui-icon-btn" type="button" id="fw-tl-out" title="Zoom out" aria-label="Zoom out" data-tip="Zoom out (minus key). Ctrl and the wheel over the timeline zoom where the pointer is"><span data-icon="zoom-out"></span></button>
+                <button class="ui-icon-btn" type="button" id="fw-tl-in" title="Zoom in" aria-label="Zoom in" data-tip="Zoom in (plus key). Ctrl and the wheel over the timeline zoom where the pointer is; drag or scroll sideways to move along it"><span data-icon="zoom-in"></span></button>
+                <button class="ghost mini" type="button" id="fw-tl-fit" data-tip="The whole test across the width (0 key)">Fit</button>
+              </span>
+            </div>
+            <div class="fw-tl" id="fw-tl" tabindex="0" aria-label="Timeline"></div>
+          </div>
+
+          <div class="fw-grid">
+            <div class="fw-card">
+              <div class="fw-card-head">
+                <span class="fw-card-title" data-tip="One row per kind of deviation, worst first — click one to see its packets">Checks</span>
+                <span class="ui-count" id="fw-checks-n"></span>
+              </div>
+              <div class="fw-table-wrap">
+                <table class="fw-table" id="fw-checks">
+                  <thead><tr><th class="c-res">Result</th><th>Check</th><th class="num">Packets</th><th>Example</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+                <div class="fw-none" id="fw-checks-none" hidden>Nothing deviated</div>
+              </div>
+            </div>
+            <div class="fw-card">
+              <div class="fw-card-head">
+                <span class="fw-card-title" data-tip="What the device has to send in a full test — ignition on and off, battery out and back, alerts. Click one to see its packets">Scenarios</span>
+                <span class="ui-count" id="fw-scen-n"></span>
+              </div>
+              <div class="fw-table-wrap">
+                <table class="fw-table fw-scen" id="fw-scen">
+                  <thead><tr><th>Scenario</th>
+                    <th class="num" data-tip="Packets of this scenario the device sent">Received</th>
+                    <th class="num" data-tip="Of those, the ones that did not fail — warnings allowed">Passed</th>
+                    <th class="num" data-tip="Of those, the ones that broke the sheet — click to see them">Failed</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="fw-card">
+            <div class="fw-card-head">
+              <span class="fw-card-title">Packets</span>
+              <span class="ui-count" id="fw-pk-n"></span>
+              <span class="fw-filter" id="fw-filter" hidden><span id="fw-filter-t"></span><button class="ui-icon-btn" type="button" id="fw-filter-x" aria-label="Show every packet"><span data-icon="x"></span></button></span>
+              <span class="spacer"></span>
+              <div class="tcp-seg" role="tablist" aria-label="Packets" id="fw-levels">
+                <button class="seg on" type="button" data-level="">All</button>
+                <button class="seg" type="button" data-level="fail">Failed</button>
+                <button class="seg" type="button" data-level="warn">Warnings</button>
+              </div>
+              <button class="ghost mini" type="button" id="fw-pk-dl" aria-haspopup="menu" data-tip="An Excel file for the developers: all the packets, the failed ones or those with warnings — each with what is wrong, the value expected and the one sent, the likely cause and the fix, and every field under its sheet name"><span data-icon="download"></span>Download</button>
+            </div>
+            <div class="fw-table-wrap">
+              <table class="fw-table fw-packets" id="fw-packets">
+                <thead><tr><th class="num">#</th><th>Received</th><th>Device time</th><th>Packet</th><th>Status</th><th class="num">Frame</th><th class="c-res">Result</th><th>First flag</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <div class="fw-none" id="fw-pk-none" hidden>No packets</div>
+            </div>
+            <div class="fw-more" id="fw-more" hidden><button class="ghost mini" type="button" id="fw-more-btn">Show more</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- the side rail: what the test found, the packet chosen — one open at a time, folded at first -->
+      <div id="fw-rail" class="fw-rail" hidden>
+        <div class="fw-rail-panel" id="fw-rail-panel" hidden>
+          <div class="pane-head">
+            <span class="pane-title" id="fw-rail-title"></span><span class="ui-count" id="fw-rail-sub"></span>
+            <span class="spacer"></span>
+            <button class="ui-icon-btn" type="button" id="fw-rail-close" title="Fold" aria-label="Fold"><span data-icon="x"></span></button>
+          </div>
+          <div class="fw-rail-body" id="fw-rail-body"></div>
+        </div>
+        <div class="fw-rail-tabs" role="tablist" aria-label="Side panels">
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="live" data-tip="The device's packets as they land on the listener, newest first — each with its result; a click opens it"><span data-icon="record"></span><span>Live</span><b class="fw-rail-live" id="fw-rail-live"></b></button>
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="score" data-tip="The test plan of this firmware version at a glance — how far it has got, what passes and fails, by category"><span data-icon="check"></span><span>Scorecard</span></button>
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="defects" data-tip="What is wrong, why, where in the firmware, and how to fix it — fix first what explains most"><span data-icon="alert"></span><span>Defects</span><b class="fw-rail-n" id="fw-rail-dn"></b></button>
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="insight" data-tip="What the test has found, worst first — each opens its packets"><span data-icon="info"></span><span>Insights</span><b class="fw-rail-n" id="fw-rail-n"></b></button>
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="packet" data-tip="The packet chosen in the list, field by field"><span data-icon="file"></span><span>Packet</span></button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="ui-dlg fw-step-dlg" id="fw-step-dlg">
+    <form method="dialog">
+      <div class="ui-dlg-head"><h2 id="fw-s-title">Run a step</h2></div>
+      <div class="ui-dlg-body">
+        <div class="fw-s-what" id="fw-s-what"></div>
+        <div class="fw-s-expect" id="fw-s-expect"></div>
+        <label class="ui-dlg-field" id="fw-s-cmdf">Command to send
+          <input id="fw-s-cmd" class="mono" spellcheck="false" />
+        </label>
+        <label class="ui-dlg-field">Window (s)
+          <input id="fw-s-win" type="number" min="10" step="10" value="180" />
+        </label>
+        <label class="fw-s-hold" id="fw-s-holdf"><input type="checkbox" id="fw-s-hold" /> Hold back Runway's acknowledgement of emergency packets during the step</label>
+        <div class="fw-d-err" id="fw-s-err" hidden></div>
+      </div>
+      <div class="ui-dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" class="ghost" data-cancel>Cancel</button>
+        <button type="submit"><span data-icon="play"></span>Start</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="ui-dlg fw-plat-dlg" id="fw-plat-dlg">
+    <form method="dialog">
+      <div class="ui-dlg-head"><h2>Platform log</h2></div>
+      <div class="ui-dlg-body">
+        <label class="ui-dlg-field">Drive log analysed in Log analysis
+          <select id="fw-plat-sel"></select>
+        </label>
+        <div class="fw-d-none" id="fw-plat-none" hidden>No drive log yet. <a href="analysis.html">Add one in Log analysis</a></div>
+        <div class="fw-d-err" id="fw-plat-err" hidden></div>
+      </div>
+      <div class="ui-dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" class="ghost" data-cancel>Cancel</button>
+        <button type="submit" id="fw-plat-go"><span data-icon="check"></span>Compare</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="ui-dlg fw-dlg" id="fw-dlg">
+    <form method="dialog">
+      <div class="ui-dlg-head"><h2 id="fw-d-title">New firmware test</h2></div>
+      <div class="ui-dlg-body">
+        <div class="fw-d-specrow" id="fw-d-specf">
+          <label class="ui-dlg-field">Device sheet
+            <select id="fw-d-spec"></select>
+          </label>
+          <input type="file" id="fw-d-sheetfile" accept=".xlsx" hidden />
+          <button type="button" class="ghost" id="fw-d-sheet" data-tip="A protocol sheet (xlsx with Field and Datatype columns) in: the packet's fields rebuilt from it, and what changed"><span data-icon="upload"></span>Import sheet</button>
+        </div>
+        <div class="fw-d-src" id="fw-d-srcrow">
+          <span class="fw-d-label">Packets from</span>
+          <div class="tcp-seg" role="tablist" aria-label="Packets from">
+            <button class="seg on" type="button" data-src="live">A listener</button>
+            <button class="seg" type="button" data-src="file">A file</button>
+          </div>
+        </div>
+        <div id="fw-d-live">
+          <label class="ui-dlg-field" data-tip="The device points at Runway on this port; its relay to the platform carries on as it is">Listener
+            <select id="fw-d-port"></select>
+          </label>
+          <label class="ui-dlg-field">Device
+            <select id="fw-d-device"></select>
+          </label>
+          <div class="fw-d-none" id="fw-d-nolisten" hidden>No listener is running. <a href="capture.html">Start one in Capture</a></div>
+        </div>
+        <div id="fw-d-file" hidden>
+          <input type="file" id="fw-d-fileinput" accept=".txt,.log,.csv,.hex,.dump" hidden />
+          <div class="fw-d-filerow">
+            <button type="button" class="ghost" id="fw-d-choose"><span data-icon="upload"></span>Choose a file</button>
+            <span class="fw-d-filename" id="fw-d-filename"></span>
+          </div>
+        </div>
+        <div class="fw-d-pin" data-tip="Leave empty to take each from the device's login">
+          <span class="fw-d-label">Expected</span>
+          <div class="fw-d-pins">
+            <label class="ui-dlg-field">IMEI <input id="fw-d-imei" class="mono" placeholder="356938035643809" spellcheck="false" /></label>
+            <label class="ui-dlg-field">Firmware <input id="fw-d-fw" class="mono" placeholder="V7.6.0" spellcheck="false" /></label>
+            <label class="ui-dlg-field">Vehicle reg. no <input id="fw-d-reg" class="mono" placeholder="DL1CAB1234" spellcheck="false" /></label>
+          </div>
+        </div>
+        <div class="fw-d-pin" data-tip="As the device is set: each one given is checked, one left empty is not">
+          <span class="fw-d-label">Device configuration</span>
+          <div class="fw-d-cfgs">
+            <label class="ui-dlg-field">Interval, ignition on (s) <input id="fw-c-on" type="number" min="1" step="any" /></label>
+            <label class="ui-dlg-field">Interval, ignition off (s) <input id="fw-c-off" type="number" min="1" step="any" /></label>
+            <label class="ui-dlg-field">Sleep after ignition off (min) <input id="fw-c-after" type="number" min="1" step="any" /></label>
+            <label class="ui-dlg-field">Interval, asleep (s) <input id="fw-c-sleep" type="number" min="1" step="any" /></label>
+            <label class="ui-dlg-field">History order
+              <select id="fw-c-order">
+                <option value="">Not given</option>
+                <option value="fifo">FIFO, oldest first</option>
+                <option value="lifo">LIFO, newest first</option>
+              </select>
+            </label>
+            <span id="fw-c-formats" class="fw-c-formats"></span>
+          </div>
+        </div>
+        <div class="fw-d-err" id="fw-d-err" hidden></div>
+      </div>
+      <div class="ui-dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" class="ghost" data-cancel>Cancel</button>
+        <button type="submit" id="fw-d-start"><span data-icon="play"></span><span id="fw-d-start-t">Start</span></button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <script src="shell.js"></script>
+  <script src="firmware.js"></script>
+</body>
+</html>

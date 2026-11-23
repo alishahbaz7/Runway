@@ -18,7 +18,6 @@ from .scorecard import ABOUT, METRICS
 
 MAX_DEVICES = 8
 MATCH_GAP_S = 60          # the first device's packets either side of a moment no further apart than this
-MAX_MATCHES = 20000       # positions compared per device (evenly spread when there are more)
 
 
 def _m(lat1, lon1, lat2, lon2) -> float:
@@ -43,9 +42,9 @@ def agreement(ref: list[dict], other: list[dict]) -> dict:
     if not ref or not other:
         return {"matched": 0}
     times = [r["t"] for r in ref]
-    step = max(1, len(other) // MAX_MATCHES)
+    # every position, never a sample: the furthest apart is the worst moment, and a sample can step over it
     apart, dspeed = [], []
-    for b in other[::step]:
+    for b in other:
         i = bisect.bisect_left(times, b["t"])
         if i < len(ref) and ref[i]["t"] == b["t"]:
             r0 = r1 = ref[i]

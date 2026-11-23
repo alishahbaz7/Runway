@@ -59,7 +59,9 @@ def app_window_command(browser: str, url: str, profile_dir: str | None = None, d
     a dark title bar (an app window ignores the page's theme-color)."""
     cmd = [browser, f"--app={url}", "--window-size=1440,900"]
     if profile_dir:
-        cmd += [f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check"]
+        # its own profile never signs in or syncs: a new profile otherwise opens Edge's "We are now
+        # syncing your browsing data" over Runway's first window
+        cmd += [f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check", "--disable-sync"]
     if dark:
         cmd.append("--force-dark-mode")
     return cmd
@@ -67,6 +69,7 @@ def app_window_command(browser: str, url: str, profile_dir: str | None = None, d
 
 def open_app_window(url: str, profile_dir: str | None = None, dark: bool | None = None) -> bool:
     """Opens Runway in its own window. Returns False when it fell back to a browser tab."""
+    _window_dark.pop(profile_dir or "", None)           # a window already open keeps its own mode: ask again
     browser = find_browser()
     if browser:
         try:
@@ -81,6 +84,93 @@ def open_app_window(url: str, profile_dir: str | None = None, dark: bool | None 
     except Exception:
         pass          # no browser at all (a headless server): the URL is in the log
     return False
+
+
+# ── the window's dark mode follows the theme ────────────────────────────────────────────────────────
+# Edge fixes --force-dark-mode for the whole process of a profile: a theme switched in the page cannot
+# change it, and another window of that profile joins the same process. So when the theme and the
+# window's mode differ, the window is closed and opened again on the same page (the user, 17-11-2026:
+# "in light theme it is showing dark").
+_window_dark: dict[str, bool] = {}       # profile → the mode its window was started with (this run's knowledge)
+_last_reopen = [0.0]
+REOPEN_GAP_S = 20                        # never twice in a row: a page that loads reports its theme again
+
+
+def window_process(profile_dir: str) -> tuple[int, bool] | None:
+    """The Edge process showing Runway's own window (started with this profile) and whether it was
+    started in dark mode — read from its command line."""
+    if not IS_WINDOWS or not profile_dir:
+        return None
+    import json as _json
+    ps = ("Get-CimInstance Win32_Process -Filter \"name='msedge.exe'\" | "
+          "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True,
+                             text=True, timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        rows = _json.loads(out or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if isinstance(rows, dict):
+        rows = [rows]
+    want = os.path.normcase(os.path.abspath(profile_dir))
+    for r in rows:
+        cmd = r.get("CommandLine") or ""
+        if "--type=" in cmd:                         # a renderer or helper, not the browser itself
+            continue
+        if want in os.path.normcase(cmd.replace('"', "")):
+            return int(r.get("ProcessId") or 0), "--force-dark-mode" in cmd
+    return None
+
+
+def window_dark(profile_dir: str) -> bool | None:
+    """The mode Runway's window was started with — asked of Windows once per run, then remembered."""
+    if profile_dir not in _window_dark:
+        found = window_process(profile_dir)
+        if found is None:
+            return None
+        _window_dark[profile_dir] = found[1]
+    return _window_dark[profile_dir]
+
+
+def _wait_exit(pid: int, seconds: float) -> bool:
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x00100000, False, pid)          # SYNCHRONIZE
+    if not h:
+        return True                                      # gone already
+    try:
+        return k32.WaitForSingleObject(h, int(seconds * 1000)) == 0
+    finally:
+        k32.CloseHandle(h)
+
+
+def reopen_window(url: str, profile_dir: str, dark: bool) -> bool:
+    """Runway's window again, on `url`, in dark mode or not. Returns whether it reopened."""
+    import time
+    if not IS_WINDOWS or time.monotonic() - _last_reopen[0] < REOPEN_GAP_S:
+        return False
+    found = window_process(profile_dir)
+    if not found or found[1] == dark:
+        if found:
+            _window_dark[profile_dir] = found[1]
+        return False
+    _last_reopen[0] = time.monotonic()
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    pid = found[0]
+    for hwnd in runway_windows(app_only=True):            # only this profile's windows — another Runway
+        owner = wintypes.DWORD()                           # (a release beside a dev copy) keeps its own
+        user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(owner))
+        if owner.value == pid:
+            user32.PostMessageW(hwnd, 0x0010, 0, 0)        # WM_CLOSE
+    if not _wait_exit(pid, 6):                           # Edge may stay on in the background: end it
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        _wait_exit(pid, 4)
+    time.sleep(0.4)
+    _window_dark[profile_dir] = bool(dark)
+    return open_app_window(url, profile_dir, dark)
 
 
 def runway_windows(app_only: bool = False) -> list[int]:

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ACCENT = (62, 207, 142, 255)     # --accent #3ecf8e (Supabase's green, since 1.1.27)
-INK = (11, 26, 18, 255)          # --on-accent #0b1a12
+ACCENT = (90, 176, 240, 255)     # --brand #5ab0f0 (the logo's blue; the app's accent went green in 1.1.27)
+INK = (4, 18, 29, 255)           # the mark on it, #04121d
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 OUT = Path(__file__).resolve().parent / "runway.ico"
 

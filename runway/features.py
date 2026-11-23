@@ -25,6 +25,7 @@ import time
 FEATURES: dict[str, str] = {
     "dashboard": "shown",
     "parser": "shown",
+    "firmware": "shown",
     "converter": "shown",
     "ota": "shown",
     "analysis": "shown",

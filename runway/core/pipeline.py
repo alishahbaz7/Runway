@@ -35,6 +35,12 @@ class Pipeline:
         self.source = source
         self.codec_name = codec or "auto"
         self.sinks = sinks
+        # holds back an ACK when it answers False — a firmware test checks the device sends again
+        # (``(frame, records) -> bool``); None sends every ACK, as always
+        self.ack_filter = None
+        # told of every byte the codec could not read (``(frame, bytes, note)``) — a firmware test
+        # counts them, so nothing the device sends goes unjudged
+        self.skip_taps: list = []
         # Optional ``(record) -> None`` hook, called once per record BEFORE the sinks see it, so
         # every consumer (store, dashboard, relays, QC capture) gets the same enriched record.
         # Kept as a caller-supplied callable so core/ stays free of what the enrichment knows
@@ -75,6 +81,20 @@ class Pipeline:
         return best_cls()
 
     # -- main loop --------------------------------------------------------- #
+    def _skipped(self, frame, chunk: bytes, note: str) -> None:
+        for tap in list(self.skip_taps):
+            try:
+                tap(frame, chunk, note)
+            except Exception:
+                log.exception("skip tap failed")
+
+    def _ack_ok(self, frame, records) -> bool:
+        try:
+            return bool(self.ack_filter(frame, records))
+        except Exception:                      # a broken filter never costs a device its ACK
+            log.exception("ack filter failed")
+            return True
+
     async def run(self) -> int:
         registry.load_plugins()
         for sink in self.sinks:
@@ -131,12 +151,16 @@ class Pipeline:
                 out = codec.decode(bytes(sess.buffer), sess)
             except Exception:
                 log.exception("codec %s crashed; dropping 1 byte to resync", codec.name)
+                self._skipped(frame, bytes(sess.buffer[:1]), "the codec failed on it")
                 del sess.buffer[:1]
                 continue
 
             if out.consumed <= 0:
                 break  # needs more data
+            chunk = bytes(sess.buffer[: out.consumed])
             del sess.buffer[: out.consumed]
+            if not out.records:
+                self._skipped(frame, chunk, out.note or "")
 
             # Tell the source who is on this connection BEFORE the ACK goes out: a source that
             # relays per device decides from it where the bytes go — and so who ACKs them.
@@ -151,7 +175,7 @@ class Pipeline:
                     except Exception:
                         log.exception("source failed to take the device id for %s", frame.peer)
 
-            if out.ack:
+            if out.ack and (self.ack_filter is None or self._ack_ok(frame, out.records)):
                 try:
                     await self.source.reply(frame, out.ack)
                 except Exception:

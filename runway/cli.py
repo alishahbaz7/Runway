@@ -73,6 +73,134 @@ def _runway_answers(url: str, timeout: float = 1.5) -> bool:
         return False
 
 
+TAKE_OVER_WAIT_S = 30
+
+
+def _health(url: str, timeout: float = 1.5) -> dict | None:
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{url}/api/health?probe=1", timeout=timeout) as r:
+            d = json.load(r)
+        return d if isinstance(d, dict) and "version" in d else None
+    except Exception:
+        return None
+
+
+def _call(url: str, method: str = "GET", body: dict | None = None, timeout: float = 10):
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(url, method=method, data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"} if body is not None else {})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def _code_changed_at() -> float:
+    """When the code this checkout runs last changed: the newest of the package's source and page files."""
+    import os
+
+    newest = 0.0
+    for dirpath, dirnames, files in os.walk(os.path.dirname(os.path.abspath(__file__))):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for f in files:
+            if f.endswith((".py", ".js", ".css", ".html", ".json")):
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(dirpath, f)))
+                except OSError:
+                    pass
+    return newest
+
+
+def _is_latest(h: dict) -> bool:
+    """The copy answering runs this checkout's code as it is now: started from here, after the last change."""
+    import os
+
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return bool(h.get("root")) and os.path.normcase(h["root"]) == os.path.normcase(here) \
+        and (h.get("started") or 0) >= _code_changed_at()
+
+
+def _listeners_of(url: str) -> list[dict]:
+    """The listeners running in the copy at ``url`` — to start again in the copy taking its place."""
+    try:
+        jobs = _call(f"{url}/api/jobs")
+    except Exception:
+        return []
+    jobs = jobs if isinstance(jobs, list) else jobs.get("jobs", [])
+    return [{"codec": j.get("codec") or "auto", "host": j.get("host"), "port": j.get("port"),
+             "store": bool(j.get("store")), "routes": j.get("routes") or {"all": j.get("relay") or "", "devices": {}}}
+            for j in jobs if isinstance(j, dict) and j.get("kind") == "listen" and j.get("status") == "running"]
+
+
+def _port_owner(port: int) -> int | None:
+    """The process listening on ``port`` (Windows: from netstat)."""
+    import os
+    import subprocess
+
+    if os.name != "nt":
+        return None
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=15,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0] == "TCP" and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
+            return int(parts[4]) if parts[4].isdigit() else None
+    return None
+
+
+def _stop_copy(url: str, host: str, port: int) -> bool:
+    """Stop the Runway at ``url`` and wait for its port: asked to quit (as the tray's Quit does), or — a
+    copy older than that way to ask — its process ended. Only ever a process that answers as Runway."""
+    import os
+    import subprocess
+    import time
+
+    try:
+        _call(f"{url}/api/app/quit", "POST", {}, timeout=5)
+    except Exception:
+        pid = _port_owner(port)
+        if pid and pid != os.getpid():
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    deadline = time.monotonic() + TAKE_OVER_WAIT_S
+    while time.monotonic() < deadline:
+        if _port_free(host, port):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _bring_back(url: str, listeners: list[dict]) -> None:
+    """In the copy now serving ``url``, start the listeners the stopped copy ran (relay rules and store
+    as they were) — except any it already runs (its own, restarted with it)."""
+    import time
+
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline and _health(url) is None:
+        time.sleep(0.5)
+    time.sleep(2)                                    # its own listeners restart first
+    running = {j["port"] for j in _listeners_of(url)}
+    for lst in listeners:
+        if lst["port"] in running:
+            continue
+        routes = lst["routes"] or {}
+        try:
+            job = _call(f"{url}/api/listen", "POST", {"codec": lst["codec"], "host": lst["host"], "port": lst["port"],
+                                                      "relay": routes.get("all") or "", "store": lst["store"]})
+            jid = (job.get("job") or {}).get("id")
+            if jid and routes.get("devices"):
+                _call(f"{url}/api/listen/{jid}/routes", "PUT", {"all": routes.get("all") or "", "devices": routes["devices"]})
+            print(f"Listener on :{lst['port']} carried over" + (f" (relay to {routes['all']})" if routes.get("all") else ""))
+        except Exception as exc:                     # noqa: BLE001 — say it, start the rest
+            print(f"Could not start the listener on :{lst['port']} again ({exc}) — start it in Capture")
+
+
 def _port_free(host: str, port: int) -> bool:
     import socket
 
@@ -195,9 +323,20 @@ def _serve(args) -> None:
     host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
     url = f"http://{host}:{args.port}"
 
+    carried: list[dict] = []
+    there = None if getattr(args, "wait_port", 0) else _health(url)
     if getattr(args, "wait_port", 0):
         _wait_for_port(args.host, args.port, args.wait_port)       # a restart into a new version
-    elif _runway_answers(url):
+    elif there and getattr(args, "take_over", False) and not _is_latest(there):
+        # main.py from source: one copy, always the latest code — the one running here is older (or a
+        # release, or another checkout): stop it, start this one, and carry its listeners over
+        what = f"branch {there['branch']}" if there.get("branch") else f"version {there.get('version')}"
+        print(f"Runway ({what}) is running at {url} on older code: stopping it to start the latest")
+        carried = _listeners_of(url)
+        if not _stop_copy(url, args.host, args.port):
+            print(f"Runway at {url} did not stop within {TAKE_OVER_WAIT_S} s — close it and start again")
+            raise SystemExit(1)
+    elif there or _runway_answers(url):
         # Runway already runs here (started again from the pinned icon): show it, don't start a second
         print(f"Runway is already running at {url}")
         if not getattr(args, "no_browser", False):
@@ -211,9 +350,11 @@ def _serve(args) -> None:
         print(text)
         raise SystemExit(1)
 
-    if not getattr(args, "no_browser", False):
-        import threading
+    import threading
 
+    if carried:
+        threading.Thread(target=_bring_back, args=(url, carried), daemon=True).start()
+    if not getattr(args, "no_browser", False):
         # Daemon thread: it must never keep Ctrl+C waiting.
         threading.Thread(target=_open_when_ready, args=(url,), daemon=True).start()
         print(f"Opening {url} in its own window unless a Runway window is already open "
@@ -295,6 +436,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="don't auto-open the dashboard in a browser")
     s.add_argument("--wait-port", type=float, default=0.0, metavar="SECONDS",
                    help="wait this long for the port to be free (a restart into a new version)")
+    s.add_argument("--take-over", action="store_true",
+                   help="a Runway on older code already on the port is stopped and this one starts, "
+                        "its listeners carried over (main.py: always the latest)")
     s.set_defaults(func=_serve, is_async=False)
 
     r = sub.add_parser("replay", help="parse a log / .loc / dump file")

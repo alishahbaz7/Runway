@@ -7,6 +7,11 @@
 
 This forwards to the real CLI in ``runway/cli.py``. With no sub-command it defaults to
 ``serve``, so just running (or double-clicking) this file brings the server up.
+
+One copy, always the latest: started from here, ``serve`` takes over its port. A Runway already
+running there on older code — a release, another checkout, or this one before the last edit — is
+stopped, the latest starts, and the listeners it ran (their relay rules and store) start again in it.
+The same code already running is just brought to the front.
 """
 
 from __future__ import annotations
@@ -41,5 +46,7 @@ if __name__ == "__main__":
     # Default to `serve` when no sub-command is given (no args, or only flags like --port).
     if len(sys.argv) == 1 or sys.argv[1] not in SUBCOMMANDS | TOP_LEVEL_FLAGS:
         sys.argv.insert(1, "serve")
+    if sys.argv[1] == "serve" and "--take-over" not in sys.argv:
+        sys.argv.append("--take-over")             # one copy, always the latest code
     _banner()
     main()

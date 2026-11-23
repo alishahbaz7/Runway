@@ -140,7 +140,7 @@ def test_the_banner_names_the_app_the_person_and_the_page():
     """The user, 13-11-2026, on Supabase's top line: a fixed banner where the application name, the
     greeting and the page name are visible — on every page, so the greeting lives there."""
     shell = _code(_text(WEB / "shell.js"))
-    for part in ('id = "banner"', 'class="bn-name">Runway<', 'id="banner-hello"', 'id="topbar-page"'):
+    for part in ('id = "banner"', 'class="bn-name">Run<b>way</b><', 'id="banner-hello"', 'id="topbar-page"'):
         assert part in shell, part
     appctl = _code(_text(WEB / "appctl.js"))
     assert 'getElementById("banner-hello")' in appctl and "dash-hello" not in appctl
@@ -152,6 +152,23 @@ def test_side_panes_take_a_dragged_width():
     for rule in ("#dash-main", "#sig-main, #proto-main", "#tcp-main, #qc-main, #cap-main", ".parser-main"):
         body = css[css.index(rule + " {"):].split("}", 1)[0]
         assert "var(--pane-l, var(--pane-l-w" in body or "var(--pane-r, var(--pane-r-w" in body, rule
+
+
+def test_the_folded_rail_keeps_every_item_in_place():
+    """Opening the folded rail on hover must not move the item under the pointer — the headings were
+    shorter folded (a rule) than open (a name), so each opened 20-95 px lower and the pointer sat on
+    another page. A heading has one height, and the same vertical padding, in both."""
+    css = _text(WEB / "style.css")
+
+    def rule(sel: str) -> str:
+        return css[css.index("\n" + sel + " {") + 1:].split("}", 1)[0]
+
+    open_ = rule(".rail-section")
+    folded = rule("body.rail-collapsed .rail-section")
+    assert re.search(r"\bheight:\s*\d+px", open_) and "border-box" in open_
+    assert "height" not in folded.replace("line-height", "")
+    vert = lambda body: (lambda p: (p[0], p[2] if len(p) > 2 else p[0]))(re.search(r"padding:\s*([^;]+);", body).group(1).split())
+    assert vert(open_) == vert(folded)
 
 
 def test_the_font_ships_with_the_app():

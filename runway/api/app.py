@@ -59,6 +59,8 @@ from ..storage.live import config, db, hub, packet_log, store
 from .. import usage as usage_mod
 from ..usage import count as usage_count, page_of
 from . import analysis as analysis_api
+from . import fwtest as fwtest_api
+from .. import install as install_mod
 from . import appctl
 
 log = logging.getLogger("runway.api")
@@ -74,6 +76,7 @@ UPLOAD_DIR = Path(DATA_DIR) / "uploads"
 # process imports it. /api/health reports both, so the page can tell "server not restarted
 # after an update" from "stale browser tab" without a version literal of its own. A frozen
 # build cannot change under a running process, so there the two are the same.
+_SERVER_STARTED = time.time()           # when this process loaded the code it runs
 _INIT_PY = Path(__file__).resolve().parent.parent / "__init__.py"
 _VERSION_RE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.M)
 
@@ -111,21 +114,21 @@ _SIG_NAME_RE = re.compile(r"^[A-Za-z0-9._ -]+$")
 
 
 def _seed_protocols() -> None:
-    """First-run seed: if the protocol repository has no definitions yet, copy the ones
-    bundled in the exe into it. Keeps a shared exe self-contained (the send-command
-    catalogue needs these) and survives a user deleting data/ to reset. A no-op in a dev
-    checkout (the seed dir IS the repo) and whenever the repo already has files."""
-    import shutil
+    """Seed the protocol repository from the definitions bundled in the exe: all of them on the
+    first start (a shared exe stays self-contained — the send-command catalogue needs these — and
+    survives a user deleting data/ to reset), and on later starts each copy a release put there
+    untouched, so a release's new definition (the Locate 140 4G field names) reaches a copy that
+    already has the old one. The person's own edits are never overwritten (install.py:
+    seed_definitions). A no-op in a dev checkout (the seed dir IS the repo)."""
+    from .. import install
     try:
-        src = PROTOCOLS_SEED_DIR
-        if not src.is_dir() or src.resolve() == PROTOCOLS_DIR.resolve():
-            return                              # dev checkout: the seed dir IS the repository
-        if any(PROTOCOLS_DIR.iterdir()):        # already populated — never overwrite
-            return
-        for f in src.iterdir():
-            if f.is_file():
-                shutil.copy2(f, PROTOCOLS_DIR / f.name)
-        log.info("seeded protocol repository from %s", src)
+        shipped = {}
+        listing = PROTOCOLS_SEED_DIR.parent / install.SHIPPED_DEFINITIONS
+        if listing.is_file():
+            shipped = json.loads(listing.read_text(encoding="utf-8"))
+        written = install.seed_definitions(PROTOCOLS_SEED_DIR, PROTOCOLS_DIR, shipped)
+        if written:
+            log.info("protocol definitions from this release: %s", ", ".join(written))
     except Exception:
         log.exception("could not seed protocol repository")
 
@@ -265,7 +268,9 @@ async def lifespan(_: FastAPI):
     log.info("Runway API ready (codecs: %s) — live view starts empty", sorted(registry.CODECS))
     # usage reporting and the update check — both in the background, release builds only
     appctl.start(running_listeners=_running_listeners)
+    fwtest_api.start()          # firmware tests take packets from the listener on their port
     yield
+    fwtest_api.stop()
     housekeeping.cancel()
     for task in [*_tasks.values(), *_replay_tasks.values()]:
         task.cancel()
@@ -278,6 +283,7 @@ app.add_middleware(
 )
 app.include_router(appctl.router)
 app.include_router(analysis_api.router)
+app.include_router(fwtest_api.router)
 
 
 def _running_listeners() -> int:
@@ -651,6 +657,11 @@ async def health(probe: bool = False):
         "status": "ok",
         "version": __version__,
         "code_version": _code_version(),
+        "branch": install_mod.branch(),          # a run from source: the banner shows this, not the version
+        # main.py asks these before starting: the copy here is the latest only if it is this checkout's
+        # and no source file changed after it started (else it stops it and starts the latest)
+        "started": _SERVER_STARTED,
+        "root": None if install_mod.FROZEN else str(Path(__file__).resolve().parents[2]),
         "codecs": len(registry.CODECS),
         "devices": len(store.devices),
         "subscribers": hub.subscribers,

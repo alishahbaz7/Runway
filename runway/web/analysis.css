@@ -45,7 +45,6 @@ label.an-selall input { width: 15px; height: 15px; margin: 0; }
 .an-legend i.line { height: 3px; border-radius: 2px; vertical-align: 2px; }
 .an-legend i.line.thin { height: 2px; opacity: .45; }
 .an-legend i.dot.dim { width: 7px; height: 7px; opacity: .45; }
-.an-map-draw button.seg { height: 26px; padding: 0 10px; }
 #an-map .leaflet-overlay-pane > svg { pointer-events: none; }   /* its lines still take clicks; the dots under it too */
 .an-legend i.dot { border-radius: 50%; }
 .an-legend i.dots { width: 14px; height: 3px; background: radial-gradient(circle, var(--c) 1.4px, transparent 1.6px) 0 50% / 5px 3px repeat-x; }
@@ -161,27 +160,6 @@ a.an-btn-link .ui-ico svg { width: 14px; height: 14px; }
 :root[data-theme="dark"] #an-map .leaflet-tile-pane,
 :root[data-theme="dark"] #an-cmp-map .leaflet-tile-pane { filter: grayscale(1) invert(1) brightness(.82) contrast(.9); opacity: 1; }
 :root[data-theme="light"] #an-map, :root[data-theme="light"] #an-cmp-map { --map-casing: #ffffff; }
-.an-map-mode button.seg { height: 26px; padding: 0 10px; }
-/* the trips above the map: one chip each, the chosen one outlined; its facts beside them */
-.an-trip-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-button.an-trip { display: inline-flex; align-items: center; gap: 6px; width: auto; height: 26px; margin: 0; padding: 0 10px;
-  border-radius: 999px; border: 1px solid var(--border-strong); background: var(--btn-bg); color: var(--text);
-  font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
-button.an-trip:hover { background: var(--hover); border-color: var(--border-strong); }
-button.an-trip.on { border-color: var(--text); background: var(--hover); }
-button.an-trip i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.an-trip-info { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; margin-left: 4px; }
-/* the pins: a trip's number at its start, a ring at its end, the last position */
-.an-pin-wrap, .an-arrow-wrap { background: none; border: 0; }
-/* a direction arrow: the trip's colour on a small disc of the map's outline colour, so it reads on the line */
-.an-arrow { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ac);
-  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 55%, transparent); }
-.an-arrow svg { display: block; width: 13px; height: 13px; stroke-width: 1.4; }
-.an-pin { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; box-sizing: border-box;
-  background: var(--pc); color: #0b1a12; border: 2px solid var(--map-casing); font-size: 11.5px; font-weight: 700;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .45); }
-.an-pin.end { width: 16px; height: 16px; margin: 3px; background: var(--map-casing); border: 4px solid var(--pc); }
-.an-pin.last { width: 18px; height: 18px; margin: 2px; background: var(--accent); border: 3px solid var(--pc); }
 .an-findings { list-style: none; margin: 0; padding: 4px 0; max-height: 400px; overflow: auto; }
 .an-finding { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start;
   padding: 8px 14px; cursor: pointer; font-size: 13px; line-height: 1.45; color: var(--text); }
@@ -442,18 +420,15 @@ button.an-ins-area:hover { background: var(--hover); }
 .an-gtip-f b { color: var(--text); font-weight: 600; }
 
 /* ---- the map, full screen ---- */
-.an-map-wrap { position: relative; }
-.an-full-ctl a { display: grid !important; place-items: center; }
-.an-full-ctl svg { width: 15px; height: 15px; }
-.an-map-tiles { display: none; }
-body.an-mapfull #an-work { container-type: normal; overflow: hidden; }   /* a size container would hold the fixed map inside it */
-body.an-mapfull .an-map-card { position: fixed; top: 0; left: 0; bottom: 0; right: 0; z-index: 900; margin: 0; border-radius: 0;
-  display: flex; flex-direction: column; background: var(--panel); }
-body.an-mapfull .an-map-wrap { flex: 1; min-height: 0; }
-body.an-mapfull #an-map { height: 100%; border-radius: 0; }
-body.an-mapfull #an-rail { position: fixed; top: 0; right: 0; bottom: 0; z-index: 901; }
-body.an-mapfull .an-map-tiles { display: flex; flex-wrap: wrap; gap: 8px; position: absolute; top: 10px; left: 58px; right: 12px;
-  z-index: 500; pointer-events: none; }
+/* the track map (trackmap.js) in its card: the map 460 px high; full screen, the card fills the window
+   and the side rail stays at its edge */
+.an-map-host .tm-card { height: auto; border-radius: 8px; }
+.an-map-host .tm-card.tm-is-full { border-radius: 0; }
+.an-map-host .tm-wrap { flex: none; height: 460px; }
+.an-map-host .tm-card:not(.tm-is-full) .tm-map { border-radius: 0 0 8px 8px; }
+body.tm-full #an-work { container-type: normal; overflow: hidden; }   /* a size container would hold the fixed map inside it */
+body.tm-full #an-rail { position: fixed; top: 0; right: 0; bottom: 0; z-index: 901; }
+.tm-is-full .tm-float .an-ftile { pointer-events: auto; }
 button.an-ftile { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; width: auto; height: auto; margin: 0;
   padding: 6px 10px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--c, var(--muted)) 55%, var(--border-strong));
   background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(6px); color: var(--text);
@@ -466,4 +441,3 @@ button.an-ftile.tone-bad { --c: var(--danger); }
 button.an-ftile b { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* the trip pins' start and end: the same card, one line */
-.leaflet-tooltip.an-tipbox.an-pintip { padding: 4px 9px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }

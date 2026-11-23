@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 
+from ..xlsx_text import row as _xr
+
 LEVEL_WORDS = {"ok": "Good", "info": "Note", "warn": "Attention", "bad": "Poor"}
 FILLS = {"ok": "E3F6EC", "info": "EEF0F3", "warn": "FDF0D5", "bad": "FBE0DA"}
 
@@ -42,12 +44,12 @@ def workbook(rep: dict) -> bytes:
     def sheet(title, header, rows, widths=None, first=False):
         ws = wb.active if first else wb.create_sheet()
         ws.title = title
-        ws.append(header)
+        ws.append(_xr(header))
         for c in ws[1]:
             c.font = bold
             c.fill = PatternFill("solid", fgColor="E6E6E6")
         for r in rows:
-            ws.append(r)
+            ws.append(_xr(r))
         ws.freeze_panes = "A2"
         for i, w in enumerate(widths or [], 1):
             ws.column_dimensions[ws.cell(1, i).column_letter].width = w
@@ -148,14 +150,14 @@ def comparison(c: dict) -> bytes:
     ws = wb.active
     ws.title = "Scorecard"
     w = c.get("window", {})
-    ws.append(["Compared over", f"{_t(w.get('start'))} – {_t(w.get('end'))}" + ("" if w.get("common") else " (no time in common: each whole log)")])
-    ws.append([])
-    ws.append(["Group", "Measure", "Unit"] + names)
+    ws.append(_xr(["Compared over", f"{_t(w.get('start'))} – {_t(w.get('end'))}" + ("" if w.get("common") else " (no time in common: each whole log)")]))
+    ws.append(_xr([]))
+    ws.append(_xr(["Group", "Measure", "Unit"] + names))
     for cell in ws[3]:
         cell.font = bold
         cell.fill = PatternFill("solid", fgColor="E6E6E6")
     for m in c.get("metrics", []):
-        ws.append([m["group"], m["label"], m["unit"]] + [v for v in m["values"]])
+        ws.append(_xr([m["group"], m["label"], m["unit"]] + [v for v in m["values"]]))
         row = ws.max_row
         for idxs, tone in ((m.get("best") or [], "ok"), (m.get("worst") or [], "bad")):
             for idx in idxs:
@@ -166,19 +168,19 @@ def comparison(c: dict) -> bytes:
     for i in range(len(names)):
         ws.column_dimensions[ws.cell(3, 4 + i).column_letter].width = 16
     ws = wb.create_sheet("Modes")
-    ws.append(["Device"] + MODE_HEAD)
+    ws.append(_xr(["Device"] + MODE_HEAD))
     for cell in ws[1]:
         cell.font = bold
     for d in devs:
         for g in d.get("modes", []):
-            ws.append([d.get("device")] + mode_row(g, {"profile": "profile", "log": "this log"}))
+            ws.append(_xr([d.get("device")] + mode_row(g, {"profile": "profile", "log": "this log"})))
     ws = wb.create_sheet("Devices")
-    ws.append(["Device", "File", "First row", "Last row", "Status", "Issues", "Firmware", "Profile"])
+    ws.append(_xr(["Device", "File", "First row", "Last row", "Status", "Issues", "Firmware", "Profile"]))
     for cell in ws[1]:
         cell.font = bold
     for d in devs:
-        ws.append([d.get("device"), d.get("file"), _t(d.get("first")), _t(d.get("last")), d.get("status_word"),
-                   d.get("issues"), ", ".join(d.get("firmware") or []), d.get("profile") or ""])
+        ws.append(_xr([d.get("device"), d.get("file"), _t(d.get("first")), _t(d.get("last")), d.get("status_word"),
+                   d.get("issues"), ", ".join(d.get("firmware") or []), d.get("profile") or ""]))
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

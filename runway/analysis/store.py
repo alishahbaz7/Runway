@@ -213,7 +213,7 @@ def delete(aid: str) -> None:
 
 
 # the row view: the fields a person reads first, plus the row's flags
-ROW_FIELDS = ["t", "ins", "type", "speed", "lat", "lon", "sats", "gsm", "ign", "supply", "history", "alt"]
+ROW_FIELDS = ["t", "ins", "type", "speed", "lat", "lon", "sats", "gsm", "ign", "supply", "ibatt_v", "ibatt_pct", "history", "alt"]
 
 
 def rows(aid: str, offset: int = 0, limit: int = 200, flag: str | None = None, type_: str | None = None,

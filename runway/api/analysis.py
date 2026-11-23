@@ -15,6 +15,8 @@
     POST   /api/analysis/delete          delete several ({"ids": [...]}) or every one ({"all": true})
     GET    /api/analysis/compare         several logs side by side (ids=a&ids=b …), over the time they share
     GET    /api/analysis/compare.xlsx    the same as an Excel workbook
+    GET    /api/live/track               the Dashboard's map: devices' live packets analysed as a log is
+                                         (device=a&device=b …) — the same track, trips, gaps and events
 """
 
 from __future__ import annotations
@@ -69,6 +71,37 @@ class SettingsBody(BaseModel):
 async def analysis_list():
     return {"items": await asyncio.to_thread(store.entries), "settings": _settings(), "defaults": an.SETTINGS,
             "profiles": _profiles()}
+
+
+# ── the Dashboard's map: live packets, analysed as a log ──────────────────────────────────────────
+LIVE_DEVICES = 30                   # the most devices one map asks for at once
+LIVE_RECORDS = 1000                 # the live store keeps this many per device
+_live_cache: dict[str, tuple] = {}  # device → (its records' first and last seq, count, settings, the track)
+
+
+@router.get("/api/live/track")
+async def live_track(device: List[str] = Query(default=[])):
+    """Each device's live packets (the latest the live store keeps) read as a drive log and analysed by
+    the same ``analyse`` as Log analysis — its track, trips, data lost, asleep, stale positions, jumps and
+    driving events, and the record behind each point. Worked out again only when a device sent more."""
+    from ..analysis import live as lv
+    from ..storage.live import store as live_store
+    settings, profiles = _settings(), _profiles()
+    key_s = repr(sorted(settings.items()))
+    out = []
+    for d in list(dict.fromkeys(x for x in device if x))[:LIVE_DEVICES]:
+        recs = live_store.device_records(d, LIVE_RECORDS)
+        key = (recs[0]["seq"] if recs else 0, recs[-1]["seq"] if recs else 0, len(recs), key_s)
+        hit = _live_cache.get(d)
+        if hit and hit[0] == key:
+            out.append(hit[1])
+            continue
+        t = await asyncio.to_thread(lv.track, d, recs, settings, profiles)
+        if len(_live_cache) > 200:
+            _live_cache.clear()
+        _live_cache[d] = (key, t)
+        out.append(t)
+    return {"devices": out}
 
 
 @router.get("/api/analysis/settings")

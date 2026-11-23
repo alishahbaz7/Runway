@@ -25,11 +25,13 @@ single new file in `runway/codecs/` — nothing downstream changes.
 ## What it does (the four pillars)
 
 1. **Parse anything** — pluggable codecs per protocol. Ships with **GT06/Concox**,
-   **Teltonika (Codec 8/8E/16 + GPRS 12/13/14)**, **AIS-140 (Locate 140B)**,
+   **Teltonika (Codec 8/8E/16 + GPRS 12/13/14)**, **AIS-140 (Locate 140B, Locate 140 4G)**,
    **Zenithra Ax1 sCAN** (AIS-140 + inline CAN), **NMEA-0183**, a **generic hex** fallback,
    and a **template** to add your own OEM protocol.
-2. **Visualize** — a web dashboard with a live map, per-device trails, a streaming
-   packet table, and a hex + decoded-tree inspector. Single device or many at once. The
+2. **Visualize** — a web dashboard with a live map: each device's track as Log analysis draws it
+   (by device, trip or speed; history, data lost, stale positions and jumps marked; a trip list with
+   distance, speeds and alerts), every packet on it — a streaming packet table, and a hex +
+   decoded-tree inspector. Single device or many at once. The
    **IMU** page charts a device's stored 6-axis samples over time (seconds to 30 days).
 3. **Ingest two ways** — upload/replay a `.log`/`.loc`/dump file, **or** have devices
    stream live to the built-in **Live TCP** server (start/stop listeners, see connected
@@ -45,6 +47,12 @@ per area (completeness, delivery, GPS, power, driving, device), packets by mode 
 sleep: made against due, on time, delay), a scorecard, trips on a map with missing data and jumps
 marked, and every finding one click from its rows. Several logs open in tabs; devices fitted in one
 vehicle can be **compared** side by side. Excel export throughout.
+
+And **Firmware test**: point a device on a new firmware at a Runway listener (its relay to the
+platform carries on) or drop in a capture, and every packet is held against the device's sheet —
+framing and checksum, every field's format, the order of packets (login first, frame numbers, live
+and history times, alerts) — with the scenarios the bench has exercised and an Excel report to sign
+the release off with. Ships with the Locate 140 4G's sheet; another device is another spec file.
 
 Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
 for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build

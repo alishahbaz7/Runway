@@ -497,7 +497,7 @@
     if (!t) { scope = null; rep = full; return showScope(); }
     scope = { n: t.n, start: t.start, end: t.end };
     $("an-report").classList.add("an-scoping");
-    renderTripBar();
+    if (tm) tm.trip(mapTrip);
     let r;
     try {
       r = await api(`/api/analysis/${encodeURIComponent(id)}/part?` + new URLSearchParams({ start: t.start, end: t.end }));
@@ -1058,6 +1058,9 @@
       ["Position", r.lat == null ? "—" : `${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`], ["GSM", r.gsm == null ? "—" : String(r.gsm)],
       ["Ignition", r.ign == null ? "—" : r.ign ? "on" : "off"],
       ["Supply", r.supply == null ? "—" : (r.supply > 100 ? r.supply / 1000 : r.supply).toFixed(1) + " V"],
+      // the device's own battery: its voltage (mV in some exports) and its level
+      ["Internal battery", r.ibatt_v == null ? "—" : (r.ibatt_v > 100 ? r.ibatt_v / 1000 : r.ibatt_v).toFixed(2) + " V"],
+      ["Internal battery level", r.ibatt_pct == null ? "—" : num(r.ibatt_pct, 0) + " %"],
       ["Frame", r.frame || "—"], ["Mark", r.mark || "—"], ["Alert", r.alert || "—"], ["Type", r.type || "—"],
     ];
     const grid_ = el("dl", "an-pk-kv");
@@ -1403,293 +1406,38 @@
   // for a light map, how strongly faded and history lines show
   const mapNum = (n, fallback) => { const v = parseFloat(cssVar(n)); return Number.isFinite(v) ? v : fallback; };
   const TRIP_COLOURS = ["#3ecf8e", "#4f8ef7", "#f5a524", "#b07cf8", "#22c3d6", "#f472b6", "#9ad94a", "#fb7a3c"];
-  let mapMode = "trips";
   let mapTrip = null;                         // a trip's number, or null for every trip
   let mapPoint = null;                        // the packet chosen on the map (its row), or null
   let mapGap = null;                          // or the stretch of missing data chosen (a break of the track)
   const DRAW_KEY = "runway.analysis.draw";
-  let mapDraw = (() => { try { return localStorage.getItem(DRAW_KEY) === "dots" ? "dots" : "lines"; } catch (e) { return "lines"; } })();
-  let dotRenderer = null, pointLayer = null;
   const tripColour = (n) => TRIP_COLOURS[(n - 1) % TRIP_COLOURS.length];
-  function speedColour(v) {
-    const lim = (full.settings && full.settings.overspeed_kmh) || 80;
-    return v > lim ? cssVar("--danger") : v > lim * 0.75 ? cssVar("--warn") : v > 3 ? cssVar("--accent") : cssVar("--map-quiet");
-  }
   function tripAt(k, trips) {
     for (const t of trips) if (k >= t.k && k <= t.k_end) return t.n;
     return null;
   }
-  function renderTripBar() {
-    const bar = $("an-trip-bar");
-    bar.innerHTML = "";
-    const trips = (full.driving || {}).trips || [];
-    bar.hidden = !trips.length;
-    if (!trips.length) return;
-    const chip = (label, n, colour, tip) => {
-      const b = el("button", "an-trip" + (mapTrip === n ? " on" : ""));
-      b.type = "button";
-      if (colour) { const sw = el("i"); sw.style.background = colour; b.appendChild(sw); }
-      b.appendChild(document.createTextNode(label));
-      if (tip) b.title = tip;
-      b.addEventListener("click", () => pickTrip(mapTrip === n ? null : n));
-      bar.appendChild(b);
-    };
-    chip("All trips", null, null);
-    // the start time; with the day too (DD-MM) when it is not the log's first day
-    const at = (iso) => { const w = when(iso); return w.length > 8 ? `${w.slice(0, 5)} ${w.slice(-8, -3)}` : w.slice(0, 5); };
-    trips.forEach((t) => chip(`${t.n} · ${at(t.start)}`, t.n, mapMode === "trips" ? tripColour(t.n) : cssVar("--accent"),
-      `Trip ${t.n}: ${range(t.start, t.end)}, ${t.km.toFixed(1)} km`));
-    const t = trips.find((x) => x.n === mapTrip);
-    if (t) {
-      bar.appendChild(el("span", "an-trip-info",
-        `${range(t.start, t.end)} · ${t.duration} · ${t.km.toFixed(1)} km · top ${num(t.max_speed, 0)} km/h · average ${num(t.avg_speed, 0)} km/h`));
-    }
-  }
-  function pin(latlng, text, colour, cls) {
-    const icon = L.divIcon({ className: "an-pin-wrap", html: `<span class="an-pin ${cls || ""}" style="--pc:${colour}">${text}</span>`,
-                             iconSize: [22, 22], iconAnchor: [11, 11] });
-    return L.marker(latlng, { icon, keyboard: false });
-  }
-  // direction: an arrow every ARROW_GAP pixels along each moving stretch, pointing the way the
-  // vehicle went — re-placed on every zoom so they stay evenly spaced on screen
-  const ARROW_GAP = 70, ARROW_MAX = 700;
-  let arrowLayer = null, arrowPaths = [];
-  function drawArrows() {
-    if (!map || !arrowLayer) return;
-    arrowLayer.clearLayers();
-    const casing = getComputedStyle($("an-map")).getPropertyValue("--map-casing").trim() || "#10120f";
-    let count = 0;
-    arrowPaths.forEach((path) => {
-      let carry = ARROW_GAP / 2;                     // the first arrow half a gap in from the start
-      for (let i = 1; i < path.length && count < ARROW_MAX; i++) {
-        const a = map.latLngToLayerPoint([path[i - 1][0], path[i - 1][1]]);
-        const b = map.latLngToLayerPoint([path[i][0], path[i][1]]);
-        const len = a.distanceTo(b);
-        if (len < 0.5) continue;
-        let at = carry;
-        const deg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-        while (at <= len && count < ARROW_MAX) {
-          const f = at / len;
-          const ll = map.layerPointToLatLng(L.point(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f));
-          const icon = L.divIcon({
-            className: "an-arrow-wrap", iconSize: [18, 18], iconAnchor: [9, 9],
-            html: `<span class="an-arrow" style="color:${path[i][2]};--ac:${casing};transform:rotate(${deg.toFixed(0)}deg)">${UI.icons.direction}</span>`,
-          });
-          L.marker(ll, { icon, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(arrowLayer);
-          count++;
-          at += ARROW_GAP;
-        }
-        carry = at - len;
-      }
-    });
-  }
+  // The map is the shared track map (trackmap.js) with this log as its one track: coloured by trip or
+  // by speed, lines or dots, arrows, history dimmed, data lost and asleep dotted, stale positions and
+  // jumps dashed, trips numbered, driving events, the last position, full screen. A trip clicked on it
+  // goes to pickTrip (the whole page rescopes to that trip); a packet, gap or hop to the rail.
+  let tm = null, floatBox = null;
   function drawMap() {
-    const box = $("an-map");
-    if (!window.L) { box.textContent = "The map needs the internet"; return; }
-    if (!map) {
-      // no keyboard handler: it focuses the map on a press, which scrolls a half-hidden map into view
-      // between press and release — and the click on a line or dot is lost
-      map = L.map(box, { zoomControl: true, attributionControl: true, keyboard: false }).setView([20.59, 78.96], 5);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-      mapLayers = L.layerGroup().addTo(map);
-      arrowLayer = L.layerGroup().addTo(map);
-      pointLayer = L.layerGroup().addTo(map);
-      // the dots on a canvas of their own, under the lines: the lines' layer lets a click through
-      // where it has nothing drawn (analysis.css), so a dot is clickable and so is every line
-      map.createPane("an-dots").style.zIndex = 390;
-      dotRenderer = L.canvas({ padding: 0.5, pane: "an-dots" });
-      const Full = L.Control.extend({
-        options: { position: "topleft" },
-        onAdd() {
-          const wrap = L.DomUtil.create("div", "leaflet-bar an-full-ctl");
-          fullBtn = L.DomUtil.create("a", "", wrap);
-          fullBtn.href = "#";
-          fullBtn.setAttribute("role", "button");
-          fullBtn.innerHTML = UI.icon("maximize");
-          fullBtn.title = "Full screen";
-          fullBtn.setAttribute("aria-label", "Full screen");
-          L.DomEvent.on(fullBtn, "click", (e) => { L.DomEvent.stop(e); setMapFull(!mapFull); });
-          L.DomEvent.disableClickPropagation(wrap);
-          return wrap;
-        },
+    if (!tm) {
+      tm = window.RunwayMap.track($("an-map-host"), {
+        title: "Track",
+        drawKey: DRAW_KEY,
+        onPoint: (id, k, ll) => selectPoint(k, ll),
+        onGap: (id, g) => (g._type === "gap" ? selectGap(g) : selectHop(g)),
+        onTrip: (id, n) => pickTrip(n),
+        fullRight: () => { const r = $("an-rail"); return r.hidden ? 0 : r.offsetWidth; },
+        onFull: (on, box) => { mapFull = on; floatBox = box; renderFloatTiles(); },
       });
-      new Full().addTo(map);
-      map.on("zoomend", drawArrows);
+      map = tm.map;
     }
-    document.querySelectorAll(".an-map-mode .seg").forEach((b) => b.classList.toggle("on", b.dataset.mode === mapMode));
-    document.querySelectorAll(".an-map-draw .seg").forEach((b) => b.classList.toggle("on", b.dataset.draw === mapDraw));
-    mapLayers.clearLayers();
-    renderTripBar();
-    const s = full.series || {};
-    const d = full.driving || {};
-    const trips = d.trips || [];
-    const casing = getComputedStyle(box).getPropertyValue("--map-casing").trim() || "#10120f";
-    const all = [], chosen = [];
-    // runs of consecutive points with one colour; the chosen trip is drawn last, on top
-    const runs = [];
-    let anyHistory = false;
-    (s.track || []).forEach((seg) => {
-      let run = null;
-      seg.forEach((p) => {
-        const n = tripAt(p[3], trips);
-        const h = p[4] ? 1 : 0;
-        if (h) anyHistory = true;
-        const colour = mapMode === "trips" ? (n ? tripColour(n) : cssVar("--map-quiet")) : speedColour(p[2]);
-        if (!run || run.colour !== colour || run.n !== n || run.h !== h) {
-          const prev = run && run.pts[run.pts.length - 1];
-          const prevK = run && run.ks[run.ks.length - 1];
-          run = { colour, n, h, pts: prev ? [prev] : [], ks: prev ? [prevK] : [], joined: !!prev };
-          runs.push(run);
-        }
-        run.pts.push([p[0], p[1]]);
-        run.ks.push(p[3]);
-        all.push([p[0], p[1]]);
-        if (mapTrip !== null && n === mapTrip) chosen.push([p[0], p[1]]);
-      });
-    });
-    // the stretches that get direction arrows: each trip (only the chosen one, when one is chosen); by
-    // speed, every stretch the vehicle was moving
-    arrowPaths = [];
-    (s.track || []).forEach((seg) => {
-      let cur = null, key = null;
-      seg.forEach((p) => {
-        const n = tripAt(p[3], trips);
-        const moving = mapMode === "trips" ? n !== null : p[2] > 3;
-        if (!moving || (mapTrip !== null && n !== mapTrip)) { cur = null; return; }
-        const k = mapMode === "trips" ? n : 1;
-        if (!cur || key !== k) { cur = []; key = k; arrowPaths.push(cur); }
-        cur.push([p[0], p[1], mapMode === "trips" ? tripColour(n) : speedColour(p[2])]);
-      });
-    });
-    const faded = (r) => mapTrip !== null && r.n !== mapTrip;
-    // the card on a trip's line: when, how far, how fast; live or history
-    const tripTip = (n, hist) => {
-      const t = trips.find((x) => x.n === n);
-      if (!t) return cardTip(hist ? "History · not in a trip" : "Not in a trip");
-      return cardTip(`Trip ${t.n}${hist ? " · history" : ""}`, { body: [["Start", when(t.start, true)], ["End", when(t.end, true)]] },
-        [["Took", t.duration], ["Distance", t.km.toFixed(1) + " km"], ["Top", num(t.max_speed, 0) + " km/h"], ["Average", num(t.avg_speed, 0) + " km/h"]]);
-    };
-    // drawn bottom to top: faded, not in a trip, history, live in a trip
-    const rank = (r) => (faded(r) ? 0 : r.n === null && mapMode === "trips" ? 1 : r.h ? 2 : 3);
-    const fade = mapNum("--map-fade", 0.22), hist = mapNum("--map-hist", 0.45);
-    // a click on a line picks the packet nearest the click
-    const pickOn = (r) => (e) => {
-      let best = 0, bd = Infinity;
-      r.pts.forEach((q, i) => { const dd = map.distance(e.latlng, q); if (dd < bd) { bd = dd; best = i; } });
-      selectPoint(r.ks[best], r.pts[best]);
-    };
-    const order = runs.filter((r) => r.pts.length > (mapDraw === "dots" ? 0 : 1)).sort((a, b) => rank(a) - rank(b));
-    // dots: one per packet, live bright, history small and dim — each picks its packet
-    if (mapDraw === "dots") arrowPaths = [];
-    order.forEach((r) => {
-      if (mapDraw !== "dots") return;
-      const fd = faded(r), inTrip = r.n !== null;
-      r.pts.forEach((q, i) => {
-        if (i === 0 && r.joined) return;
-        L.circleMarker(q, { renderer: dotRenderer, radius: r.h ? 2.6 : inTrip || mapMode === "speed" ? 3.6 : 2.8, color: casing,
-                            weight: r.h ? 0.5 : 1, fillColor: r.colour, fillOpacity: fd ? fade : r.h ? hist : 1, opacity: fd ? fade * 0.7 : r.h ? hist * 0.8 : 0.8 })
-          .on("click", () => selectPoint(r.ks[i], q)).addTo(mapLayers);
-      });
-    });
-    order.forEach((r) => {
-      if (mapDraw === "dots") return;
-      const inTrip = r.n !== null;
-      if (faded(r)) {
-        L.polyline(r.pts, { color: r.colour, weight: inTrip && !r.h ? 3 : 2, opacity: fade }).on("click", pickOn(r)).addTo(mapLayers);
-        return;
-      }
-      if (r.h) {                                  // history: the same colour, dimmed and thin
-        const line = L.polyline(r.pts, { color: r.colour, weight: inTrip || mapMode === "speed" ? 2.5 : 1.8, opacity: hist }).addTo(mapLayers);
-        line.bindTooltip(tripTip(r.n, true), TIP).on("click", pickOn(r));
-        return;
-      }
-      const bold = inTrip || mapMode === "speed";
-      if (bold) L.polyline(r.pts, { color: casing, weight: inTrip ? 8 : 6, opacity: 0.6 }).addTo(mapLayers);
-      const line = L.polyline(r.pts, { color: r.colour, weight: bold ? (inTrip ? 4.5 : 3.5) : 2.5, opacity: bold ? 1 : 0.7 }).addTo(mapLayers);
-      line.bindTooltip(tripTip(r.n, false), TIP);
-      line.on("click", pickOn(r));
-    });
-    // no data: dotted from the last position before the gap to the first after it
-    const BREAK = { loss: ["--danger", "ignition on — data lost"], sleep: ["--map-asleep", "ignition off"], unknown: ["--warn", "no ignition state"] };
-    (s.breaks || []).forEach((g) => {
-      const inChosen = mapTrip === null || tripAt(g.k, trips) === mapTrip || tripAt(g.k_from, trips) === mapTrip;
-      const [tone, words] = BREAK[g.kind] || BREAK.unknown;
-      L.polyline([g.from, g.to], { color: cssVar(tone), weight: 3.5, dashArray: "1 9", lineCap: "round", opacity: inChosen ? 0.95 : Math.max(0.3, fade) })
-        .bindTooltip(gapTip(g, words), { sticky: true, className: "an-tipbox" })
-        .on("click", () => selectGap(g)).addTo(mapLayers);
-    });
-    (s.stale || []).forEach((x) => {
-      if (!x.stale) return;
-      const real = x.stale[0] === x.from[0] && x.stale[1] === x.from[1] ? x.to : x.from;
-      L.polyline([real, x.stale], { color: cssVar("--danger"), weight: 3, dashArray: "6 6", opacity: mapTrip === null ? 0.9 : Math.max(0.35, fade) })
-        .bindTooltip(hopTip(x), TIP).on("click", () => selectHop(x)).addTo(mapLayers);
-      L.circleMarker(x.stale, { radius: 7, color: cssVar("--danger"), weight: 2, fillOpacity: 0.25 })
-        .bindTooltip(hopTip(x), TIP).on("click", () => selectHop(x)).addTo(mapLayers);
-    });
-    (s.jumps || []).forEach((x) => {
-      L.polyline([x.from, x.to], { color: cssVar("--warn"), weight: 3, dashArray: "4 6", opacity: mapTrip === null ? 0.9 : Math.max(0.35, fade) })
-        .bindTooltip(hopTip(x), TIP).on("click", () => selectHop(x)).addTo(mapLayers);
-    });
-    // each trip numbered at its start, its end ringed; the chosen one labelled with its times
-    trips.forEach((t) => {
-      if (mapTrip !== null && t.n !== mapTrip) return;
-      const colour = mapMode === "trips" ? tripColour(t.n) : cssVar("--accent");
-      if (t.to[0] != null) {
-        pin(t.to, "", colour, "end").bindTooltip(`End ${when(t.end).slice(-8)}`, { permanent: mapTrip === t.n, direction: "auto", offset: [10, 0], className: "an-tipbox an-pintip" })
-          .addTo(mapLayers);
-      }
-      if (t.from[0] != null) {
-        pin(t.from, String(t.n), colour).bindTooltip(`Start ${when(t.start).slice(-8)}`, { permanent: mapTrip === t.n, direction: "auto", offset: [12, 0], className: "an-tipbox an-pintip" })
-          .on("click", () => pickTrip(t.n)).addTo(mapLayers);
-      }
-    });
-    (d.events || []).forEach((e) => {
-      if (!e.at[0]) return;
-      const n = tripAt(e.k, trips);
-      if (mapTrip !== null && n !== mapTrip) return;
-      L.circleMarker(e.at, { radius: 6, color: casing, weight: 1.5, fillColor: cssVar("--info"), fillOpacity: 1 })
-        .bindTooltip(cardTip(`Driving event · ${e.name || "code " + e.code}`, { body: [["Time", when(e.time, true)], ["Speed", num(e.speed, 0) + " km/h"], ["Position", pos(e.at)]] }), TIP)
-        .on("click", () => selectPoint(e.k, e.at)).addTo(mapLayers);
-    });
-    // where it stood last (the only mark at all for a vehicle that never moved)
-    const lastSeg = (s.track || []).length ? s.track[s.track.length - 1] : null;
-    const last = lastSeg && lastSeg[lastSeg.length - 1];
-    if (last && mapTrip === null) {
-      pin([last[0], last[1]], "", cssVar("--text"), "last").bindTooltip(cardTip("Last position", { body: [["Time", when(s.end, true)], ["Position", pos([last[0], last[1]])]] }), TIP)
-        .on("click", () => selectPoint(last[3], [last[0], last[1]])).addTo(mapLayers);
-      if (!all.length) all.push([last[0], last[1]]);
-    }
-    const fit = chosen.length ? chosen : all;
-    setTimeout(() => {
-      map.invalidateSize();
-      if (fit.length) map.fitBounds(fit, { padding: [28, 28], maxZoom: 17, animate: false });
-      drawArrows();
-      markPoint();
-    }, 50);
-    const lg = $("an-map-legend");
-    lg.innerHTML = "";
-    const lim = (full.settings && full.settings.overspeed_kmh) || 80;
-    const kinds = new Set((s.breaks || []).map((g) => g.kind));
-    const dots = mapDraw === "dots";
-    const items = [["Live", "--text", dots ? "dot" : "line"]].concat(anyHistory ? [["History", "--text", dots ? "dot dim" : "line thin"]] : [])
-      .concat(kinds.has("loss") ? [["Data lost", "--danger", "dots"]] : [], kinds.has("sleep") ? [["Asleep", "--map-asleep", "dots"]] : [])
-      .concat(mapMode === "trips"
-        ? [["Not in a trip", "--map-quiet", "line"], ["Stale position", "--danger", "dot"], ["Driving event", "--info", "dot"]]
-        : [[`Over ${lim} km/h`, "--danger"], ["Moving", "--accent"], ["Standing", "--map-quiet"], ["Stale position", "--danger", "dot"]]);
-    items.forEach(([t, c, k]) => {
-      const sp = el("span");
-      const i = el("i", k || "line");
-      i.style.setProperty("--c", `var(${c})`);
-      sp.append(i, document.createTextNode(t));
-      lg.appendChild(sp);
-    });
+    tm.set([{ id: "log", name: (full.meta || {}).device || "", colour: cssVar("--accent"), rows: (full.summary || {}).rows,
+              series: full.series || {}, driving: full.driving || {}, settings: full.settings || {} }],
+           { refit: true, trip: mapTrip });
+    markPoint();
   }
-  document.querySelectorAll(".an-map-mode .seg").forEach((b) => b.addEventListener("click", () => { mapMode = b.dataset.mode; drawMap(); }));
-  document.querySelectorAll(".an-map-draw .seg").forEach((b) => b.addEventListener("click", () => {
-    mapDraw = b.dataset.draw;
-    try { localStorage.setItem(DRAW_KEY, mapDraw); } catch (e) { /* not remembered */ }
-    drawMap();
-  }));
   // a stretch of missing data, as a small table: start and end, each its time and position; then how
   // long, how far apart, what kind
   function cardTip(title, rows, foot) {
@@ -1726,13 +1474,10 @@
   // ---- the map full screen: the map fills the screen, the area tiles float over it, the side rail stays at
   // its edge; the same button (or Esc) brings it back. In the browser's own full screen where it is allowed.
   let mapFull = false;
-  function fitFull() {
-    if (!mapFull) return;
-    const rail = $("an-rail");
-    document.querySelector(".an-map-card").style.right = (rail.hidden ? 0 : rail.offsetWidth) + "px";
-  }
+  function fitFull() { if (tm) tm.fitFull(); }
   function renderFloatTiles() {
-    const box = $("an-map-tiles");
+    const box = floatBox;
+    if (!box) return;
     box.innerHTML = "";
     if (!mapFull || !rep) return;
     (rep.areas || []).forEach((a) => {
@@ -1747,32 +1492,7 @@
       box.appendChild(t);
     });
   }
-  function setMapFull(on) {
-    if (on === mapFull) return;
-    mapFull = on;
-    document.body.classList.toggle("an-mapfull", on);
-    const card = document.querySelector(".an-map-card");
-    if (!on) card.style.right = "";
-    if (fullBtn) {
-      fullBtn.innerHTML = UI.icon(on ? "minimize" : "maximize");
-      fullBtn.title = on ? "Exit full screen" : "Full screen";
-      fullBtn.setAttribute("aria-label", fullBtn.title);
-    }
-    try {
-      if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-      if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    } catch (e) { /* the page fills the window instead */ }
-    renderFloatTiles();
-    fitFull();
-    setTimeout(() => { fitFull(); if (map) map.invalidateSize(); }, 120);
-    setTimeout(() => { if (map) map.invalidateSize(); }, 400);
-  }
-  let fullBtn = null;
-  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && mapFull) setMapFull(false); });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && mapFull && !document.querySelector("dialog[open]")) setMapFull(false);
-  });
-  window.addEventListener("resize", fitFull);
+  function setMapFull(on) { if (tm) tm.setFull(on); }
 
   // the packet chosen: a ring on the map, and the Packet panel opens on it
   let pointAt = null;                         // where it is on the map, when it has a position
@@ -1801,21 +1521,10 @@
   }
   // what is picked, marked in the page's text colour — light on the dark map, dark on the light one
   function markPoint() {
-    if (!pointLayer) return;
-    pointLayer.clearLayers();
-    const ink = cssVar("--text");
-    if (mapGap) {
-      const g = mapGap;
-      const hop = g._type === "jump" || g._type === "stale";
-      L.polyline([g.from, g.to], { color: ink, weight: 10, opacity: 0.22, lineCap: "round", interactive: false }).addTo(pointLayer);
-      L.polyline([g.from, g.to], { color: cssVar(hop ? (g._type === "stale" ? "--danger" : "--warn") : g.kind === "loss" ? "--danger" : g.kind === "sleep" ? "--map-asleep" : "--warn"),
-                                   weight: 4, dashArray: hop ? "6 6" : "1 9", lineCap: "round", interactive: false }).addTo(pointLayer);
-      [g.from, g.to].forEach((q) => L.circleMarker(q, { radius: 7, color: ink, weight: 2.5, fill: false, interactive: false }).addTo(pointLayer));
-      return;
-    }
-    if (mapPoint == null || !pointAt) return;
-    L.circleMarker(pointAt, { radius: 10, color: cssVar("--text"), weight: 2.5, fill: false, interactive: false }).addTo(pointLayer);
-    L.circleMarker(pointAt, { radius: 4, color: cssVar("--text"), weight: 0, fillColor: cssVar("--text"), fillOpacity: 1, interactive: false }).addTo(pointLayer);
+    if (!tm) return;
+    if (mapGap) tm.markGap("log", mapGap);
+    else if (mapPoint != null && pointAt) tm.mark("log", mapPoint, false, pointAt);
+    else tm.clearMark();
   }
   // from the Trips table: that trip, on the summary (a trip's own report numbers its trips from 1, so
   // it is found in the whole log by its first row)

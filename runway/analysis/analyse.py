@@ -1115,8 +1115,9 @@ def _power(rows: list[dict], ffill: list, transitions: list | None = None, flags
 
 def _power_line(rows: list[dict], ffill: list) -> list:
     """For the chart: [time, main supply V, internal battery V, ignition, internal %] — a 0 V internal
-    reading is no reading. Thinned to ~1,500 points keeping each stretch's lowest supply, so a dip
-    at engine start still shows."""
+    reading is no reading. A long log is cut into ~1,500 stretches, and each keeps its envelope: the
+    readings with the lowest and the highest supply and internal battery, in time order — a dip at
+    engine start and a spike both still show (the lowest alone hid every peak)."""
     pts = []
     for r in rows:
         sv_, iv = _volts(r.get("supply")), _volts(r.get("ibatt_v"))
@@ -1130,7 +1131,13 @@ def _power_line(rows: list[dict], ffill: list) -> list:
     out = []
     for i in range(0, len(pts), stride):
         chunk = pts[i:i + stride]
-        out.append(min(chunk, key=lambda p: p[1] if p[1] is not None else 1e9))
+        pick = set()
+        for col in (1, 2):                                  # main supply, internal battery
+            have = [j for j, p in enumerate(chunk) if p[col] is not None]
+            if have:
+                pick.add(min(have, key=lambda j: chunk[j][col]))
+                pick.add(max(have, key=lambda j: chunk[j][col]))
+        out.extend(chunk[j] for j in sorted(pick or {0}))
     return out
 
 
@@ -1242,6 +1249,17 @@ def _driving(rows, flags, s, gap_s, gps, on_s, off_s, idle_s) -> dict:
                            if od.get("alertId") in HARSH_ALERTS else DRIVING_EVENTS.get(r["green"], ""),
                            "speed": r.get("speed"), "at": [r.get("lat"), r.get("lon")], "type": r.get("type"),
                            "k": r["k"]})
+    # each trip's own summary, for the map's trip list: what happened on it
+    by_k = {r["k"]: r for r in rows}
+    for t in out_trips:
+        inside = [by_k[k] for k in range(t["k"], t["k_end"] + 1) if k in by_k]
+        steps = [(y["t"] - x["t"]).total_seconds() for x, y in zip(inside, inside[1:])]
+        t["alerts"] = sum(1 for r in inside if (r.get("od") or {}).get("PacketType")
+                          and (r.get("od") or {}).get("PacketType") not in ROUTINE_CODES)
+        t["events"] = sum(1 for e in events if t["k"] <= e["k"] <= t["k_end"])
+        t["overspeed"] = sum(1 for e in over if t["k"] <= e["k"] <= t["k_end"])
+        t["history"] = sum(1 for r in inside if r.get("history"))
+        t["lost_s"] = sum(x for x in steps if x > gap_s)          # stretches without data while driving
     ign = []
     last = None
     for r in rows:
@@ -1573,7 +1591,7 @@ def _series(rows, ffill, t0, t1, gaps, gps, driving, delivery, frames, flags, de
             far = _m(a["lat"], a["lon"], b["lat"], b["lon"])
             jump = b["k"] in jump_ks or (far > s["jump_min_m"] and far / max(dt, 1.0) * 3.6 > s["jump_kmh"])
             if dt > gap_s or jump:
-                if len(cur) > 1:
+                if cur:                                   # a lone packet between two breaks stays too (a dot)
                     segs.append(cur)
                 cur = []
                 if dt > gap_s and far > 20:
@@ -1583,18 +1601,42 @@ def _series(rows, ffill, t0, t1, gaps, gps, driving, delivery, frames, flags, de
                                    "kind": "loss" if state == 1 else "sleep" if state == 0 else "unknown",
                                    "metres": round(far), "k_from": a["k"], "k": b["k"]})
         cur.append(b)
-    if len(cur) > 1:
+    if cur:
         segs.append(cur)
-    total = sum(len(x) for x in segs) or 1
-    stride = max(1, total // 4000)
-    # each point: latitude, longitude, speed, row, and 1 when the platform marked it history (sent later)
+    # one moment in several packets of one kind (a location update, or each alert): where, how many, which
+    # frame numbers — a pile of duplicates reads as one point otherwise, and its frame numbers as packets lost
+    dups, i = [], 0
+    while i < len(rows) and len(dups) < 2000:
+        j = i
+        while j + 1 < len(rows) and rows[j + 1]["t"] == rows[i]["t"]:
+            j += 1
+        if j > i:
+            kinds: dict[str, list] = defaultdict(list)
+            for r in rows[i:j + 1]:
+                kinds[(r.get("od") or {}).get("PacketType") or ""].append(r)
+            for grp in kinds.values():
+                if len(grp) < 2:
+                    continue
+                fix = next((r for r in grp if _valid(r)), None)
+                frames = [(r.get("meta") or {}).get("frameNumber") for r in grp]
+                frames = [f for f in frames if f]
+                dups.append({"time": _iso(grp[0]["t"]), "count": len(grp), "k": grp[0]["k"], "ks": [r["k"] for r in grp][:200],
+                             "at": [round(fix["lat"], 6), round(fix["lon"], 6)] if fix else None,
+                             # the same data each time (the same packet made again), or not (the clock did not move)
+                             "same": len({(r.get("lat"), r.get("lon"), r.get("speed"), r.get("ign")) for r in grp}) == 1,
+                             "frames": [frames[0], frames[-1]] if frames else None,
+                             "history": sum(1 for r in grp if r.get("history"))})
+        i = j + 1
+    # each point: latitude, longitude, speed, row, and 1 when the platform marked it history (sent later).
+    # Every packet with a clean position, as the device sent it — never thinned: a map that leaves packets
+    # out draws a line the device did not report (it cut corners at roundabouts and missed the packet picked).
     track = [[[round(r["lat"], 6), round(r["lon"], 6), r.get("speed") or 0, r["k"], 1 if r.get("history") else 0]
-              for r in seg[::stride] + [seg[-1]]] for seg in segs]
+              for r in seg] for seg in segs]
     return {"bucket_s": bucket, "start": _iso(t0), "end": _iso(t1),
             "points": pts, "fields": ["t", "rows", "speed", "ign", "history", "latency", "sats", "latency_median"],
             "gaps": [{"start": g["start"], "end": g["end"], "kind": g["kind"]} for g in gaps],
             "markers": markers, "track": track, "breaks": breaks,
-            "stale": [_hop(x) for x in gps["stale"]], "jumps": [_hop(x) for x in gps["jumps"]]}
+            "stale": [_hop(x) for x in gps["stale"]], "jumps": [_hop(x) for x in gps["jumps"]], "dups": dups}
 
 
 def _hop(x: dict) -> dict:

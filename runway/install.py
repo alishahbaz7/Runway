@@ -60,3 +60,74 @@ def base_dir() -> str:
     if FROZEN:
         return launcher_root() or os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# ── definitions a release ships into data/ ───────────────────────────────────────────────────────
+# A release carries the protocol definitions (data/protocols) and copies them into the data folder
+# on its first start; the copy there is the person's to edit (Configuration → Protocols) and wins.
+# With nothing more, a later release could never bring a definition up to date — the Locate 140 4G
+# field names would reach a fresh install only. So every release also ships SHIPPED_DEFINITIONS:
+# the hash of every version of each definition any release has carried (built from git history by
+# packaging/build_release.py). A copy whose hash is in that list is one a release put there,
+# untouched — it is replaced by the new one; any other is the person's own edit, and stays.
+SHIPPED_DEFINITIONS = "protocols_shipped.json"
+
+
+def definition_hash(data: bytes) -> str:
+    """A definition's hash, line endings aside (a checkout on Windows writes CRLF, git keeps LF)."""
+    import hashlib
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def seed_definitions(src, dst, shipped: dict | None = None) -> list[str]:
+    """Copy the shipped definitions in ``src`` into the data folder's ``dst``: all of them into an
+    empty folder (the first start), and later each one whose copy is a release's own, untouched
+    (its hash in ``shipped``). Never a file the person edited, and never one they removed.
+    Returns the names written."""
+    import shutil
+    from pathlib import Path
+    src, dst = Path(src), Path(dst)
+    if not src.is_dir() or src.resolve() == dst.resolve():
+        return []                                # a run from source: the shipped folder IS the data
+    dst.mkdir(parents=True, exist_ok=True)
+    first = not any(dst.iterdir())
+    written = []
+    for f in sorted(src.iterdir()):
+        if not f.is_file():
+            continue
+        to = dst / f.name
+        if not to.exists():
+            if first:
+                shutil.copy2(f, to)
+                written.append(f.name)
+            continue
+        have = definition_hash(to.read_bytes())
+        if have != definition_hash(f.read_bytes()) and have in set((shipped or {}).get(f.name) or ()):
+            shutil.copy2(f, to)
+            written.append(f.name)
+    return written
+
+
+def branch(root: str | None = None) -> str | None:
+    """The git branch a run from source is on ("v<x.y.z>") — the banner shows it in place of the version,
+    so a copy run from a branch is never taken for a release. None in a release build, or outside a
+    checkout. Read from .git/HEAD (the banner asks every few seconds; no git process for that); a
+    detached HEAD gives its short commit."""
+    if FROZEN:
+        return None
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    git = os.path.join(root, ".git")
+    try:
+        if os.path.isfile(git):                                   # a worktree: ".git" names the real one
+            with open(git, encoding="utf-8") as f:
+                line = f.read().strip()
+            if not line.startswith("gitdir:"):
+                return None
+            git = os.path.join(root, line.split(":", 1)[1].strip())
+        with open(os.path.join(git, "HEAD"), encoding="utf-8") as f:
+            head = f.read().strip()
+    except OSError:
+        return None
+    if head.startswith("ref:"):
+        return head.split("/", 2)[-1] if head.startswith("ref: refs/heads/") else head[4:].strip()
+    return head[:7] or None

@@ -28,6 +28,9 @@ Two header vocabularies are handled, both mapped onto the same builders:
 
   * The **Locate 140 VB** ``$PVT`` (vendor ``GTRP``), per its AIS-140 compliance sheet: the
     doc's NMP layout without the odometer, so the parenthesized OTA response is field 50.
+    The **Locate 140 4G** sends this same 50-field ``$PVT`` (its PVT sheet), and an 8-field
+    ``$LGN`` — the doc's login without the vendor, firmware written ``V7.6.0``. Login layouts
+    are a table too (:data:`LOGIN_LAYOUTS`, keyed by field count).
 
 The normal/alert sentence therefore comes in several layouts that share fields 1-25 and
 diverge after. Each is a row in :data:`NMP_LAYOUTS` (an :class:`NmpLayout`), picked by the
@@ -84,9 +87,13 @@ _MAX_SENTENCE = 4096
 _HEADERS = (b"$LGN,", b"$NMP,", b"$HLP,", b"$HEL,", b"$EPB,", b"$PVT,", b"$HLM,", b"$NRM,")
 
 _IMEI_RE = re.compile(r"^\d{14,16}$")
-# x.y.z, with an optional build letter — real firmware strings include both "01.3.0" (Locate
-# 140B) and "5.1.29C" (Zenithra Ax1 sCAN), and the login locates this field by content.
-_FW_RE = re.compile(r"^\d+\.\d+\.\d+[A-Za-z]?$")
+# what can name a device: digits (an IMEI, or a shorter id some firmwares use) — never a firmware
+# version or a packet type, which is what a broken sentence puts in the IMEI's place
+_DEVICE_RE = re.compile(r"^\d{6,20}$")
+# x.y.z, with an optional "V" before it and build letter after — real firmware strings include
+# "01.3.0" (Locate 140B), "5.1.29C" (Zenithra Ax1 sCAN) and "V7.6.0" (Locate 140 4G); a login of
+# an unknown shape locates this field by content.
+_FW_RE = re.compile(r"^[Vv]?\d+\.\d+\.\d+[A-Za-z]?$")
 
 _NMP_TYPES = {
     "NR": "normal", "EA": "emergency_alert", "TA": "tamper_alert", "HP": "health_packet",
@@ -168,6 +175,29 @@ NMP_LAYOUTS: dict[tuple[int, bool], NmpLayout] = {
 }
 
 
+@dataclass(frozen=True)
+class LoginLayout:
+    """Where one layout of the login sentence puts its fields (1-based, after the header).
+    The position block — latitude, N/S, longitude, E/W — starts at ``lat_at``."""
+    name: str
+    text: dict[str, int]          # io key -> index, kept as sent
+    imei: int
+    lat_at: int
+
+
+# Keyed by field count. A login of any other shape (the Locate 140B's 7 fields, whose first
+# field is not named anywhere) is read by content: the IMEI is the 14-16 digit run, the
+# firmware the x.y.z token, the position the (lat, N/S, lon, E/W) run.
+LOGIN_LAYOUTS: dict[int, LoginLayout] = {
+    # the documented AIS-140 v1.9 login
+    9: LoginLayout("ais140_v1.9", {"vendor_id": 1, "vehicle_reg_no": 2, "firmware_version": 4,
+                                   "protocol_version": 5}, imei=3, lat_at=6),
+    # the doc's login without the vendor: Locate 140 4G (its login sheet), Zenithra Ax1 sCAN
+    8: LoginLayout("ais140_no_vendor", {"vehicle_reg_no": 1, "firmware_version": 3,
+                                    "protocol_version": 4}, imei=2, lat_at=5),
+}
+
+
 @register_codec
 class Ais140Codec(Codec):
     name = "ais140"
@@ -226,6 +256,18 @@ class Ais140Codec(Codec):
         return builder(rest.split(","), checksum, session, raw_hex)
 
     # -- field helpers -------------------------------------------------------- #
+    def _device(self, value: str | None, session: Session) -> str:
+        """The device a sentence names, when the field holds a device's number. A broken sentence (cut
+        off and glued to the next one: "$PVT,GTRP,V7.06.11,LB$ ,<CR><LF>$PVT,…") puts other text there —
+        a firmware version — which made a device of its own on the Dashboard; the connection's device
+        stays the one its earlier sentences named."""
+        v = (value or "").strip()
+        if _DEVICE_RE.match(v):
+            session.device_id = v
+        elif not session.device_id:
+            session.device_id = f"{self.name}-unknown"
+        return session.device_id
+
     @staticmethod
     def _get(f: list[str], index: int) -> str | None:
         return f[index - 1] if 0 < index <= len(f) else None
@@ -257,17 +299,26 @@ class Ais140Codec(Codec):
 
     # -- LGN: login -------------------------------------------------------------- #
     def _lgn(self, f: list[str], checksum, session: Session, raw_hex: str) -> UnifiedRecord:
-        # Field count differs between the doc's 9-field layout and the real 7-field one seen
-        # on the wire (no vehicle name / protocol-version literal) — locate IMEI and the GPS
-        # block by content instead of trusting either fixed position, so both parse correctly.
-        imei = next((t for t in f if _IMEI_RE.match(t)), None) or self._get(f, 3) or session.device_id or f"{self.name}-unknown"
-        session.device_id = imei
-        lat, lon = self._find_latlon(f)
-        firmware = next((t for t in f if _FW_RE.match(t)), None)
+        # A known shape (LOGIN_LAYOUTS) is read by position; any other by content. The IMEI
+        # falls back to content even for a known shape — it names the device, and so decides
+        # its relay route: a misplaced field must not make the device someone else.
+        layout = LOGIN_LAYOUTS.get(len(f))
+        if layout:
+            imei = self._get(f, layout.imei)
+            if not imei or not _IMEI_RE.match(imei):
+                imei = next((t for t in f if _IMEI_RE.match(t)), None)
+            io = {"layout": layout.name, **{key: self._get(f, i) for key, i in layout.text.items()}}
+            lat = self._signed(f, layout.lat_at, layout.lat_at + 1, "S")
+            lon = self._signed(f, layout.lat_at + 2, layout.lat_at + 3, "W")
+        else:
+            imei = next((t for t in f if _IMEI_RE.match(t)), None) or self._get(f, 3)
+            io = {"layout": "by_content", "firmware_version": next((t for t in f if _FW_RE.match(t)), None)}
+            lat, lon = self._find_latlon(f)
+        imei = self._device(imei, session)
         return UnifiedRecord(
             device_id=imei, protocol=self.name, message_type="login",
             position=Position(latitude=lat, longitude=lon),
-            io={"firmware_version": firmware, "fields": f, "checksum": checksum},
+            io={**io, "fields": f, "checksum": checksum},
             raw_hex=raw_hex,
         )
 
@@ -308,8 +359,7 @@ class Ais140Codec(Codec):
         ``head`` overrides the vendor-slot io keys (Zenithra: the slot is a packet-format
         version, and the vendor is the $MMI header itself).
         """
-        imei = self._get(f, 6) or session.device_id or f"{self.name}-unknown"
-        session.device_id = imei
+        imei = self._device(self._get(f, 6), session)
         ptype = self._get(f, 3) or ""
         alert_id = self._int(self._get(f, 4))
         custom = CUSTOM_PACKETS.get((ptype, alert_id))
@@ -366,8 +416,7 @@ class Ais140Codec(Codec):
 
     # -- HLP: health -------------------------------------------------------------- #
     def _hlp(self, f: list[str], checksum, session: Session, raw_hex: str) -> UnifiedRecord:
-        imei = self._get(f, 3) or session.device_id or f"{self.name}-unknown"
-        session.device_id = imei
+        imei = self._device(self._get(f, 3), session)
         return UnifiedRecord(
             device_id=imei, protocol=self.name, message_type="health",
             battery_pct=self._float(self._get(f, 4)),
@@ -381,8 +430,7 @@ class Ais140Codec(Codec):
 
     # -- EPB: emergency ------------------------------------------------------------ #
     def _epb(self, f: list[str], checksum, session: Session, raw_hex: str) -> UnifiedRecord:
-        imei = self._get(f, 2) or session.device_id or f"{self.name}-unknown"
-        session.device_id = imei
+        imei = self._device(self._get(f, 2), session)
         ptype = self._get(f, 1) or ""
         rec = UnifiedRecord(
             device_id=imei, protocol=self.name, message_type=_EPB_TYPES.get(ptype, ptype or "emergency"),
