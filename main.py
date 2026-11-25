@@ -1,6 +1,6 @@
 """Runway launcher — the simple way to start the app.
 
-    python main.py                 # starts the web server (dashboard + parser) on :8080
+    python main.py                 # starts the web server (dashboard + parser) on :8180
     python main.py --port 9000     # ...on a different port
     python main.py replay samples/teltonika_demo.hex --codec teltonika
     python main.py codecs          # list available codecs
@@ -9,9 +9,13 @@ This forwards to the real CLI in ``runway/cli.py``. With no sub-command it defau
 ``serve``, so just running (or double-clicking) this file brings the server up.
 
 One copy, always the latest: started from here, ``serve`` takes over its port. A Runway already
-running there on older code — a release, another checkout, or this one before the last edit — is
-stopped, the latest starts, and the listeners it ran (their relay rules and store) start again in it.
-The same code already running is just brought to the front.
+running there on older code — another checkout, or this one before the last edit — is stopped, the
+latest starts, and the listeners it ran (their relay rules and store) start again in it. The same code
+already running is just brought to the front.
+
+Beside the release: a copy run from source serves on 8180 and the release on 8080, each with its own
+data folder and window, so both run at once. This checkout's copy found on 8080 (where it ran before
+1.1.29) is moved to 8180 with its listeners; a release there is left alone.
 """
 
 from __future__ import annotations

@@ -29,6 +29,20 @@ FROZEN = bool(getattr(sys, "frozen", False))
 # unless pointed at a test server on purpose — RUNWAY_USAGE_URL / RUNWAY_UPDATE_MANIFEST_URL).
 CHANNEL = os.environ.get("RUNWAY_CHANNEL") or ("release" if FROZEN else "dev")
 
+# The port each kind of copy serves on unless told otherwise (--port wins), so the release a person
+# runs every day and a copy run from source (development) run side by side, each with its own data
+# folder and window: the release keeps 8080, the address its windows and bookmarks know.
+PORTS = {"release": 8080, "dev": 8180}
+
+
+def default_port(channel: str = "") -> int:
+    return PORTS.get(channel or CHANNEL, PORTS["release"])
+
+
+def channel_of(health: dict) -> str:
+    """The kind of copy that answered /api/health: it says (1.1.29 on), or a run from source has a root."""
+    return health.get("channel") or ("dev" if health.get("root") else "release")
+
 # How the running server was started, so a restart into a new version serves on the same address.
 # Set by the CLI's `serve` (same process as the app).
 SERVE_ARGS: list[str] = []

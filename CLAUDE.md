@@ -25,7 +25,7 @@ pip install -e ".[dev]"        # install (FastAPI, uvicorn, pydantic, httpx, pyt
 python -m pytest -q            # run all tests
 python -m pytest tests/test_codecs.py::test_gt06_login_then_location   # single test
 
-runway serve                  # dashboard + REST + WS on :8080  (or: python -m runway.cli serve)
+runway serve                  # dashboard + REST + WS on :8180 from source, :8080 a release  (or: python -m runway.cli serve)
 runway replay <file> --codec gt06 [--fmt auto] [--hex]   # parse a log/.loc/dump file
 runway listen --codec teltonika --port 5050              # live TCP listener
 runway codecs                 # list registered codecs
@@ -36,7 +36,12 @@ runway codecs                 # list registered codecs
 checkout before the last edit (`/api/health` `root` + `started` against the newest source file) — is
 stopped (`POST /api/app/quit`, loopback only; a release before 1.1.28 lacks it, so the process owning
 the port is ended) and its running listeners are started again in the new copy with their relay
-rules and store. The same code running is only brought forward. So never leave a second Runway of
+rules and store. The same code running is only brought forward. **A release and a copy from source run
+side by side** (`install.PORTS`: the release on 8080, source on 8180; `--port` wins): each defers only to
+a copy of its own kind (`/api/health` `channel`, `install.channel_of`) — a start that finds the other
+kind on its port says so and stops, never shows that one in its place — brings forward its own window
+only (`desktop.focus_window(profile_dir)`), and `main.py` never stops a release; this checkout's copy
+found on 8080 (pre-1.1.29) is moved to 8180 with its listeners. So never leave a second Runway of
 your own running for the user (a demo on another port) — point them at `main.py`; check things in
 isolated copies on scratch ports and stop them. A run from source shows "Branch v<x.y.z>" in the
 banner (`install.branch()`, read from `.git/HEAD`); a release "Version <x.y.z>". Its data folder is
@@ -135,7 +140,9 @@ per-packet table needs a retention rule here and an index that serves its purge.
 every packet held against its sheet. The sheet is a *spec* (`fwtest/specs/<name>.json`; the person's
 own in `data/fwtest/specs` win by file name): per header the field count and a field list (index, -1 =
 the last field; `rules` by name from `rules.py` — a new rule is one decorated function; `allow` for the
-standard's `x` / `99`), the checksum algorithm, the terminator, and the tables the sequence checks read
+standard's `x` / `99`), the checksum algorithm and the bytes it covers (`checksum.over`, `spec.XOR_OVER`:
+`between` `$` and `*` — the standard practice, the default — or `from_dollar`; a wrong checksum is tried
+over the other spans so the test says which one the firmware took), the terminator, and the tables the sequence checks read
 (`status_by_alert`, `alert_ids`, `ignition_by_type`) — a device whose sheet differs changes its spec,
 never `gate.py`. How much a check weighs for a device is the spec's `levels` (check → warn / fail over
 `CHECKS`); a flag it lowers keeps `was`, and a plan case that names the check judges `was` — a
@@ -144,11 +151,18 @@ extra field is flagged once for its count and still checked field by field. `Gat
 received, conn)` returns the packet's row with its flags; each flag's `key` groups it into one row
 of the checks table (`CHECKS` holds every non-field check's label, meaning and level). A run on disk
 (`runs.py`, `data/fwtest/<id>/`) keeps only `meta.json` and the packets as received (`packets.log`):
-the gate is rebuilt from them at start, never stored judged. A live run is fed by a
+the gate is rebuilt from them at start, never stored judged. A packet is written as its own text, only a
+byte that cannot be text escaped (`\r \n \t \\ \xNN`), `0x<hex>` when mostly binary (`packet_text` /
+`packet_bytes`, the file's `HEADER` line says so for whoever opens it). Never write it converted when
+it needs no conversion: a developer reads this file. A hex log from before 1.1.29 still reads and is
+rewritten as text on load (`to_text`, checked before it replaces the file). A live run is fed by a
 `FirmwareTestSink` that `api/fwtest.py` adds to the pipeline of the listener on the run's port (a
 watcher every 3 s, so it survives a listener restarted in Capture or a Runway restart); it only
 reads — relay and ACKs stay the listener's. A file run frames the capture with the spec's codec, and
-is not held to CR LF (`Gate(wire=False)`): a file's line endings are its editor's. `insights.py` turns
+is not held to CR LF (`Gate(wire=False)`): a file's line endings are its editor's. Live or history is
+the gate's `HISTORY`: H, plus an emergency packet's SP (stored), while its NM is live. The Live switch
+(`packets?status=live`), the page (`isLate` / `liveWord`) and the maps (`log_of`) all read it the same
+way. The EPB's time is its one `date_time` field. `insights.py` turns
 the gate into the rail's Insights (plain words, worst first, each with the filter that shows its
 packets) — a check flags *why* where it can (`flag(why=…)`, e.g. a checksum `kept_live`), and an
 insight is built from that, never from a flag's wording; a check without wording of its own still
@@ -214,8 +228,10 @@ reads each device's live-store records as drive-log rows (`analysis/live.py` `lo
 `analyse` — never a second trip/gap logic in the page. A point's row `k` leads back to its record by
 `seqs[k]`. Log analysis draws its log with it too: the page keeps its state (`mapTrip`, `mapPoint`,
 `mapGap`) and its rail; the component hands clicks back (`onPoint`, `onGap`, `onTrip` — a trip rescopes
-the page, which then sets it with `tm.trip`). A map feature is added to the component once, for every
-page that shows a track. The device comparison keeps its own map on purpose (one vehicle: each device a
+the page, which then sets it with `tm.trip`). Firmware test's rail *Map* draws a test the same way:
+`/api/fwtest/runs/{id}/track` hands the gate's rows to `log_of` as records (`fwtest/maptrack.py`), so
+`seqs[k]` is a packet number. Its map is made once and moved back in, never rebuilt, because the rail
+redraws on every poll. A map feature is added to the component once, for every page that shows a track. The device comparison keeps its own map on purpose (one vehicle: each device a
 narrower stripe over the one beneath, so overlapping tracks all show). **Never thin what is shown or judged**
 (the user: "we cannot deviate from the information received from the device"): the track carries
 every packet; the map keeps quick by level of detail in drawing only — per zoom the points that move a

@@ -381,3 +381,23 @@ li.fw-live-row.new { animation: fwLiveNew 1.6s ease-out; }
 .fw-live-raw { margin-top: 4px; font-size: 11px; line-height: 1.45; color: var(--dim); word-break: break-all; }
 .fw-live-flag { margin-top: 3px; font-size: 12px; color: var(--danger-ink); }
 li.fw-live-row.lv-warn .fw-live-flag { color: var(--warn-ink); }
+/* the live list's switch — all, or live only — each with how many */
+.fw-live-bar { flex-wrap: wrap; row-gap: 6px; }
+.fw-live-seg button.seg { height: 26px; padding: 0 10px; font-size: 12px; }
+.fw-live-n { color: var(--dim); font-variant-numeric: tabular-nums; }
+.fw-live-seg button.seg.on .fw-live-n { color: var(--text); }
+
+/* the map tab: the track fills the rail, the packet or stretch picked on it sits under it */
+.fw-rail-body.is-map { overflow: hidden; display: flex; flex-direction: column; }
+.fw-map { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fw-map-host { flex: 1; min-height: 260px; }
+.fw-map-pick { flex: none; max-height: 42%; overflow: auto; border-top: 1px solid var(--border); background: var(--panel); }
+.fw-map-pick[hidden] { display: none; }
+.fw-map-pick .fw-live-row { border-bottom: 0; }
+.fw-map-facts { margin-top: 3px; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.fw-map-gap { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; }
+dl.fw-map-kv { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 12.5px;
+  font-variant-numeric: tabular-nums; }
+dl.fw-map-kv dt { color: var(--dim); font-weight: 600; }
+dl.fw-map-kv dd { margin: 0; color: var(--text); }
+.fw-map-gap .fw-defect-acts button.mini { height: 26px; }

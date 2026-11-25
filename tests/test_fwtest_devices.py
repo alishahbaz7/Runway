@@ -66,6 +66,7 @@ def test_a_correct_device_has_no_defect_and_no_failing_case():
 # ── each known fault, alone: found, and explained ─────────────────────────────────────────────────
 EXPECT = {
     "kept_live": ("checksum", "kept_live", True), "login_star": ("checksum", "star_included", True),
+    "pvt_dollar": ("checksum", "dollar_included", True),
     "hel_no_cs": ("checksum", "missing", True), "fields51": ("field_count", None, True),
     "short_date": ("field.date", None, False), "broken_time": ("field.time", None, False),
     "lifo": ("history_order", None, True), "no_login_on_reconnect": ("login_first", None, True),

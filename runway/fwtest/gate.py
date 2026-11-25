@@ -23,13 +23,14 @@ from functools import reduce
 
 from ..analysis.modes import margin_for
 from . import rules
-from .spec import Spec, clean_config
+from .spec import XOR_OVER, Spec, clean_config
 
 # check id → (label, what it holds the packets to, level)
 CHECKS: dict[str, tuple[str, str, str]] = {
     "framing": ("Framing", "Starts with $, a * before the checksum, and ends as the sheet says (CR LF).", "fail"),
     "not_packet": ("Bytes that are not a packet", "Everything the device sends is a packet the protocol reads — a broken sentence, a packet cut off, stray bytes are not.", "fail"),
-    "checksum": ("Checksum", "The two hex digits after * are the XOR of every byte from $ up to the *.", "fail"),
+    "checksum": ("Checksum", "The two hex digits after * are the XOR of the bytes the sheet names — by default the "
+                 "standard's: every byte between $ and *, both left out.", "fail"),
     "field_count": ("Field count", "As many fields as the sheet lists for the packet.", "fail"),
     "unknown_packet": ("Packet in the sheet", "A header the sheet does not describe.", "fail"),
     "consistency": ("Fields agree with each other", "What a packet says in one field agrees with another — a main-power-disconnect packet says main power 0, a fix has at least 3 satellites…", "fail"),
@@ -56,7 +57,7 @@ LEVELS = {"pass": 0, "warn": 1, "fail": 2}
 # where each check's rule comes from — so a developer sees which document says so
 CHECK_SOURCE = {
     "framing": "AIS-140 standard: $…*CC, one sentence per line (CR LF)",
-    "checksum": "The XOR the device's own live packets carry — neither the sheet nor the standard names the algorithm",
+    "checksum": "Standard practice (NMEA 0183), set in the device's spec — AIS-140 calls the checksum optional and names no algorithm",
     "field_count": "The device's sheet: its field list (or the format set in Configuration)",
     "unknown_packet": "The device's sheet: its packet types",
     "not_packet": "AIS-140 standard: everything sent is a $…* sentence",
@@ -77,6 +78,9 @@ CHECK_SOURCE = {
     "interval": "The device's configuration, as given; margins as Log analysis's",
 }
 # the fields whose values a test should see change — what has not been exercised yet is said
+# a packet sent late: history (H), or an emergency packet stored (SP) — an emergency packet's live one is NM
+HISTORY = ("H", "SP")
+
 WATCH = ("heading_deg", "digital_input_status", "digital_output_status", "analog_input_1", "analog_input_2",
          "emergency_status", "tamper_alert", "main_power_status", "gsm_signal", "gps_fix", "satellites")
 
@@ -166,6 +170,8 @@ class Gate:
         self.headers: Counter = Counter()
         self.status: Counter = Counter()
         self.checksum = Counter()
+        # the bytes the XOR covers: the spec's checksum "over" (the standard's, between $ and *, by default)
+        self.xor_from, self.xor_words = XOR_OVER[spec.checksum.get("over", "between")]
         self.firmware: dict[str, int] = {}
         self.devices: dict[str, int] = {}
         self._frames: dict[int, tuple[int, int]] = {}
@@ -252,7 +258,7 @@ class Gate:
                 self.checksum["missing"] += 1
                 flag("checksum", "no checksum after *", expected="2 hex digits", got="(none)", why="missing")
             else:
-                want = f"{xor(raw[:star]):02X}"
+                want = f"{xor(raw[self.xor_from:star]):02X}"
                 if sent.upper() == want:
                     self.checksum["ok"] += 1
                 else:
@@ -301,6 +307,8 @@ class Gate:
             flag("ignition_alert", f"{ptype} with ignition {vals['ignition']}", expected=want_ign, got=vals["ignition"])
 
         dt = device_time(vals.get("date"), vals.get("time"))
+        if dt is None and len(vals.get("date_time") or "") == 14:      # an emergency packet's: DDMMYYYYhhmmss
+            dt = device_time(vals["date_time"][:8], vals["date_time"][8:])
         if dt and received is not None and dt.timestamp() > received + spec.settings["future_tolerance_s"]:
             flag("future_time", f"carries {_iso(dt)}, {round(dt.timestamp() - received)} s after it reached Runway")
 
@@ -351,7 +359,7 @@ class Gate:
                 self._times[(kind, dt)] = (n, hash(raw), status, data)
             elif seen[1] != hash(raw):                    # the same packet again is a resend (frame_repeat)
                 pn, _, pstatus, pdata = seen
-                if {pstatus, status} == {"L", "H"} and pdata == data:
+                if {pstatus, status} in ({"L", "H"}, {"NM", "SP"}) and pdata == data:     # live, then history
                     flag("time_repeat", f"{_iso(dt)}: sent live as #{pn}, and again as history", level="warn", why="resent")
                 elif pdata == data:
                     flag("time_repeat", f"{_iso(dt)}, as #{pn}: the same data again, only the frame number differs "
@@ -520,6 +528,8 @@ class Gate:
                 c = checks.get(f["key"])
                 if c is None:
                     about = CHECKS.get(f["check"], ("", ""))[1] if f["check"] != "field" else self._field_about(r["header"], f["field"])
+                    if f["check"] == "checksum":                 # the span this device's sheet sets
+                        about = f"The two hex digits after * are the XOR of {self.xor_words}."
                     src = CHECK_SOURCE.get(f["check"], "") if f["check"] != "field" else self._field_source(r["header"], f["field"])
                     if f.get("was"):
                         about += f" A warning for the {self.spec.name} (its spec's levels); a test-plan case that names it still fails on it."
@@ -535,18 +545,31 @@ class Gate:
         return sorted(checks.values(), key=lambda c: (-LEVELS[c["level"]], -c["packets"]))
 
     def _checksum_hint(self, raw: bytes, star: int, sent: str, vals: dict) -> tuple[str, str]:
-        """Why a checksum is wrong, when it can be told: (why, the words for the flag)."""
-        if f"{xor(raw[:star + 1]):02X}" == sent.upper():
-            return "star_included", "; it matches only with the * included"
+        """Why a checksum is wrong, when it can be told: (why, the words for the flag). Tried: the XOR over
+        another span than the sheet's — the '$' taken in or left out, the '*' taken in — and, for a history
+        packet, the checksum it had live (over either span: two faults at once still read as the history one)."""
+        s, sent = self.xor_from, sent.upper()
+        other = 1 - s
+        dollar = ("dollar_included", "the $ included") if s else ("dollar_left_out", "the $ left out")
+        spans = [((other, star), *dollar), ((s, star + 1), "star_included", "the * included")]
+        if s:
+            spans.append(((0, star + 1), "dollar_star_included", "the $ and the * included"))
         # a history packet whose checksum is still the one it had live: rewrite status and alert back
         m = self.spec.status_by_alert.get(vals.get("packet_type") or "") or {}
-        live_alert = next((a for a, s in m.items() if s == "L"), None)
+        live_alert = next((a for a, st in m.items() if st == "L"), None)
         if vals.get("packet_status") == "H" and live_alert and vals.get("alert_id"):
             width = len(vals["alert_id"])
             before = f",{vals['alert_id']},H,".encode()
             after = f",{live_alert.zfill(width)},L,".encode()
-            if before in raw[:star] and f"{xor(raw[:star].replace(before, after, 1)):02X}" == sent.upper():
-                return "kept_live", f"; it is the checksum of this packet live ({live_alert.zfill(width)}, L), not as history"
+            if before in raw[:star]:
+                as_live = raw[:star].replace(before, after, 1)
+                for start, also in ((s, ""), (other, f", worked out with {dollar[1]}")):
+                    if f"{xor(as_live[start:]):02X}" == sent:
+                        return "kept_live", (f"; it is the checksum of this packet live ({live_alert.zfill(width)}, L), "
+                                             f"not as history{also}")
+        for (a, b), why, words in spans:
+            if f"{xor(raw[a:b]):02X}" == sent:
+                return why, f"; it matches only with {words}"
         return "other", ""
 
     def _field_source(self, header: str, name: str) -> str:
@@ -578,6 +601,7 @@ class Gate:
         return {
             "spec": self.spec.name, "packets": len(rows), "failed": failed, "warned": warned,
             "passed": len(rows) - failed, "live": self.status.get("L", 0), "history": self.status.get("H", 0),
+            "late": sum(self.status.get(s, 0) for s in HISTORY),       # every packet sent late, SP with H
             "headers": dict(self.headers), "checksum": dict(self.checksum),
             "checks": checks, "scenarios": scen, "scenarios_seen": seen, "scenarios_total": len(scen),
             "verdict": verdict, "firmware": self.firmware, "devices": self.devices,
@@ -586,9 +610,16 @@ class Gate:
         }
 
     def packets(self, level: str = "", check: str = "", scenario: str = "", offset: int = 0, limit: int = 100,
-                newest_first: bool = True) -> dict:
+                newest_first: bool = True, status: str = "") -> dict:
+        """The packets of a set, newest first. ``status``: ``live`` — every packet but history (a login, a
+        health packet or bytes that are no packet were sent as they happened too); ``history`` — only that,
+        an emergency packet stored (SP) with it."""
         self._derive()
         rows = self.rows
+        if status == "live":
+            rows = [r for r in rows if r["status"] not in HISTORY]
+        elif status == "history":
+            rows = [r for r in rows if r["status"] in HISTORY]
         if level == "fail":
             rows = [r for r in rows if r["level"] == "fail"]
         elif level == "warn":

@@ -6,7 +6,8 @@
 
   "checksum": {
     "algorithm": "xor",
-    "about": "Two hex digits after '*': the XOR of every byte from '$' up to, not including, '*' — what the device's live PVT packets carry."
+    "over": "between",
+    "about": "Two hex digits after '*': the XOR of every byte between '$' and '*', both left out. The standard practice (NMEA 0183); AIS-140 calls the checksum optional and names no algorithm."
   },
   "terminator": "\r\n",
 

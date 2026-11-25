@@ -54,7 +54,8 @@ def log_of(records: list[dict], device: str = "") -> tuple[DriveLog, list]:
              "ign": None if ign is None else int(bool(ign)),
              "supply": None if rec.get("external_v") is None else rec["external_v"] * 1000,     # mV, as the export
              "ibatt_v": rec.get("battery_v"), "alt": rec.get("altitude_m"),
-             "history": status == "H" if status in ("L", "H") else None,
+             # live or history: AIS-140's L / H, and an emergency packet's NM (normal) / SP (stored)
+             "history": True if status in ("H", "SP") else False if status in ("L", "NM") else None,
              "firmware": io.get("firmware_version") or "", "seq": rec.get("seq")}
         r["meta"] = {k: v for k, v in (("AISPacketType", status if status in ("L", "H") else None),
                                        ("frameNumber", _txt(io.get("frame_number")))) if v}

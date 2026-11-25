@@ -1,6 +1,6 @@
 @echo off
 REM Double-click this file (or run it) to start the Runway server.
-REM It opens the dashboard + packet parser on http://127.0.0.1:8080
+REM It opens the dashboard + packet parser on http://127.0.0.1:8180 (a release keeps 8080)
 REM
 REM The server always runs from the repo-local .venv (created on first run), never from
 REM whatever "python" happens to be first on PATH — this machine has several Pythons and
@@ -23,8 +23,8 @@ if errorlevel 1 (
 )
 
 echo Starting Runway server...  (close this window or press Ctrl+C to stop)
-echo Dashboard: http://127.0.0.1:8080
-echo Parser:    http://127.0.0.1:8080/parser.html
+echo Dashboard: http://127.0.0.1:8180
+echo Parser:    http://127.0.0.1:8180/parser.html
 ".venv\Scripts\python.exe" main.py
 pause
 exit /b 0

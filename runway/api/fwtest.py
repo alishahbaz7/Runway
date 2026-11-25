@@ -6,7 +6,9 @@
     POST   /api/fwtest/runs                    a live run: {spec, port, device, expect, title}
     POST   /api/fwtest/runs/file               a run over a capture (multipart "file", spec, device, expect_*)
     GET    /api/fwtest/runs/{id}               one run: its summary, checks, scenarios, where it listens
-    GET    /api/fwtest/runs/{id}/packets       its packets, newest first (level=, check=, scenario=, offset=, limit=)
+    GET    /api/fwtest/runs/{id}/packets       its packets, newest first (level=, check=, scenario=, status=live|history,
+                                               offset=, limit=)
+    GET    /api/fwtest/runs/{id}/track         its packets on the map: read as a drive log and analysed as one is
     GET    /api/fwtest/runs/{id}/packets/{n}   one packet, field by field
     PUT    /api/fwtest/runs/{id}/config        the device's settings (intervals, history order, format) or the
                                                values pinned, corrected: the test is judged again from its packets
@@ -242,10 +244,38 @@ async def fwtest_run(rid: str):
 
 @router.get("/api/fwtest/runs/{rid}/packets")
 async def fwtest_packets(rid: str, level: str = "", check: str = "", scenario: str = "",
+                         status: str = Query("", pattern="^(|live|history)$"),
                          offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
     run = _run(rid)
     with run.lock:
-        return run.gate.packets(level, check, scenario, offset, limit)
+        return run.gate.packets(level, check, scenario, offset, limit, status=status)
+
+
+_track_cache: dict[str, tuple] = {}     # run id → (packets, settings, the track)
+
+
+@router.get("/api/fwtest/runs/{rid}/track")
+async def fwtest_track(rid: str):
+    """The test's packets on the map: read as a drive log and analysed by the one ``analyse`` — the track,
+    trips, data lost, asleep, stale positions, jumps, duplicates — every packet with a device time on it.
+    ``seqs[k]`` is row k's packet number. Worked out again only when packets came or the settings changed."""
+    from ..fwtest import maptrack
+    from .analysis import _profiles, _settings
+    run = _run(rid)
+    settings, profiles = _settings(), _profiles()
+    key_s = repr(sorted(settings.items()))
+    with run.lock:
+        n = len(run.gate.rows)
+        hit = _track_cache.get(rid)
+        if hit and hit[0] == n and hit[1] == key_s:
+            return hit[2]
+        rows = list(run.gate.rows)                       # the rows are only appended to: a copy is the test so far
+        device = run.meta.get("device") or next(iter(run.gate.devices), "")
+    t = await asyncio.to_thread(maptrack.track, rows, device, settings, profiles)
+    if len(_track_cache) > 20:
+        _track_cache.clear()
+    _track_cache[rid] = (n, key_s, t)
+    return t
 
 
 @router.get("/api/fwtest/runs/{rid}/packets/{n}")

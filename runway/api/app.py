@@ -658,6 +658,7 @@ async def health(probe: bool = False):
         "version": __version__,
         "code_version": _code_version(),
         "branch": install_mod.branch(),          # a run from source: the banner shows this, not the version
+        "channel": install_mod.CHANNEL,          # release or dev: a start defers only to a copy of its own kind
         # main.py asks these before starting: the copy here is the latest only if it is this checkout's
         # and no source file changed after it started (else it stops it and starts the latest)
         "started": _SERVER_STARTED,

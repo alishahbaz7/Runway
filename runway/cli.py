@@ -1,6 +1,6 @@
 """Runway command-line interface.
 
-    runway serve                    # launch dashboard + API (default :8080)
+    runway serve                    # launch dashboard + API (a release :8080, from source :8180)
     runway replay capture.log --codec gt06
     runway listen --codec teltonika --port 5050
     runway codecs                   # list available protocol codecs
@@ -114,13 +114,17 @@ def _code_changed_at() -> float:
     return newest
 
 
-def _is_latest(h: dict) -> bool:
-    """The copy answering runs this checkout's code as it is now: started from here, after the last change."""
+def _same_checkout(h: dict) -> bool:
+    """The copy answering runs from this checkout (a release has no root)."""
     import os
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return bool(h.get("root")) and os.path.normcase(h["root"]) == os.path.normcase(here) \
-        and (h.get("started") or 0) >= _code_changed_at()
+    return bool(h.get("root")) and os.path.normcase(h["root"]) == os.path.normcase(here)
+
+
+def _is_latest(h: dict) -> bool:
+    """The copy answering runs this checkout's code as it is now: started from here, after the last change."""
+    return _same_checkout(h) and (h.get("started") or 0) >= _code_changed_at()
 
 
 def _listeners_of(url: str) -> list[dict]:
@@ -315,6 +319,8 @@ def _serve(args) -> None:
 
     from . import desktop, install
 
+    if args.port is None:                     # the release on 8080, a copy from source on 8180: side by side
+        args.port = install.default_port()
     # how this server was started — a restart into a new version serves on the same address
     install.SERVE_ARGS[:] = ["serve", "--host", args.host, "--port", str(args.port)] + \
         (["--no-browser"] if getattr(args, "no_browser", False) else [])
@@ -324,7 +330,29 @@ def _serve(args) -> None:
     url = f"http://{host}:{args.port}"
 
     carried: list[dict] = []
+    if getattr(args, "take_over", False) and not getattr(args, "wait_port", 0):
+        # this checkout's own copy on another kind's port (it served 8080 before 1.1.29): moved here,
+        # its listeners with it — a release, or another checkout, there is never touched
+        for port in sorted(set(install.PORTS.values()) - {args.port}):
+            other = f"http://{host}:{port}"
+            h = _health(other)
+            if h and _same_checkout(h):
+                print(f"Runway from this checkout is running at {other}: moving it to {url}")
+                carried = _listeners_of(other)
+                if not _stop_copy(other, args.host, port):
+                    print(f"Runway at {other} did not stop within {TAKE_OVER_WAIT_S} s — close it and start again")
+                    raise SystemExit(1)
     there = None if getattr(args, "wait_port", 0) else _health(url)
+    if there and not getattr(args, "take_over", False) and install.channel_of(there) != install.CHANNEL:
+        # the other kind of copy holds this port (a release here while a copy from source starts, or the
+        # other way round): never show that one in this one's place — say so
+        other_kind = "a copy run from source" if install.channel_of(there) == "dev" else "the release"
+        text = (f"Port {args.port} is in use by {other_kind} of Runway, so this one cannot start there.\n\n"
+                f"Start it on another port (serve --port {install.default_port()}), or close the other copy.")
+        if install.FROZEN:
+            desktop.message_box(text, "Runway", desktop.MB_OK | desktop.MB_ICONERROR)
+        print(text)
+        raise SystemExit(1)
     if getattr(args, "wait_port", 0):
         _wait_for_port(args.host, args.port, args.wait_port)       # a restart into a new version
     elif there and getattr(args, "take_over", False) and not _is_latest(there):
@@ -332,7 +360,7 @@ def _serve(args) -> None:
         # release, or another checkout): stop it, start this one, and carry its listeners over
         what = f"branch {there['branch']}" if there.get("branch") else f"version {there.get('version')}"
         print(f"Runway ({what}) is running at {url} on older code: stopping it to start the latest")
-        carried = _listeners_of(url)
+        carried += _listeners_of(url)
         if not _stop_copy(url, args.host, args.port):
             print(f"Runway at {url} did not stop within {TAKE_OVER_WAIT_S} s — close it and start again")
             raise SystemExit(1)
@@ -430,7 +458,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("serve", help="run the web dashboard + API")
     s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--port", type=int, default=8080)
+    s.add_argument("--port", type=int, default=None,
+                   help="default: 8080 for a release, 8180 run from source — the two run side by side")
     s.add_argument("--reload", action="store_true", help="auto-reload (dev)")
     s.add_argument("--no-browser", action="store_true",
                    help="don't auto-open the dashboard in a browser")

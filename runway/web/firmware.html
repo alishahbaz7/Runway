@@ -4,7 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Runway · Firmware test</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="trackmap.css" />
   <link rel="stylesheet" href="firmware.css" />
 </head>
 <body data-page="firmware">
@@ -190,6 +192,7 @@
         </div>
         <div class="fw-rail-tabs" role="tablist" aria-label="Side panels">
           <button class="fw-rail-tab" type="button" role="tab" data-rail="live" data-tip="The device's packets as they land on the listener, newest first — each with its result; a click opens it"><span data-icon="record"></span><span>Live</span><b class="fw-rail-live" id="fw-rail-live"></b></button>
+          <button class="fw-rail-tab" type="button" role="tab" data-rail="map" data-tip="The test's packets on the map as they land — its trips, data lost, stale positions and jumps, as Log analysis draws a log; a click on the track shows its packet"><span data-icon="map"></span><span>Map</span></button>
           <button class="fw-rail-tab" type="button" role="tab" data-rail="score" data-tip="The test plan of this firmware version at a glance — how far it has got, what passes and fails, by category"><span data-icon="check"></span><span>Scorecard</span></button>
           <button class="fw-rail-tab" type="button" role="tab" data-rail="defects" data-tip="What is wrong, why, where in the firmware, and how to fix it — fix first what explains most"><span data-icon="alert"></span><span>Defects</span><b class="fw-rail-n" id="fw-rail-dn"></b></button>
           <button class="fw-rail-tab" type="button" role="tab" data-rail="insight" data-tip="What the test has found, worst first — each opens its packets"><span data-icon="info"></span><span>Insights</span><b class="fw-rail-n" id="fw-rail-n"></b></button>
@@ -310,7 +313,9 @@
   </dialog>
 
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="shell.js"></script>
+  <script src="trackmap.js"></script>
   <script src="firmware.js"></script>
 </body>
 </html>
