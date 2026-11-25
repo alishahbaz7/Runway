@@ -17,6 +17,7 @@ CONFIG = {"ign_on_s": 10, "ign_off_s": 60, "sleep_after_min": 10, "sleep_s": 600
 FAULTS = {
     "kept_live": "history packets keep the checksum of their live version",
     "login_star": "the login's checksum is worked out over the '*' too",
+    "pvt_dollar": "the PVT's checksum is worked out from the '$' (V7.06.11)",
     "hel_no_cs": "the health packet has no checksum",
     "fields51": "a 51st field before the OTA response",
     "short_date": "some history packets carry DDMMYY",
@@ -66,9 +67,10 @@ class Device:
     def emit(self, raw: bytes, received: float, skipped=False):
         self.events.append((raw, received, self.conn, skipped))
 
-    def frame_of(self, body: str, star: bool = False, cs: bool = True) -> bytes:
+    def frame_of(self, body: str, star: bool = False, cs: bool = True, dollar: bool = False) -> bytes:
+        """$body*CC — CC the XOR of the bytes between '$' and '*' (the standard); a fault takes in the '*' or the '$'."""
         raw = ("$" + body).encode()
-        tail = f"{xor(raw + (b'*' if star else b'')):02X}" if cs else ""
+        tail = f"{xor(raw[0 if dollar else 1:] + (b'*' if star else b'')):02X}" if cs else ""
         return raw + b"*" + tail.encode() + b"\r\n"
 
     def connect(self, at: float):
@@ -113,11 +115,12 @@ class Device:
             fields.append("()")
             return ",".join(fields)
 
+        dollar = "pvt_dollar" in self.f
         if not live and "kept_live" in self.f:
-            live_raw = ("$" + body("L", "01")).encode()
-            raw = ("$" + body(st, alert)).encode() + b"*" + f"{xor(live_raw):02X}".encode() + b"\r\n"
+            live_cs = self.frame_of(body("L", "01"), dollar=dollar).split(b"*")[1]
+            raw = ("$" + body(st, alert)).encode() + b"*" + live_cs
         else:
-            raw = self.frame_of(body(st, alert))
+            raw = self.frame_of(body(st, alert), dollar=dollar)
         if live:
             self.emit(raw, at + (3600 if ("stale_live" in self.f and frame == 15) else 1))
         else:

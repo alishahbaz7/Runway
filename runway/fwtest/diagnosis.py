@@ -3,7 +3,7 @@
 Every kind of failure has a diagnosis (``DIAG``): the firmware area it most likely sits in, how severe
 it is, the likely cause, where to look, the fix, how to verify it, and what it costs if shipped. Where
 Runway tests the cause itself — the checksum of a history packet matches its live version; the XOR
-matches with the '*' included — the cause is *proved*, not likely.
+matches over another span, the '$' or the '*' taken in — the cause is *proved*, not likely.
 
     defects(gate, plan=None) -> {"defects": [...], "fix_first": {...}, "areas": {...}}
 
@@ -33,12 +33,30 @@ DIAG: dict[tuple[str, str | None], dict] = {
         where="Where a buffered packet's status and alert ID are set for history, before it is sent.",
         fix="Work out the XOR again after setting the packet status and alert ID for history.",
         impact="A server that validates checksums drops every history packet — the data buffered while offline is lost."),
+    ("checksum", "dollar_included"): dict(
+        area="builder", severity="critical", proved=True,
+        cause="The XOR starts one byte too early: it takes in the '$'. The standard practice (NMEA 0183) XORs only the bytes between '$' and '*'. Runway worked the XOR out with the '$' included and it matched.",
+        where="The checksum routine for this packet type — its loop start.",
+        fix="Start the XOR at the byte after '$' and end it at the byte before '*'.",
+        impact="A server that validates checksums the standard way rejects every such packet."),
+    ("checksum", "dollar_left_out"): dict(
+        area="builder", severity="critical", proved=True,
+        cause="The XOR leaves out the '$', which this device's sheet takes in. Runway worked the XOR out without the '$' and it matched.",
+        where="The checksum routine for this packet type — its loop start.",
+        fix="Start the XOR at the '$', as the sheet says.",
+        impact="A server that validates checksums as the sheet says rejects the packet."),
     ("checksum", "star_included"): dict(
         area="builder", severity="critical", proved=True,
         cause="The XOR runs one byte too far: it takes in the '*'. Runway worked the XOR out with the '*' included and it matched.",
         where="The checksum routine for this packet type — its loop end.",
-        fix="End the XOR at the byte before '*', as the other packets do.",
+        fix="End the XOR at the byte before '*'.",
         impact="A server that validates checksums rejects the packet — for the login, the whole session."),
+    ("checksum", "dollar_star_included"): dict(
+        area="builder", severity="critical", proved=True,
+        cause="The XOR covers the '$' and the '*' too: it starts one byte early and ends one byte late. Runway worked the XOR out with both included and it matched.",
+        where="The checksum routine for this packet type — its loop start and end.",
+        fix="Start the XOR at the byte after '$' and end it at the byte before '*'.",
+        impact="A server that validates checksums rejects the packet."),
     ("checksum", "missing"): dict(
         area="builder", severity="major", proved=True,
         cause="Nothing is written after the '*' for this packet type.",
@@ -48,7 +66,7 @@ DIAG: dict[tuple[str, str | None], dict] = {
         area="builder", severity="critical", proved=False,
         cause="The checksum does not match the packet: the packet is changed after its checksum is worked out, or the XOR covers another span.",
         where="The checksum routine, and anything that edits a packet after it.",
-        fix="Work the XOR out last, over every byte from '$' up to '*'.", impact="A server that validates checksums rejects the packet."),
+        fix="Work the XOR out last, over the bytes the sheet names (the standard: between '$' and '*').", impact="A server that validates checksums rejects the packet."),
     ("field_count", None): dict(
         area="builder", severity="critical", proved=True,
         cause="The packet has another number of fields than the sheet: a parser that follows the sheet reads every field after the difference wrongly.",

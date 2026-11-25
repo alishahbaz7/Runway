@@ -18,6 +18,13 @@ from collections import Counter
 
 ORDER = {"fail": 0, "warn": 1, "info": 2, "ok": 3}
 SILENT_S = 300                     # a live test with no packet for this long says so
+# a checksum worked out over another span than the sheet's (the gate's why) → what the firmware does
+SPAN_WORDS = {
+    "dollar_included": "the XOR is worked out from the $, which the standard leaves out",
+    "dollar_left_out": "the XOR leaves out the $, which this device's sheet takes in",
+    "star_included": "the XOR is worked out over the * too",
+    "dollar_star_included": "the XOR is worked out over the $ and the * too",
+}
 
 
 def _n(x: int, one: str, many: str | None = None) -> str:
@@ -82,9 +89,9 @@ def insights(gate, live: bool = False, now: float | None = None) -> list[dict]:
             if c["kept_live"]:
                 bad.append(f"Wrong on {every} {name}{plural}{count}: each keeps the checksum it had "
                            f"live — the firmware marks it history without working it out again.")
-            elif c["star_included"]:
-                bad.append(f"Wrong on {'the' if total == 1 else every} {name}: it is worked out over the * too, "
-                           f"which the other packets leave out.")
+            elif (span := next((k for k in SPAN_WORDS if c[k]), None)):
+                lead = f"the {name}" if total == 1 else f"{every} {name}{plural}{count}"
+                bad.append(f"Wrong on {lead}: {SPAN_WORDS[span]}.")
             elif c["missing"]:
                 bad.append(f"Missing on {'the' if total == 1 else every} {name}: nothing after the *.")
             else:

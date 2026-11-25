@@ -240,14 +240,25 @@ def color_title_bars(background: str, text: str, dark: bool) -> int:
     return done
 
 
-def focus_window() -> bool:
-    """Brings an open Runway window to the front; False when there is none."""
-    wins = runway_windows()
+def focus_window(profile_dir: str | None = None) -> bool:
+    """Brings an open Runway window to the front; False when there is none. With profile_dir, only
+    this copy's own window (a release beside a copy from source: each brings its own forward)."""
+    wins = runway_windows(app_only=bool(profile_dir))
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32 if wins else None
+    if wins and profile_dir:
+        found = window_process(profile_dir)
+        mine = []
+        for hwnd in wins:
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(owner))
+            if found and owner.value == found[0]:
+                mine.append(hwnd)
+        wins = mine
     if not wins:
         return False
-    import ctypes
-
-    user32 = ctypes.windll.user32
     hwnd = wins[0]
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, 9)                 # SW_RESTORE
@@ -259,7 +270,7 @@ def focus_window() -> bool:
 
 def show(url: str, **window) -> None:
     """Runway's window to the front, or a new one (window: open_app_window's options)."""
-    if not focus_window():
+    if not focus_window(window.get("profile_dir")):
         open_app_window(url, **window)
 
 

@@ -52,7 +52,8 @@ And **Firmware test**: point a device on a new firmware at a Runway listener (it
 platform carries on) or drop in a capture, and every packet is held against the device's sheet —
 framing and checksum, every field's format, the order of packets (login first, frame numbers, live
 and history times, alerts) — with the scenarios the bench has exercised and an Excel report to sign
-the release off with. Ships with the Locate 140 4G's sheet; another device is another spec file.
+the release off with. Beside it, the packets as they land (all, or live only) and the test's track on
+the map. Ships with the Locate 140 4G's sheet; another device is another spec file.
 
 Plus a **Converter** (CanPlus vehicle `*.Config.XML` → JSON/DBC), a **Protocols** repository
 for shareable/transferable parser files, and a standalone **`Runway-v<version>.exe`** build
@@ -72,9 +73,13 @@ pip install -e ".[dev]"
 runway replay tests/fixtures/nmea_sample.log --codec nmea
 runway codecs                      # list available protocol codecs
 
-# 3. Launch the dashboard (then open http://127.0.0.1:8080)
+# 3. Launch the dashboard (then open http://127.0.0.1:8180)
 runway serve
 ```
+
+Run from source, Runway serves on **8180**; the release (`Runway.exe`) serves on **8080**. Each keeps
+its own data folder and window, so the release you use every day and a development copy run side by
+side. `--port` picks another.
 
 In the dashboard you can upload a log, pick a codec (or *auto-detect*), watch packets
 stream onto the map, and click any packet to inspect its raw bytes and decoded fields.

@@ -6,8 +6,9 @@
  *   a test    its verdict and state, tiles (packets, failed, warnings, checksum, scenarios), the checks
  *             (one row per kind of deviation, worst first), the scenarios (received, passed, failed),
  *             and every packet — a tile, a check, a scenario or an insight shows its packets
- *   rail      bookmark tabs on the right edge: Insights (what the test found, in words, worst first)
- *             and Packet (the one clicked in the list, field by field) — folded at first
+ *   rail      bookmark tabs on the right edge, folded at first: Live (the packets as they land — all, or
+ *             live only), Map (the test's track, as Log analysis draws a log), Scorecard, Defects, Insights
+ *             (what the test found, in words, worst first) and Packet (the one clicked, field by field)
  *
  * A live test takes packets from the listener on its port (the device keeps relaying to its platform)
  * and the page polls the test on screen; a file test is judged once. All of it from /api/fwtest/….
@@ -72,6 +73,10 @@
   const whenEpoch = (s) => (s ? fmtShort(new Date(s * 1000)) : "");
   const whenUtc = (s) => (s ? fmtShort(new Date(s.replace(" ", "T") + "Z")) : "");
   const num = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
+  // live or history: AIS-140's L / H, and an emergency packet's NM (normal) / SP (stored) — as the gate reads it
+  const LATE = { L: false, NM: false, H: true, SP: true };
+  const isLate = (s) => LATE[s] === true;
+  const liveWord = (s) => (LATE[s] === false ? "Live" : LATE[s] === true ? "History" : s || "");
   const runOf = (id) => runs.find((r) => r.id === id);
   const devOf = (v) => v.device || Object.keys((v.summary && v.summary.devices) || {})[0] || v.title;
 
@@ -249,6 +254,7 @@
       renderRun();
       coach(v);
       if (grew && railTab === "live") loadLive().catch(() => {});
+      if (grew && railTab === "map") wantTrack();
       $("fw-rail-live").classList.toggle("on", v.state === "live" && !!v.listening);
       if (grew && polls % 2 === 0) loadTimeline().catch(() => {});
       if (grew && polls % 4 === 0) loadDefects();
@@ -425,7 +431,7 @@
     tr.appendChild(el("td", "", whenEpoch(r.received)));
     tr.appendChild(el("td", "", whenUtc(r.time)));
     tr.appendChild(el("td", "mono", [r.header, r.type, r.alert].filter(Boolean).join(" ")));
-    tr.appendChild(el("td", "", r.status === "L" ? "Live" : r.status === "H" ? "History" : (r.status || "")));
+    tr.appendChild(el("td", "", liveWord(r.status)));
     tr.appendChild(el("td", "num mono", r.frame || ""));
     const [w, t] = LEVEL[r.level];
     const res = el("td", "c-res");
@@ -452,7 +458,7 @@
   }
 
   // ── the side rail ──────────────────────────────────────────────────────────────────────────
-  const RAIL = { live: "Live packets", score: "Scorecard", defects: "Defects", insight: "Insights", packet: "Packet" };
+  const RAIL = { live: "Live packets", map: "Map", score: "Scorecard", defects: "Defects", insight: "Insights", packet: "Packet" };
 
   function renderRail() {
     const rail = $("fw-rail");
@@ -470,9 +476,15 @@
     $("fw-rail-title").textContent = RAIL[railTab];
     const body = $("fw-rail-body");
     const place = (cur && cur.id) + ":" + railTab + (railTab === "packet" ? ":" + pkOpen : "");
+    body.classList.toggle("is-map", railTab === "map");
+    if (railTab === "map" && body.dataset.place === place && mapPane && mapPane.parentNode === body) {
+      mapShown();                    // the map stays as the reader left it: a poll's redraw never rebuilds it
+      return;
+    }
     const keep = body.dataset.place === place ? body.scrollTop : 0;     // a poll's redraw keeps the reader's place
     body.textContent = "";
     if (railTab === "live") renderLive(body);
+    else if (railTab === "map") renderMap(body);
     else if (railTab === "insight") renderInsights(body);
     else if (railTab === "score") renderScore(body);
     else if (railTab === "defects") renderDefects(body);
@@ -488,15 +500,18 @@
   let liveFresh = 0;           // the newest packet before the last load — those after it are new
   let liveFlashed = new Set(); // new packets already flashed: the rail redraws on every poll
   let livePaused = false;
+  const LIVE_SHOW_KEY = "runway.fwtest.liveshow";
+  let liveShow = store.get(LIVE_SHOW_KEY) === "live" ? "live" : "all";   // all, or live only: every packet but history
 
   async function loadLive(force) {
     if (!cur || (livePaused && !force)) return;
-    const key = cur.id + ":" + cur.summary.packets;
+    const key = cur.id + ":" + cur.summary.packets + ":" + liveShow;
     if (key === liveKey && !force) return;
-    const d = await api(`/api/fwtest/runs/${encodeURIComponent(cur.id)}/packets?limit=${LIVE_N}`);
+    const d = await api(`/api/fwtest/runs/${encodeURIComponent(cur.id)}/packets?limit=${LIVE_N}` +
+                        (liveShow === "live" ? "&status=live" : ""));
     if (!cur || !key.startsWith(cur.id + ":")) return;
-    const same = liveKey.startsWith(cur.id + ":");
-    liveFresh = same && liveRows.length ? liveRows[0].n : 0;     // the first load of a test flashes nothing
+    const same = liveKey.startsWith(cur.id + ":") && liveKey.endsWith(":" + liveShow);
+    liveFresh = same && liveRows.length ? liveRows[0].n : 0;     // the first load of a test or a set flashes nothing
     liveFlashed = new Set();
     liveKey = key;
     liveRows = d.rows;
@@ -516,7 +531,30 @@
     bar.appendChild(dot);
     bar.appendChild(el("span", "fw-live-t", livePaused ? "Paused" : live ? "Landing as it comes" : "The last packets"));
     bar.appendChild(el("span", "spacer"));
-    bar.appendChild(el("span", "ui-count", `${num(cur.summary.packets)} in all`));
+    // all, or live only — each with how many: the live ones are every packet but history
+    const seg = el("div", "tcp-seg fw-live-seg");
+    seg.setAttribute("role", "tablist");
+    seg.setAttribute("aria-label", "Packets shown");
+    const hist = cur.summary.late != null ? cur.summary.late : cur.summary.history || 0;
+    for (const [id, label, n, tip] of [
+      ["all", "All", cur.summary.packets, "Every packet, history included"],
+      ["live", "Live", cur.summary.packets - hist, "Every packet but history — what the device sends as it happens"]]) {
+      const b = el("button", "seg" + (liveShow === id ? " on" : ""));
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(liveShow === id));
+      b.dataset.tip = tip;
+      b.appendChild(document.createTextNode(label + " "));
+      b.appendChild(el("span", "fw-live-n", num(n)));
+      b.addEventListener("click", () => {
+        if (liveShow === id) return;
+        liveShow = id;
+        store.set(LIVE_SHOW_KEY, id);
+        loadLive(true).catch(() => {});
+      });
+      seg.appendChild(b);
+    }
+    bar.appendChild(seg);
     if (live) {
       const pb = el("button", "ghost mini");
       pb.type = "button";
@@ -527,7 +565,7 @@
     }
     body.appendChild(bar);
     if (!liveRows.length) {
-      body.appendChild(el("div", "fw-none", "No packet yet"));
+      body.appendChild(el("div", "fw-none", liveShow === "live" && cur.summary.packets ? "No live packet yet" : "No packet yet"));
       return;
     }
     const ul = el("ul", "fw-live");
@@ -538,7 +576,7 @@
       const top = el("div", "fw-live-top");
       top.appendChild(el("span", "fw-live-time", whenEpoch(r.received)));
       top.appendChild(el("span", "fw-live-kind mono", [r.header, r.type, r.alert].filter(Boolean).join(" ")));
-      if (r.status) top.appendChild(el("span", "ui-pill sm " + (r.status === "L" ? "ok" : "info"), r.status === "L" ? "Live" : "History"));
+      if (r.status) top.appendChild(el("span", "ui-pill sm " + (isLate(r.status) ? "info" : "ok"), liveWord(r.status)));
       if (r.frame) top.appendChild(el("span", "fw-live-frame mono", "#" + r.frame));
       const [w, t] = LEVEL[r.level];
       top.appendChild(el("span", "ui-pill sm " + t, w));
@@ -552,6 +590,183 @@
       ul.appendChild(li);
     }
     body.appendChild(ul);
+  }
+
+  // ── the map: the test's packets on Log analysis's map, as they land ─────────────────────────────
+  // The server reads the packets as a drive log and runs the one analyse (/api/fwtest/runs/{id}/track) —
+  // trips, data lost, asleep, stale positions, jumps, every packet with a device time — so the map is the
+  // Dashboard's and Log analysis's. It is made once and kept: the rail's redraw moves it back in. A point
+  // picked on it shows its packet under the map; a click on that opens it field by field.
+  let mapPane = null;
+  let tm = null;
+  let mapPick = null;
+  let trk = null;              // { id, n, data } — the track drawn: the test, its packets then, the analysis
+  let trkBusy = false;
+  let trkAt = 0;
+  let trkTimer = null;
+  let picked = null;           // { n, row } a packet, or { gap } a stretch — what the card under the map shows
+
+  function renderMap(body) {
+    if (!mapPane) {
+      mapPane = el("div", "fw-map");
+      const host = el("div", "fw-map-host");
+      mapPick = el("div", "fw-map-pick");
+      mapPane.append(host, mapPick);
+      body.appendChild(mapPane);
+      tm = window.RunwayMap.track(host, { drawKey: "runway.fwtest.draw", onPoint: mapPoint, onGap: mapGap });
+      if (window.ResizeObserver) new ResizeObserver(() => tm.invalidate()).observe(host);   // the rail resized
+    } else body.appendChild(mapPane);
+    if (trk && trk.id !== cur.id) {                // another test: its own track, from its own fit
+      trk = null;
+      picked = null;
+      tm.set([]);
+      tm.clearMark();
+    }
+    if (!trk) tm.note("Loading");
+    renderPick();
+    mapShown();
+    loadTrack(true);
+  }
+
+  // the map back on screen (a tab, an unfolded rail, a redraw): its size, its count, the chosen packet
+  function mapShown() {
+    requestAnimationFrame(() => tm && tm.invalidate());
+    const d = trk && trk.id === cur.id ? trk.data : null;
+    $("fw-rail-sub").textContent = d && d.rows ? `${num(d.rows)} packets` : "";
+    if (d && pkOpen && (!picked || picked.n !== pkOpen)) markPacket(pkOpen, false);
+  }
+
+  async function loadTrack(force) {
+    if (!cur || !tm || railTab !== "map") return;
+    const id = cur.id, n = cur.summary.packets;
+    if (!force && trk && trk.id === id && trk.n === n) return;
+    if (trkBusy) { wantTrack(); return; }
+    trkBusy = true;
+    trkAt = Date.now();
+    try {
+      const d = await api(`/api/fwtest/runs/${encodeURIComponent(id)}/track`);
+      if (!cur || cur.id !== id || railTab !== "map") return;
+      const refit = !trk || trk.id !== id;
+      trk = { id, n, data: d };
+      tm.set(d.rows ? [{ id: "test", name: devOf(cur), colour: window.RunwayMap.tripColour(1), rows: d.rows,
+                         series: d.series, driving: d.driving, settings: d.settings }] : [], { refit });
+      tm.note(((d.series || {}).track || []).some((sg) => sg.length) ? ""
+        : cur.summary.packets ? "No position in the packets yet" : "No packet yet");
+      if (picked && picked.n) markPacket(picked.n, false);
+      else if (refit && pkOpen) markPacket(pkOpen, true);
+      mapShown();
+    } catch (e) {
+      // the page is newer than the Runway serving it: say so, not a blank map
+      tm.note(e.message === "Not Found" ? "This Runway started before the map — run main.py again to restart it"
+                                        : `The map could not be drawn: ${e.message}`);
+    } finally {
+      trkBusy = false;
+    }
+  }
+
+  // packets came: the map follows — at most every 5 s while they stream in, the last of them always
+  function wantTrack() {
+    if (trkTimer || railTab !== "map") return;
+    trkTimer = setTimeout(() => { trkTimer = null; loadTrack(); }, Math.max(0, 5000 - (Date.now() - trkAt)));
+  }
+
+  // a packet ringed on the map, by its number (the analysis gives each row's: seqs[k])
+  function markPacket(n, pan) {
+    const k = trk && trk.data.seqs ? trk.data.seqs.indexOf(n) : -1;
+    if (k >= 0) tm.mark("test", k, pan); else tm.clearMark();
+  }
+
+  async function mapPoint(id, k) {
+    const n = trk && trk.data.seqs ? trk.data.seqs[k] : null;
+    if (n == null) return;
+    picked = { n, row: null };
+    renderPick();
+    try {
+      const d = await api(`/api/fwtest/runs/${encodeURIComponent(cur.id)}/packets/${n}`);
+      if (!picked || picked.n !== n) return;
+      picked.row = d;
+      pkOpen = n;                                    // the packet chosen: the list marks it, Packet shows it
+      pkData = d;
+      for (const tr of $("fw-packets").querySelectorAll("tbody tr")) tr.classList.toggle("on", tr.dataset.n === String(n));
+    } catch (e) {
+      if (picked && picked.n === n) picked.error = e.message;
+    }
+    renderPick();
+  }
+
+  function mapGap(id, g) {
+    picked = { gap: g };
+    renderPick();
+  }
+
+  // the card under the map: the packet picked (as a live row — a click opens it), or the stretch
+  function renderPick() {
+    if (!mapPick) return;
+    mapPick.textContent = "";
+    mapPick.hidden = !picked;
+    if (!picked) return;
+    if (picked.gap) {
+      pickGap(picked.gap);
+      return;
+    }
+    const r = picked.row;
+    if (!r) {
+      mapPick.appendChild(el("div", "fw-none", picked.error ? `#${picked.n} could not be read: ${picked.error}` : "Loading"));
+      return;
+    }
+    const row = el("div", "fw-live-row lv-" + r.level);
+    const top = el("div", "fw-live-top");
+    top.appendChild(el("span", "fw-live-time", r.received ? whenEpoch(r.received) : whenUtc(r.time)));
+    top.appendChild(el("span", "fw-live-kind mono", [r.header, r.type, r.alert].filter(Boolean).join(" ")));
+    if (r.status) top.appendChild(el("span", "ui-pill sm " + (isLate(r.status) ? "info" : "ok"), liveWord(r.status)));
+    top.appendChild(el("span", "fw-live-frame mono", "#" + r.n));
+    const [w, t] = LEVEL[r.level];
+    top.appendChild(el("span", "ui-pill sm " + t, w));
+    row.appendChild(top);
+    const facts = [r.time && r.received ? "Device time " + whenUtc(r.time) : "", r.speed != null ? `${r.speed} km/h` : "",
+                   r.ign === "1" ? "Ignition on" : r.ign === "0" ? "Ignition off" : ""].filter(Boolean).join(" · ");
+    if (facts) row.appendChild(el("div", "fw-map-facts", facts));
+    row.appendChild(el("div", "fw-live-raw mono", r.raw));
+    if (r.flags.length) {
+      const f = r.flags.find((x) => x.level === r.level) || r.flags[0];
+      row.appendChild(el("div", "fw-live-flag", `${f.label}: ${f.text}` + (r.flags.length > 1 ? ` (+${r.flags.length - 1})` : "")));
+    }
+    row.dataset.tip = "Open the packet field by field";
+    row.addEventListener("click", () => openPacket(r.n));
+    mapPick.appendChild(row);
+  }
+
+  // a stretch without data, a stale position or a jump: what it was, and its two packets
+  function pickGap(g) {
+    const hop = g._type === "jump" || g._type === "stale";
+    const local = (iso) => (iso ? fmtShort(new Date(iso)) : "—");        // the analysis's times are local
+    const seqs = (trk && trk.data.seqs) || [];
+    const box = el("div", "fw-map-gap");
+    const top = el("div", "fw-live-top");
+    top.appendChild(el("span", "fw-live-kind", hop ? (g._type === "stale" ? "Stale position" : "Jump") : "Missing data"));
+    if (!hop) top.appendChild(el("span", "ui-pill sm " + (g.kind === "loss" ? "bad" : "muted"),
+                                 g.kind === "loss" ? "Ignition on" : g.kind === "sleep" ? "Ignition off" : "Ignition not known"));
+    box.appendChild(top);
+    const kv = el("dl", "fw-map-kv");
+    const add = (k, v) => { if (v == null || v === "") return; kv.append(el("dt", "", k), el("dd", "", String(v))); };
+    add("From", local(hop ? g.from_time : g.start) + (seqs[g.k_from] != null ? ` · #${seqs[g.k_from]}` : ""));
+    add("To", local(hop ? g.time : g.end) + (seqs[g.k] != null ? ` · #${seqs[g.k]}` : ""));
+    add("Apart", g.metres == null ? null : g.metres >= 1000 ? (g.metres / 1000).toFixed(2) + " km" : g.metres + " m");
+    if (hop) add("Would be", g.kmh == null ? null : Math.round(g.kmh) + " km/h");
+    else add("Duration", g.duration);
+    box.appendChild(kv);
+    const acts = el("div", "fw-defect-acts");
+    for (const [label, k] of [["From packet", g.k_from], ["To packet", g.k]]) {
+      if (seqs[k] == null) continue;
+      const b = el("button", "ghost mini");
+      b.type = "button";
+      b.appendChild(ic("file"));
+      b.appendChild(document.createTextNode(label));
+      b.addEventListener("click", () => openPacket(seqs[k]));
+      acts.appendChild(b);
+    }
+    box.appendChild(acts);
+    mapPick.appendChild(box);
   }
 
   // ── defects: what is wrong, why, where, how to fix — fix first what explains most ─────────────
@@ -847,10 +1062,10 @@
       }
       if (!inView(p[1])) continue;
       if (p[3] === "fail") { fails.push(p); continue; }
-      sv("circle", { cx: x(p[1]), cy: p[2] === "H" ? 62 : 38, r: 2, class: p[2] === "H" ? "hist" : "live" }, svg);
+      sv("circle", { cx: x(p[1]), cy: isLate(p[2]) ? 62 : 38, r: 2, class: isLate(p[2]) ? "hist" : "live" }, svg);
     }
     for (const p of fails) {
-      const c = sv("circle", { cx: x(p[1]), cy: p[2] === "H" ? 62 : 38, r: 3, class: (p[2] === "H" ? "hist" : "live") + " fail" }, svg);
+      const c = sv("circle", { cx: x(p[1]), cy: isLate(p[2]) ? 62 : 38, r: 3, class: (isLate(p[2]) ? "hist" : "live") + " fail" }, svg);
       c.addEventListener("click", () => openPacket(p[0]));
     }
     $("fw-tl-span").textContent = `${spanWords(g.span)} on screen`;
@@ -1106,7 +1321,7 @@
     next.setAttribute("aria-label", "Next packet");
     next.disabled = d.n >= cur.summary.packets;
     next.addEventListener("click", () => openPacket(d.n + 1));
-    const when = [whenEpoch(d.received), d.status === "L" ? "Live" : d.status === "H" ? "History" : ""].filter(Boolean).join(" · ");
+    const when = [whenEpoch(d.received), liveWord(d.status)].filter(Boolean).join(" · ");
     nav.append(prev, el("span", "fw-pk-when", when), next);
     body.appendChild(nav);
 

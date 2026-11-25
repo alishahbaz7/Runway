@@ -2,7 +2,9 @@
 
     packets      header → {label, fields (the count, or null when the sheet gives none),
                  field_list: [{index, name, label, rules, allow, level}]}; index -1 is the last field
-    checksum     {"algorithm": "xor"} — the XOR of every byte from '$' up to '*', two hex digits
+    checksum     {"algorithm": "xor", "over": "between" | "from_dollar"} — two hex digits after '*', the XOR
+                 of the bytes ``over`` names (``XOR_OVER``): by default the standard practice (NMEA 0183),
+                 every byte between '$' and '*', both left out
     terminator   what ends every packet ("\\r\\n")
     expect       the values a run may pin (IMEI, number plate, firmware); else learned from the login
     status_by_alert, alert_ids, ignition_by_type   the sequence checks' tables
@@ -26,6 +28,12 @@ from .rules import RULES
 
 SHIPPED = Path(__file__).resolve().parent / "specs"
 _KNOWN_KEYS = {"expect"}
+
+# the bytes a XOR checksum covers — a spec's checksum "over" → (the first byte: 0 = the '$', the words)
+XOR_OVER = {
+    "between": (1, "every byte between $ and *, both left out (NMEA 0183, the standard practice)"),
+    "from_dollar": (0, "every byte from $ up to, not including, *"),
+}
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,9 @@ def parse(data: dict, file: str = "") -> Spec:
     bad = {k: v for k, v in levels.items() if v not in ("warn", "fail")}
     if bad:
         raise ValueError("levels: " + ", ".join(f"{k} is {v!r}, not warn or fail" for k, v in bad.items()))
+    over = (data.get("checksum") or {}).get("over", "between")
+    if over not in XOR_OVER:
+        raise ValueError(f"checksum over is {over!r}, not " + " or ".join(XOR_OVER))
     return Spec(name=data["name"], file=file, codec=data.get("codec") or "", about=data.get("about") or "",
                 checksum=data.get("checksum") or {}, terminator=data.get("terminator") or "",
                 login=data.get("login") or "LGN",

@@ -25,8 +25,9 @@ def xor(b: bytes) -> int:
 
 
 def sentence(body: str, checksum: str | None = "auto", end: str = "\r\n") -> bytes:
+    """$body*CC CR LF — CC the XOR of the bytes between '$' and '*', the standard's."""
     raw = ("$" + body).encode()
-    cs = f"{xor(raw):02X}" if checksum == "auto" else (checksum or "")
+    cs = f"{xor(body.encode()):02X}" if checksum == "auto" else (checksum or "")
     return raw + b"*" + cs.encode() + end.encode()
 
 
@@ -148,8 +149,43 @@ def test_a_history_packet_keeping_its_live_checksum_is_named(gate):
 
 def test_a_checksum_over_the_star_too_is_named(gate):
     raw = b"$LGN,DL1CAB1234," + IMEI.encode() + b",V7.6.0,AIS140,28.550455,N,77.268884,E*"
-    row = gate.feed(raw + f"{xor(raw):02X}".encode() + b"\r\n", T0, "c")
+    row = gate.feed(raw + f"{xor(raw[1:]):02X}".encode() + b"\r\n", T0, "c")
     assert "matches only with the * included" in row["flags"][0]["text"]
+
+
+def test_the_checksum_is_the_standards_between_the_dollar_and_the_star(gate):
+    """The XOR of the bytes between '$' and '*', both left out (NMEA 0183). V7.06.11's PVT takes in the '$':
+    failed, and said so — the fix is one byte at the loop's start. A device whose sheet says otherwise sets it."""
+    from runway.fwtest import diagnosis
+    from runway.fwtest.insights import insights
+    body = pvt(frame=1)[1:pvt(frame=1).index(b"*")]
+    right = f"{xor(body):02X}".encode()
+    from_dollar = f"{xor(b'$' + body):02X}".encode()
+    assert right != from_dollar
+    gate.feed(login(), T0, "c")
+    assert gate.feed(b"$" + body + b"*" + right + b"\r\n", T0 + 1, "c")["level"] == "pass"
+    row = gate.feed(b"$" + body.replace(b",000001,", b",000002,") + b"*"
+                    + f"{xor(b'$' + body.replace(b',000001,', b',000002,')):02X}".encode() + b"\r\n", T0 + 11, "c")
+    f = next(f for f in row["flags"] if f["key"] == "checksum")
+    assert (f["why"], f["level"]) == ("dollar_included", "fail") and "matches only with the $ included" in f["text"]
+    ck = next(c for c in gate.summary()["checks"] if c["key"] == "checksum")
+    assert "between $ and *, both left out" in ck["about"]
+    ins = next(i for i in insights(gate) if i["title"].startswith("Checksum wrong"))
+    assert "the XOR is worked out from the $, which the standard leaves out" in ins["text"]
+    d = next(d for d in diagnosis.defects(gate)["defects"] if d["key"] == "checksum")
+    assert d["why"] == "dollar_included" and d["proved"] and "after '$'" in d["fix"]
+    # a sheet that takes the '$' in says so, and then the standard's XOR is the one that is wrong
+    from runway.fwtest.spec import SHIPPED
+    data = json.loads((SHIPPED / load("Locate 140 4G").file).read_text(encoding="utf-8"))
+    data["checksum"]["over"] = "from_dollar"
+    g = Gate(parse(data))
+    g.feed(sentence(login()[1:login().index(b"*")].decode(), checksum=f"{xor(b'$' + login()[1:login().index(b'*')]):02X}"), T0, "c")
+    assert g.rows[0]["level"] == "pass"
+    wrong = g.feed(b"$" + body + b"*" + right + b"\r\n", T0 + 1, "c")
+    assert next(f for f in wrong["flags"] if f["key"] == "checksum")["why"] == "dollar_left_out"
+    data["checksum"]["over"] = "from_star"
+    with pytest.raises(ValueError, match="checksum over"):
+        parse(data)
 
 
 def test_line_endings_count_on_the_wire_not_in_a_file():
@@ -287,6 +323,67 @@ def test_bytes_that_are_not_a_packet_fail(tmp_path):
     run.close()
     again = Runs(tmp_path).get(run.id)                       # kept as such across a restart
     assert again.gate.rows[1]["flags"][0]["key"] == "not_packet"
+
+
+# ── packets.log: the packet as the device sent it ──────────────────────────────────────────────────
+def test_the_log_holds_each_packet_as_its_own_text(tmp_path):
+    """A developer opening packets.log reads what the device sent — CR LF and a stray byte shown where
+    they are, nothing else converted; the first line says how it is written."""
+    from runway.fwtest.runs import HEADER
+    run = Runs(tmp_path).create("Locate 140 4G", {"kind": "live", "port": 5999})
+    run.add(login(), T0, "1.2.3.4:5")
+    run.add(pvt(frame=1).replace(b",404,", b",4\x0204,"), T0 + 1, "1.2.3.4:5")
+    run.add(b"GARBAGE", T0 + 2, "1.2.3.4:5", skipped=True)
+    run.close()
+    lines = (run.folder / "packets.log").read_text(encoding="ascii").splitlines()
+    assert lines[0] == HEADER
+    assert lines[1] == f"{T0:.3f}\t1.2.3.4:5\t" + login().decode().replace("\r\n", "\\r\\n")
+    assert ",4\\x0204," in lines[2] and lines[2].endswith("\\r\\n")
+    assert lines[3].endswith("\tGARBAGE\tS")
+    again = Runs(tmp_path).get(run.id)                       # read back: the same packets, judged the same
+    assert [r["raw"] for r in again.gate.rows] == [r["raw"] for r in run.gate.rows]
+    assert [r["level"] for r in again.gate.rows] == [r["level"] for r in run.gate.rows]
+
+
+@pytest.mark.parametrize("raw", [
+    b"$LGN,DL1CAB1234*5A\r\n",                 # a sentence with its CR LF
+    b"$PVT,1,2,3*",                            # a firmware that ends without checksum or CR LF
+    b"$A\tB\\C\x02\x7f\r\n",                   # a tab, a backslash, a control byte, DEL
+    b"0x41\r\n", b"abcd", b"\\x41",             # text that would read back as something else
+    bytes.fromhex("78780d010356938035643809000a0d0a"),   # a binary packet: hex
+    b"\r\n", b"\x00",
+])
+def test_every_packet_comes_back_exactly(raw):
+    from runway.fwtest.runs import log_line, packet_text, read_line
+    back, received, conn, skipped = read_line(log_line(raw, T0, "c", skipped=True).rstrip("\n"))
+    assert (back, received, conn, skipped) == (raw, T0, "c", True)
+    assert ("\t" not in packet_text(raw)) and ("\n" not in packet_text(raw))
+
+
+def test_a_log_from_before_is_read_and_turned_to_text(tmp_path, monkeypatch):
+    """1.1.28 wrote every packet in hex: such a log still reads, and is rewritten as text when Runway loads
+    it — the same packets, checked before the file is replaced; a line it cannot read is kept as it is."""
+    from runway.fwtest import runs as runs_mod
+    run = Runs(tmp_path).create("Locate 140 4G", {"kind": "live", "port": 5999})
+    old = [f"{T0:.3f}\tc\t{login().hex()}", "not a packet line",
+           f"{T0 + 1:.3f}\tc\t{pvt(frame=1).hex()}", f"{T0 + 2:.3f}\tc\t{b'GARBAGE'.hex()}\tS"]
+    p = run.folder / "packets.log"
+    p.write_text("\n".join(old) + "\n", encoding="ascii")
+    p.write_text(p.read_text(encoding="ascii") + runs_mod.log_line(pvt(frame=2, at=T0 + 10), T0 + 11, "c"),
+                 encoding="ascii")                           # and a line the new code added
+    monkeypatch.setattr(runs_mod.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError("busy")))
+    busy = Runs(tmp_path).get(run.id)                        # another Runway holds it: left in hex, still read
+    assert p.read_text(encoding="ascii").splitlines()[0] == old[0] and len(busy.gate.rows) == 4
+    assert not (run.folder / "packets.log.tmp").exists()
+    monkeypatch.undo()
+    again = Runs(tmp_path).get(run.id)
+    lines = p.read_text(encoding="ascii").splitlines()
+    assert lines[0] == runs_mod.HEADER and lines[2] == "not a packet line"
+    assert lines[1] == f"{T0:.3f}\tc\t" + login().decode().replace("\r\n", "\\r\\n")
+    assert lines[4] == f"{T0 + 2:.3f}\tc\tGARBAGE\tS"
+    assert [r["raw"] for r in again.gate.rows] == [r["raw"] for r in busy.gate.rows]
+    assert [r["header"] for r in again.gate.rows] == ["LGN", "PVT", "?", "PVT"]
+    assert runs_mod.to_text(p) == 0                          # once text, left alone
 
 
 def test_a_file_keeps_its_unreadable_bytes(client):
@@ -539,6 +636,27 @@ def test_a_file_tests_timeline_stands_on_the_devices_time(client):
     assert [p[2] for p in tl["points"]] == ["L", "H", "L", "L"]
     win = c.get(f"/api/fwtest/runs/{v['id']}/timeline?start={T0 + 15}&end={T0 + 35}").json()
     assert [p[1] for p in win["points"]] == [T0 + 20, T0 + 30]
+
+
+def test_the_tests_packets_on_the_map_and_the_live_list_live_only(client):
+    """The rail's Map: every packet with a device time on the track, in device-time order, each row back to
+    its packet number (the login has no time). The Live list asks for live only: every packet but history."""
+    c, _, api = client
+    run = api.runs.create("Locate 140 4G", {"kind": "live", "port": 5097})
+    run.add(login(), T0, "a")
+    run.add(pvt(frame=1, at=T0 + 10), T0 + 11, "a")
+    run.add(pvt(frame=2, at=T0 + 20), T0 + 21, "a")
+    run.add(pvt(frame=3, at=T0 + 15, status="H"), T0 + 22, "a")
+    t = c.get(f"/api/fwtest/runs/{run.id}/track").json()
+    assert t["rows"] == 3 and t["seqs"] == [2, 4, 3]
+    assert [p[4] for seg in t["series"]["track"] for p in seg] == [False, True, False]   # the history one, dimmed
+    assert c.get(f"/api/fwtest/runs/{run.id}/track").json() == t                        # cached until packets come
+    run.add(pvt(frame=4, at=T0 + 30), T0 + 31, "a")
+    assert c.get(f"/api/fwtest/runs/{run.id}/track").json()["seqs"] == [2, 4, 3, 5]
+    live = c.get(f"/api/fwtest/runs/{run.id}/packets?status=live").json()
+    assert live["total"] == 4 and [r["n"] for r in live["rows"]] == [5, 3, 2, 1]
+    assert [r["n"] for r in c.get(f"/api/fwtest/runs/{run.id}/packets?status=history").json()["rows"]] == [4]
+    assert c.get(f"/api/fwtest/runs/{run.id}/packets?status=other").status_code == 422
 
 
 def test_a_report_holds_a_damaged_packets_bytes(client):

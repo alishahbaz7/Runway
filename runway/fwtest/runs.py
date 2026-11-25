@@ -1,7 +1,13 @@
 """Firmware test runs on disk — ``data/fwtest/<id>/``:
 
     meta.json     the run: spec, title, source (live on a port, or a file), device, what it pins, state
-    packets.log   each packet as it came — received time, connection, bytes in hex — one per line
+    packets.log   each packet as it came — received time, connection, the packet — one per line
+
+The packet is written as it came: its own text, with only a byte that cannot stand as text written
+as an escape (``\\r \\n \\t \\\\ \\xNN``), so a developer opening the file reads what the device sent,
+CR LF and a stray byte included. A packet that is mostly not text (a binary protocol) is
+``0x<hex>``. The file's first line (``HEADER``) says so. A log from before 1.1.29 held every packet
+in hex: it still reads, and is rewritten as text when Runway loads it (``to_text``).
 
 Nothing judged is stored: the gate is rebuilt from ``packets.log`` when Runway starts, so a run
 survives a restart and a corrected spec judges an old run again. A live run is fed by a sink the
@@ -11,6 +17,9 @@ API attaches to the listener on its port; a file run is fed once.
 from __future__ import annotations
 
 import json
+import logging
+import os
+import re
 import shutil
 import threading
 import time
@@ -24,6 +33,109 @@ from .gate import Gate
 from .insights import insights
 
 UNKNOWN_IDS = {"", "unknown", "ais140-unknown", "zenithra-unknown"}
+log = logging.getLogger(__name__)
+
+# ── packets.log: the packet as it came ──────────────────────────────────────────────────────────────
+HEADER = ("# Runway firmware test - one packet per line, columns split by a tab: received (Unix time in s, "
+          "empty for a file) | connection | the packet exactly as the device sent it | S when the bytes were "
+          "not a packet. The packet is its own text; only a byte that is not printable is written as an "
+          "escape: \\r \\n \\t \\\\ \\xNN. A packet that is mostly not text (a binary protocol) is 0x<hex>.")
+TEXT_SHARE = 0.9                                   # this much of it printable: written as text
+_PLAIN = frozenset(range(32, 127)) - {0x5C}        # printable ASCII, the backslash escaped
+_ESC = {0x0D: "\\r", 0x0A: "\\n", 0x09: "\\t", 0x5C: "\\\\"}
+_CHR = {"r": "\r", "n": "\n", "t": "\t", "\\": "\\"}
+_UNESC = re.compile(r"\\(x[0-9a-f]{2}|.?)")
+_HEX = re.compile(r"(?:[0-9a-f]{2})+")           # a line from before 1.1.29: the packet in hex
+
+
+def packet_text(raw: bytes) -> str:
+    """The packet for the log: its own text, a byte that is not printable as an escape; mostly not text,
+    ``0x<hex>``. Text that would read back as hex (``0x…``, or hex digits only) is written as hex."""
+    printable = sum(1 for b in raw if 32 <= b < 127 or b in (9, 10, 13))
+    if not raw or printable < TEXT_SHARE * len(raw):
+        return "0x" + raw.hex()
+    text = "".join(chr(b) if b in _PLAIN else _ESC.get(b, f"\\x{b:02x}") for b in raw)
+    if text.startswith("0x") or _HEX.fullmatch(text):
+        return "0x" + raw.hex()
+    return text
+
+
+def _unescape(m: re.Match) -> str:
+    e = m.group(1)
+    if len(e) == 3:
+        return chr(int(e[1:], 16))
+    if e in _CHR:
+        return _CHR[e]
+    raise ValueError(f"not an escape: \\{e}")
+
+
+def packet_bytes(field: str) -> bytes:
+    """The bytes back from the log's packet column — text, ``0x<hex>``, or a line before 1.1.29 (hex)."""
+    if field.startswith("0x"):
+        return bytes.fromhex(field[2:])
+    if _HEX.fullmatch(field):
+        return bytes.fromhex(field)
+    return _UNESC.sub(_unescape, field).encode("latin-1")
+
+
+def log_line(raw: bytes, received: float | None, conn: str | None, skipped: bool = False) -> str:
+    return (f"{'' if received is None else f'{received:.3f}'}\t{conn or ''}\t{packet_text(raw)}"
+            + ("\tS" if skipped else "") + "\n")
+
+
+def read_line(line: str) -> tuple[bytes, float | None, str | None, bool] | None:
+    """A log line → (packet, received, connection, skipped); None for the header or a line it cannot read."""
+    if not line or line.startswith("#"):
+        return None
+    parts = line.split("\t")
+    if len(parts) not in (3, 4):
+        return None
+    try:
+        received = float(parts[0]) if parts[0] else None
+        return packet_bytes(parts[2]), received, parts[1] or None, parts[3:] == ["S"]
+    except ValueError:
+        return None
+
+
+def to_text(path: Path) -> int:
+    """A log from before 1.1.29 (every packet in hex) rewritten with each packet as text — the same bytes,
+    checked packet by packet before the file is replaced. Left as it is when there is nothing to convert
+    or the file is busy (it still reads). How many packets were converted."""
+    if not path.is_file():
+        return 0
+    lines = path.read_text(encoding="ascii", errors="replace").splitlines()
+    out, converted = [HEADER], 0
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        got = read_line(line)
+        if got is None or not _HEX.fullmatch(parts[2]):
+            out.append(line)                       # already text, or a line it cannot read: kept as it is
+            continue
+        out.append("\t".join([parts[0], parts[1], packet_text(got[0])] + parts[3:]))
+        converted += 1
+    if not converted:
+        return 0
+    before = [read_line(x) for x in lines]
+    after = [read_line(x) for x in out[1:]]
+    if [x for x in before if x] != [x for x in after if x]:
+        log.error("%s: not converted to text — the packets would not read back the same", path)
+        return 0
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="ascii") as f:
+            f.write("\n".join(out) + "\n")
+        check = [read_line(x) for x in tmp.read_text(encoding="ascii").splitlines()]
+        if [x for x in check if x] != [x for x in before if x]:
+            raise OSError("the written copy does not read back the same")
+        os.replace(tmp, path)
+    except OSError as exc:                         # busy (another Runway still writes it): next start
+        log.warning("%s: left in hex for now (%s)", path, exc)
+        tmp.unlink(missing_ok=True)
+        return 0
+    log.info("%s: %d packets now written as text", path, converted)
+    return converted
 
 
 class Run:
@@ -63,22 +175,21 @@ class Run:
         if not p.is_file():
             return
         for line in p.read_text(encoding="ascii", errors="replace").splitlines():
-            parts = line.split("\t")
-            if len(parts) not in (3, 4):
-                continue
-            try:
-                received = float(parts[0]) if parts[0] else None
-                self.gate.feed(bytes.fromhex(parts[2]), received, parts[1] or None, skipped=parts[3:] == ["S"])
-            except ValueError:
-                continue
+            got = read_line(line)
+            if got is not None:
+                raw, received, conn, skipped = got
+                self.gate.feed(raw, received, conn, skipped=skipped)
 
     def add(self, raw: bytes, received: float | None, conn: str | None, skipped: bool = False) -> dict:
         """A packet as it came — or (``skipped``) bytes the protocol could not read, kept and failed."""
         with self.lock:
             if self._log is None:
-                self._log = open(self.folder / "packets.log", "a", encoding="ascii")
-            self._log.write(f"{'' if received is None else f'{received:.3f}'}\t{conn or ''}\t{raw.hex()}"
-                            + ("\tS" if skipped else "") + "\n")
+                p = self.folder / "packets.log"
+                fresh = not p.is_file() or p.stat().st_size == 0
+                self._log = open(p, "a", encoding="ascii")
+                if fresh:
+                    self._log.write(HEADER + "\n")
+            self._log.write(log_line(raw, received, conn, skipped))
             self._log.flush()
             return self.gate.feed(raw, received, conn, skipped=skipped)
 
@@ -125,6 +236,7 @@ class Runs:
                 continue
             try:
                 meta = json.loads(meta_p.read_text(encoding="utf-8"))
+                to_text(d / "packets.log")             # a log from before 1.1.29: its packets as text
                 run = Run(d, meta, specs.load(meta["spec"], self.own_specs))
                 run._replay()
                 self.runs[run.id] = run

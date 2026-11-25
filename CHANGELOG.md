@@ -4,6 +4,69 @@ All notable changes to **Runway** are recorded here (released as *ProInfo* throu
 see the 1.1.24 entry for the rename).
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
+## [1.1.29] — 2026-11-25
+
+### Added
+- **The release and a copy run from source run side by side.** The release keeps port 8080, and a
+  run from source (`main.py`) now serves on 8180; `--port` still picks another. Each has its own data
+  folder and its own window.
+  - A start defers only to a copy of its own kind. Finding the other kind on its port, it says so and
+    stops, instead of bringing that copy forward as if it were itself. "Open Runway" brings forward
+    that copy's own window.
+  - `main.py` never stops a release. This checkout's own copy found on 8080, where it ran before, is
+    moved to 8180 with its listeners, relay rules and store.
+  - `/api/health` says which kind of copy answers (`channel`).
+- **Firmware test has a map.** A *Map* tab in the side rail shows the test's packets on Log
+  analysis's map as they land, the same component the Dashboard uses. The server reads the packets
+  as a drive log and runs the one `analyse` (`/api/fwtest/runs/{id}/track`, `fwtest/maptrack.py`).
+  That gives trips, history dimmed, data lost and asleep dotted, stale positions and jumps dashed,
+  and every packet with a device time on it. A file test is drawn by the device's time.
+  - A click on the track puts that packet under the map, as a row of the live list; a click on the
+    row opens it field by field. A click on a gap or a jump shows its two ends, each one click from
+    its packet. The packet chosen in the list is ringed when the map opens.
+  - The map is made once and kept: it follows new packets at most every 5 s (worked out again only
+    when packets came) and keeps the reader's zoom and place while it does.
+- **Live packets: all, or live only.** A switch over the list, each side with its count, remembered
+  on this computer. *Live* is every packet but history, including a login, a health packet or an
+  emergency packet sent as it happened. It is asked of the server (`packets?status=live`), so a
+  history flood never pushes the live packets out of the newest shown.
+
+### Changed
+- **A firmware test keeps each packet as the device sent it, as text** (`data/fwtest/<id>/packets.log`).
+  Until now every packet was written in hex, which nobody can read without a tool. Each line is now
+  the received time, the connection and the packet's own text. Only a byte that cannot stand as text
+  is written as an escape: `\r \n \t \\ \xNN`. So CR LF, a missing terminator or a stray control byte
+  shows exactly where it is. A packet that is mostly not text (a binary protocol) is `0x<hex>`. The
+  file's first line explains the columns for whoever opens it.
+  - A log written before is still read, and is rewritten as text the first time Runway loads it. The
+    packets are checked one by one to read back as the same bytes before the file is replaced. If
+    another Runway still holds the file, it is left in hex and converted at the next start.
+  - A Runway before 1.1.29 reads only the hex lines of such a log.
+- **The checksum is held to the standard practice: the XOR of the bytes between `$` and `*`, both
+  left out** (NMEA 0183). AIS-140 calls the checksum optional and names no algorithm. The Locate 140
+  4G's sheet used to take the `$` in, because that is what the device's PVTs carried, so V7.06.11's
+  PVTs passed and its logins failed. The span is now a setting of the device's spec (`checksum.over`:
+  `between`, the default, or `from_dollar`), shown in the check's description.
+  - A wrong checksum is tested against the other spans, and the test says which one it matches: the
+    `$` taken in, the `*` taken in, or both. Each is a proved defect with its fix. A history packet
+    that keeps its live checksum is still found when the XOR also takes the `$` in.
+  - Found on V7.06.11 (a day on the bench, 5,242 packets):
+    - every PVT, live and history, works the XOR out from the `$` (5,230 packets);
+    - the login already follows the standard;
+    - the health packet carries no checksum after the `*`;
+    - one history PVT reached the server with bytes missing (`$PP,V7.06.11,…`).
+
+### Fixed
+- **An emergency packet has its device time (Firmware test).** The EPB carries date and time in one
+  field (`DDMMYYYYhhmmss`) and the gate read only the separate date and time other packets carry. So
+  an SOS had no time: it was missing from a file test's timeline and would have been missing from the
+  map. It is now held to the future-time check like every packet, and one emergency moment sent normal
+  (NM) and again stored (SP) is a resend (a warning), as live and history are.
+- **An emergency packet's NM / SP read as live / history.** The live list called a normal (NM)
+  emergency packet *History*, and the timeline put a stored (SP) one in the live lane. One reading
+  now serves the list, the packet table, the packet view, the timeline and the Live switch. The
+  maps (Firmware test's and the Dashboard's) draw SP as history too.
+
 ## [1.1.28] — 2026-11-23
 
 ### Added
